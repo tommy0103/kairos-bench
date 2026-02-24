@@ -1,13 +1,14 @@
 import type { LLMMessage, OpenAIAgent } from "./openai";
 import type { TelegramMessage } from "../telegram/types";
 import { system } from "./prompt";
+import { RemoteAsyncIterable } from "./remoteAsyncIterable";
 
 export interface AgentRuntime {
   observe: (message: TelegramMessage) => void;
   streamReply: (input: {
     triggerMessage: TelegramMessage;
     prompt: string;
-  }) => AsyncGenerator<string, void, unknown>;
+  }) => AsyncIterable<string>;
 }
 
 export interface CreateInMemoryAgentRuntimeOptions {
@@ -31,14 +32,25 @@ export function createInMemoryAgentRuntime(
     historyByChat.set(message.chatId, history);
   };
 
-  const streamReply: AgentRuntime["streamReply"] = async function* ({
+  const streamReply: AgentRuntime["streamReply"] = ({
     triggerMessage,
     prompt,
-  }) {
+  }) => {
+    const stream = new RemoteAsyncIterable<string>();
     const history = historyByChat.get(triggerMessage.chatId) ?? [];
     const systemPrompt = system();
     const llmMessages = buildLLMMessages(history, triggerMessage.messageId, prompt, systemPrompt);
-    yield* options.agent.streamText(llmMessages);
+    void (async () => {
+      try {
+        for await (const chunk of options.agent.streamText(llmMessages)) {
+          stream.push(chunk);
+        }
+        stream.end();
+      } catch (error) {
+        stream.fail(error);
+      }
+    })();
+    return stream;
   };
 
   return {
