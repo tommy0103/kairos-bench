@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadDynamicToolsFromDirectory } from "./dynamicToolsLoader";
 import { createAgentLoopRunner } from "./loopRunner";
+import { createApoptosisTool } from "./tools/apoptosis";
 import { createEvoluteTool } from "./tools/evolute";
 import { createToolsRegistry } from "./toolsRegistry";
 import { createToolsDocWriter } from "./toolsDocWriter";
@@ -60,13 +61,24 @@ export function createOpenAIAgent(
     toolsDocWriter.sync(toolsRegistry.getCurrentTools());
   };
   const evoluteTool = createEvoluteTool();
+  const apoptosisTool = createApoptosisTool();
   toolsRegistry.registerStaticTool(evoluteTool);
+  toolsRegistry.registerStaticTool(apoptosisTool);
+  const unregisterTool = async (name: string): Promise<boolean> => {
+    const deleted = toolsRegistry.unregisterTool(name);
+    if (deleted) {
+      loopRunner.applyToolsToActiveLoops();
+      toolsDocWriter.sync(toolsRegistry.getCurrentTools());
+    }
+    return deleted;
+  };
   const loopRunner = createAgentLoopRunner({
     apiKey,
     baseURL,
     defaultModel,
     getCurrentTools: () => toolsRegistry.getCurrentTools(),
     registerDynamicTool,
+    unregisterTool,
   });
   toolsDocWriter.sync(toolsRegistry.getCurrentTools());
   void (async () => {
@@ -109,17 +121,10 @@ export function createOpenAIAgent(
     await registerDynamicTool(tool);
   };
 
-  const unregisterTool: OpenAIAgent["unregisterTool"] = async (name) => {
-    const deleted = toolsRegistry.unregisterTool(name);
-    if (deleted) {
-      loopRunner.applyToolsToActiveLoops();
-      toolsDocWriter.sync(toolsRegistry.getCurrentTools());
-    }
-    return deleted;
-  };
+  const unregisterToolApi: OpenAIAgent["unregisterTool"] = async (name) => unregisterTool(name);
 
   const replaceTools: OpenAIAgent["replaceTools"] = async (tools) => {
-    toolsRegistry.replaceStaticTools([...tools, evoluteTool]);
+    toolsRegistry.replaceStaticTools([...tools, evoluteTool, apoptosisTool]);
     loopRunner.applyToolsToActiveLoops();
     toolsDocWriter.sync(toolsRegistry.getCurrentTools());
   };
@@ -131,7 +136,7 @@ export function createOpenAIAgent(
     generateText,
     streamText,
     registerTool,
-    unregisterTool,
+    unregisterTool: unregisterToolApi,
     replaceTools,
     listTools,
   };

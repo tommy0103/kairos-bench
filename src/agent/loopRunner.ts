@@ -31,6 +31,7 @@ export interface CreateAgentLoopRunnerOptions {
   defaultModel: string;
   getCurrentTools: () => AgentTool<any>[];
   registerDynamicTool: (tool: AgentTool<any>) => Promise<void>;
+  unregisterTool: (name: string) => Promise<boolean>;
 }
 
 const DEFAULT_PROVIDER = "openai";
@@ -156,6 +157,21 @@ function isLlmMessage(message: AgentMessage): message is Message {
   return role === "user" || role === "assistant" || role === "toolResult";
 }
 
+interface ApoptosisToolResult {
+  details?: {
+    targetToolName?: string;
+  };
+}
+
+function extractApoptosisTargetToolName(result: unknown): string | null {
+  const targetToolName = (result as ApoptosisToolResult | undefined)?.details?.targetToolName;
+  if (typeof targetToolName !== "string") {
+    return null;
+  }
+  const normalized = targetToolName.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
 export function createAgentLoopRunner(options: CreateAgentLoopRunnerOptions): AgentLoopRunner {
   const activeAgentLoops = new Set<AgentContext>();
 
@@ -271,6 +287,14 @@ export function createAgentLoopRunner(options: CreateAgentLoopRunnerOptions): Ag
               // options.toolsRegistry.registerDynamicTool(event.result.details);
               const latestTools = options.getCurrentTools();
               syncToolsInPlace(loopContext, latestTools);
+            }
+            else if (event.toolName === "apoptosis") {
+              const targetToolName = extractApoptosisTargetToolName(event.result);
+              if (targetToolName) {
+                await options.unregisterTool(targetToolName);
+                const latestTools = options.getCurrentTools();
+                syncToolsInPlace(loopContext, latestTools);
+              }
             }
             else {
               console.log("[Event: tool_execution_end] Tool:", event.toolName, 
