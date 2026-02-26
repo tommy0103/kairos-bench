@@ -1,4 +1,4 @@
-import type { AgentRuntime } from "../agent";
+import type { ClientRuntime } from "./clientRuntime";
 import type { TelegramAdapter, TelegramMessage } from "../telegram/types";
 import type {
   GatewayContext,
@@ -8,7 +8,7 @@ import type {
 
 export interface CreateMessageGatewayOptions {
   telegram: TelegramAdapter;
-  runtime: AgentRuntime;
+  runtime: ClientRuntime;
   policies: GatewayTriggerPolicy[];
 }
 
@@ -36,16 +36,13 @@ export function createMessageGateway(
 
   const handleMessage = async (message: TelegramMessage) => {
     console.log("handleMessage", message);
-    options.runtime.observe(message);
-    if (message.metadata.isBot) {
-      return;
-    }
+    options.runtime.recordMessage(message);
 
     const decision = await pickDecision(policies, message, context);
     if (!decision.shouldTrigger || !decision.prompt) {
       return;
     }
-    console.log("streamMessage", message);
+    // console.log("streamMessage", message);
     const streamMessageId = await options.telegram.startStream(
       message.chatId,
       message.messageId

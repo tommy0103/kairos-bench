@@ -33,8 +33,21 @@ export function createTelegramAdapter(token: string): TelegramAdapter {
     });
   };
 
+  const dispatchMessage = (message: TelegramMessage) => {
+    messages.push(message);
+    for (const handler of messageHandlers) {
+      void Promise.resolve(handler(message)).catch((error) => {
+        console.error("telegram onMessage handler failed:", error);
+      });
+    }
+  };
+
   const reply: TelegramAdapter["reply"] = async (chatId, text, messageId) => {
-    await sendMessage(chatId, text, messageId);
+    const sent = await sendMessage(chatId, text, messageId);
+    const outgoing = toOutgoingTelegramMessage(sent);
+    if (outgoing) {
+      dispatchMessage(outgoing);
+    }
   };
 
   const startStream: TelegramAdapter["startStream"] = async (
@@ -47,8 +60,13 @@ export function createTelegramAdapter(token: string): TelegramAdapter {
     streams.set(streamId, {
       chatId,
       placeholderMessageId: sent.message_id,
+      conversationType: toConversationType(sent.chat.type),
+      username: sent.from?.username ?? null,
+      replyToMessageId: sent.reply_to_message?.message_id ?? null,
+      replyToUserId: sent.reply_to_message?.from?.id?.toString() ?? null,
       chunks: [],
     });
+    console.log("startStream", streams.get(streamId));
     return streamId;
   };
 
@@ -69,19 +87,28 @@ export function createTelegramAdapter(token: string): TelegramAdapter {
     const finalText = state.chunks.join("") || DEFAULT_FINAL_TEXT;
     const escapedFinalText = escapeText(finalText);
     try {
-      await retry(
-        () =>
-          bot.api.editMessageText(
+      const finalMessage = await retry(
+        async () => {
+          return await bot.api.editMessageText(
             state.chatId,
             state.placeholderMessageId,
             escapedFinalText,
             {
               parse_mode: "MarkdownV2"
             }
-          ),
+          );
+        },
         EDIT_RETRY_ATTEMPTS,
         EDIT_RETRY_DELAY_MS
       );
+      // console.log("finalMessage", finalMessage);
+      // console.log("state", state);
+      const outgoing = toEditedResultMessage(finalMessage, state, finalText);
+      // console.log("state", state);
+      // console.log("outgoing", outgoing);
+      if (outgoing) {
+        dispatchMessage(outgoing);
+      }
       return finalText;
     } finally {
       streams.delete(streamId);
@@ -102,12 +129,7 @@ export function createTelegramAdapter(token: string): TelegramAdapter {
       return;
     }
 
-    messages.push(message);
-    for (const handler of messageHandlers) {
-      void Promise.resolve(handler(message)).catch((error) => {
-        console.error("telegram onMessage handler failed:", error);
-      });
-    }
+    dispatchMessage(message);
 
     await next();
   });
@@ -152,6 +174,75 @@ function toTelegramMessage(ctx: Context): TelegramMessage | null {
       isReplyToMe: message.reply_to_message?.from?.id === ctx.me.id,
       isMentionMe: isMentionMe(ctx),
       mentions: extractMentions(message),
+    },
+  };
+}
+
+function toOutgoingTelegramMessage(
+  message: Awaited<ReturnType<Bot["api"]["sendMessage"]>>
+): TelegramMessage | null {
+  if (!message?.chat) {
+    return null;
+  }
+  const context = message.text ?? "";
+  return {
+    userId: message.from?.id?.toString() ?? "bot",
+    messageId: message.message_id,
+    chatId: message.chat.id,
+    conversationType: toConversationType(message.chat.type),
+    context,
+    timestamp: (message.date ?? Math.floor(Date.now() / 1000)) * 1000,
+    metadata: {
+      isBot: message.from?.is_bot ?? true,
+      username: message.from?.username ?? null,
+      replyToMessageId: message.reply_to_message?.message_id ?? null,
+      replyToUserId: message.reply_to_message?.from?.id?.toString() ?? null,
+      isReplyToMe: false,
+      isMentionMe: false,
+      mentions: [],
+    },
+  };
+}
+
+function toEditedResultMessage(
+  result: Awaited<ReturnType<Bot["api"]["editMessageText"]>>,
+  state: StreamState,
+  finalText: string
+): TelegramMessage | null {
+  const baseMetadata = {
+    isBot: true,
+    replyToMessageId: state.replyToMessageId,
+    replyToUserId: state.replyToUserId,
+    isReplyToMe: false,
+    isMentionMe: false,
+    mentions: [] as string[],
+  };
+
+  if (result === true) {
+    return {
+      userId: "bot",
+      messageId: state.placeholderMessageId,
+      chatId: state.chatId,
+      conversationType: state.conversationType,
+      context: finalText,
+      timestamp: Date.now(),
+      metadata: {
+        ...baseMetadata,
+        username: state.username,
+      },
+    };
+  }
+
+  return {
+    userId: result.from?.id?.toString() ?? "bot",
+    messageId: result.message_id,
+    chatId: result.chat.id,
+    conversationType: state.conversationType,
+    context: finalText ?? result.text ?? "",
+    timestamp: (result.date ?? Math.floor(Date.now() / 1000)) * 1000,
+    metadata: {
+      ...baseMetadata,
+      username: result.from?.username ?? state.username,
     },
   };
 }

@@ -1,9 +1,9 @@
-import type { AgentRuntime } from "../agent";
+import type { ClientRuntime } from "./clientRuntime";
 import type { TelegramAdapter, TelegramMessage } from "../telegram/types";
 
 export interface GatewayContext {
   telegram: TelegramAdapter;
-  runtime: AgentRuntime;
+  runtime: ClientRuntime;
 }
 
 export type TriggerReason = "mention_me" | "reply_to_me" | "none";

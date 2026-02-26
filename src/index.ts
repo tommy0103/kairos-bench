@@ -2,7 +2,6 @@ import {
   createGrpcEnclaveClient,
   createEvoluteTool,
   createFetchWebpageTool,
-  createInMemoryAgentRuntime,
   createLocalEnclaveClient,
   createListFilesSafeTool,
   createOpenAIAgent,
@@ -12,6 +11,7 @@ import {
 } from "./agent";
 import type { OpenAIAgent } from "./agent";
 import {
+  createClientRuntime,
   createMentionMeTriggerPolicy,
   createMessageGateway,
   createReplyToMeTriggerPolicy,
@@ -115,7 +115,7 @@ process.on("SIGHUP", () => {
   });
 });
 
-const runtime = createInMemoryAgentRuntime({
+const runtime = createClientRuntime({
   enclaveClient,
 });
 const gateway = createMessageGateway({

@@ -25,6 +25,10 @@ export interface TelegramMessage {
 export interface StreamState {
   chatId: number;
   placeholderMessageId: number;
+  conversationType: TelegramConversationType;
+  username: string | null;
+  replyToMessageId: number | null;
+  replyToUserId: string | null;
   chunks: string[];
 }
 
