@@ -17,11 +17,13 @@ import {
   createReplyToMeTriggerPolicy,
 } from "./gateway";
 import { createTelegramAdapter } from "./telegram/adapter";
+import { createUserRolesStore } from "./storage";
 import { fetch } from "bun";
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const API_KEY = process.env.API_KEY ?? process.env.QWEN_API_KEY;
 const AGENT_ENCLAVE_TARGET = process.env.AGENT_ENCLAVE_TARGET;
+const OWNER_USER_ID = process.env.OWNER_USER_ID;
 // const API_KEY = process.env.API_KEY ?? process.env.KIMI_API_KEY;
 // const API_KEY = process.env.API_KEY ?? process.env.ARK_API_KEY;
 // const API_KEY = process.env.API_KEY ?? process.env.OPENAI_API_KEY;
@@ -88,15 +90,15 @@ const telegram = createTelegramAdapter(BOT_TOKEN);
 const agent = AGENT_ENCLAVE_TARGET
   ? null
   : createOpenAIAgent({
-      model,
-      baseURL,
-      apiKey: API_KEY,
-      tools: buildEnabledTools(),
-    });
+    model,
+    baseURL,
+    apiKey: API_KEY,
+    tools: buildEnabledTools(),
+  });
 const enclaveClient = AGENT_ENCLAVE_TARGET
   ? createGrpcEnclaveClient({
-      target: AGENT_ENCLAVE_TARGET,
-    })
+    target: AGENT_ENCLAVE_TARGET,
+  })
   : createLocalEnclaveClient(agent as OpenAIAgent);
 
 const refreshTools = async () => {
@@ -115,6 +117,12 @@ process.on("SIGHUP", () => {
   });
 });
 
+const userRoles = createUserRolesStore();
+if (OWNER_USER_ID) {
+  userRoles.setRole(OWNER_USER_ID, "owner");
+  console.log(`Owner registered: ${OWNER_USER_ID}`);
+}
+
 const runtime = createClientRuntime({
   enclaveClient,
 });
@@ -125,6 +133,7 @@ const gateway = createMessageGateway({
     createReplyToMeTriggerPolicy(),
     createMentionMeTriggerPolicy(),
   ],
+  userRoles,
 });
 
 process.on("SIGINT", () => {

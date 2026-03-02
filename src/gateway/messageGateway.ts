@@ -5,11 +5,15 @@ import type {
   GatewayTriggerPolicy,
   TriggerDecision,
 } from "./types";
+import type { UserRolesStore } from "../storage";
+
+const BLOCKED_REPLY = "我不能响应被拉黑的用户喵";
 
 export interface CreateMessageGatewayOptions {
   telegram: TelegramAdapter;
   runtime: ClientRuntime;
   policies: GatewayTriggerPolicy[];
+  userRoles?: UserRolesStore;
 }
 
 export interface MessageGateway {
@@ -37,6 +41,15 @@ export function createMessageGateway(
   const handleMessage = async (message: TelegramMessage) => {
     console.log("handleMessage", message);
     options.runtime.recordMessage(message);
+
+    // blocked users get recorded but never trigger agent
+    if (options.userRoles?.isBlocked(message.userId)) {
+      const wouldTrigger = await pickDecision(policies, message, context);
+      if (wouldTrigger.shouldTrigger) {
+        await options.telegram.reply(message.chatId, BLOCKED_REPLY, message.messageId);
+      }
+      return;
+    }
 
     const decision = await pickDecision(policies, message, context);
     if (!decision.shouldTrigger || !decision.prompt) {

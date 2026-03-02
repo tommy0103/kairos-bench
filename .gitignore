@@ -49,3 +49,6 @@ src/agent/memory_files
 .dev.docs
 .evolute-modules
 src/agent/tools/evolutions
+
+# storage
+data/
