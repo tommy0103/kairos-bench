@@ -64,6 +64,7 @@ export interface CreateAgentLoopRunnerOptions {
 }
 
 const DEFAULT_PROVIDER = "openai";
+const FORCE_UA = process.env.OPENAI_FORCE_USER_AGENT?.trim();
 
 function createCompatibleModel(modelId: string, baseURL: string): Model<"openai-completions"> {
   return {
@@ -82,6 +83,7 @@ function createCompatibleModel(modelId: string, baseURL: string): Model<"openai-
     },
     contextWindow: 128000,
     maxTokens: 4096,
+    headers: FORCE_UA ? { "User-Agent": FORCE_UA } : undefined,
   };
 }
 
