@@ -49,7 +49,9 @@ export function createClientRuntime(options: CreateClientRuntimeOptions): Client
       embedder: createOllamaDenseEmbedder({
         model: "qwen3-embedding:0.6b"
       }),
-      // localModel: createOllamaLocalModel(),
+      // localModel: createOllamaLocalModel({
+      //   model: "qwen3.5:2b"
+      // }),
       cloudModel: createOpenAICloudModel({
         apiKey: process.env.ARK_API_KEY,
         baseURL: "https://ark.cn-beijing.volces.com/api/v3",

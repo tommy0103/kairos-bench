@@ -42,7 +42,7 @@ const MEDIUM_MESSAGE_LENGTH = 8;
 const SHORT_MESSAGE_LENGTH = 4;
 const RECENT_SESSIONS_COUNT = 5;
 const RECENT_CHAT_MESSAGES_COUNT = 10;
-const SESSION_LRU_EXPIRE_MS = 60 * 60 * 1000;
+const SESSION_LRU_EXPIRE_MS = 10 * 60 * 1000;
 const TOPIC_SUMMARY_CONCAT_MAX = 3;
 const TOPIC_SUMMARY_CLOUD_BATCH = 5;
 const IMPOSSIBLE_SIMILARITY_SCORE_THRESHOLD = 0.35;
@@ -113,7 +113,8 @@ export function createInMemoryContextStore(
         //   currentAlphaTime += 0.15;
         // }
         const score = scoreMessageToSession(vector, targetSession, now, gammaTime, lambda);
-        shouldUpdateCenter = score >= similarityThreshold && !isShortMessage;
+        // shouldUpdateCenter = score >= similarityThreshold && !isShortMessage;
+        shouldUpdateCenter = !isShortMessage;
         setSessionActive(ccb, targetSession.sessionId);
       } else {
         const best = pickBestSession(
@@ -346,6 +347,7 @@ function downgradeSessionStatus(session: SessionControlBlock): void {
     session.status = "L2_BACKGROUND";
   } else if (session.status === "L2_BACKGROUND") {
     session.status = "L3_ARCHIVED";
+
   }
 }
 
@@ -359,10 +361,10 @@ async function downgradeExpiredSessions(
       downgradeSessionStatus(session);
       if (session.status === "L3_ARCHIVED") {
         await archiveSession(session);
-        ccb.sessionControlBlocks.delete(session.sessionId);
-        for (const messageId of session.messageIds) {
-          ccb.messageNodes.delete(messageId);
-        }
+        // ccb.sessionControlBlocks.delete(session.sessionId);
+        // for (const messageId of session.messageIds) {
+        //   ccb.messageNodes.delete(messageId);
+        // }
       }
     }
   }
@@ -389,6 +391,9 @@ function pickBestSession(
 ): { session: SessionControlBlock | null; score: number } {
   let winner: { session: SessionControlBlock; score: number } | null = null;
   for (const session of ccb.sessionControlBlocks.values()) {
+    if (session.status === "L3_ARCHIVED") {
+      continue;
+    }
     const score = scoreMessageToSession(vector, session, now, alphaTime, lambda);
     console.log(session.sessionId, score);
     if (!winner || score > winner.score) {
@@ -406,6 +411,9 @@ function pickBestSession(
 
     let shortWinner: { session: SessionControlBlock; score: number } | null = null;
     for (const session of recentSessions) {
+      if (session.status === "L3_ARCHIVED") {
+        continue;
+      }
       const score = scoreMessageToSession(vector, session, now, alphaTime, lambda);
       // console.log("short", session.sessionId, score);
       if (!shortWinner || score > shortWinner.score) {

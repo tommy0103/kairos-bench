@@ -58,7 +58,7 @@ function parseDeciderOutput(
 
 const DEFAULT_RERANKER_API_URL = "http://127.0.0.1:8008/rerank";
 const DEFAULT_RERANKER_TIMEOUT_MS = 2500;
-const DEFAULT_RERANKER_ASSIGN_THRESHOLD = 0.32;
+const DEFAULT_RERANKER_ASSIGN_THRESHOLD = 0.30;
 
 interface RerankerResponse {
   scores?: number[];
