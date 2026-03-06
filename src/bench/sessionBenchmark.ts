@@ -10,8 +10,8 @@ import { createInMemoryContextStore } from "../gateway/context";
 import { loadUbuntuTrainParquet } from "./ubuntuDataset";
 import { loadDramaticBenchmark } from "./dramaticDataset";
 import { pairwiseF1 } from "./pairwiseF1";
-import { createOllamaDenseEmbedder } from "../embedding"; 
-import { createOllamaLocalModel, createOpenAICloudModel } from "../llm";
+import { createOllamaDenseEmbedder } from "../model/embedding"; 
+import { createOllamaLocalModel, createOpenAICloudModel } from "../model/llm";
 
 const DEFAULT_PARQUET = join(
   process.cwd(),

@@ -1,5 +1,6 @@
 import type { ClientRuntime } from "./clientRuntime";
-import type { TelegramAdapter, TelegramMessage } from "../telegram/types";
+import type { TelegramAdapter } from "../telegram/types";
+import type { TelegramMessage } from "../types/message";
 import type {
   GatewayContext,
   GatewayTriggerPolicy,

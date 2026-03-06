@@ -6,7 +6,7 @@
     "test:embed": "bun run src/test-embed.ts",
     "dev": "concurrently \"bun run dev:state\" \"bun run dev:enclave\"",
     "dev:state": "AGENT_ENCLAVE_TARGET=127.0.0.1:50051 bun run --watch src/index.ts",
-    "dev:enclave": "bun run src/agent/transport/enclave/server.ts"
+    "dev:enclave": "bun run src/agent/enclave/server.ts"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.14.3",

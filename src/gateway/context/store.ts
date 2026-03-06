@@ -1,7 +1,7 @@
 import { gamma, max } from "mathjs";
-import { createDenseEmbedder, type DenseEmbedder } from "../../embedding";
-import type { CloudModel, LocalModel } from "../../llm";
-import type { TelegramMessage } from "../../telegram/types";
+import { createDenseEmbedder, type DenseEmbedder } from "../../model/embedding";
+import type { CloudModel, LocalModel } from "../../model/llm";
+import type { TelegramMessage } from "../../types/message";
 import {
   decideSessionByLlm,
   decideSessionByReranker,

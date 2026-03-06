@@ -1,26 +1,8 @@
-export type TelegramConversationType =
-  | "private"
-  | "group"
-  | "supergroup"
-  | "channel";
-
-export interface TelegramMessage {
-  userId: string;
-  messageId: number;
-  chatId: number;
-  conversationType: TelegramConversationType;
-  context: string;
-  timestamp: number;
-  metadata: {
-    isBot: boolean;
-    username: string | null;
-    replyToMessageId: number | null;
-    replyToUserId: string | null;
-    isReplyToMe: boolean;
-    isMentionMe: boolean;
-    mentions: string[];
-  };
-}
+import type {
+  TelegramConversationType,
+  TelegramMessage,
+} from "../types/message";
+export type { TelegramConversationType, TelegramMessage };
 
 export interface StreamState {
   chatId: number;

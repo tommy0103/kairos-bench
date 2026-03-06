@@ -1,5 +1,4 @@
 export * from "./core";
-export * from "./remoteAsyncIterable";
-export * from "./transport/enclave";
+export * from "../types/remoteAsyncIterable";
 export * from "./dynamicToolsLoader";
 export * from "./tools";

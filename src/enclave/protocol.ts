@@ -1,4 +1,4 @@
-import type { LLMMessage } from "../../core/openai";
+import type { LLMMessage } from "../types/message";
 
 export interface StreamReplyRequest {
   chatId: number | string;

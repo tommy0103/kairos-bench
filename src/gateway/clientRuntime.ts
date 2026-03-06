@@ -2,19 +2,19 @@ import type { OpenAIAgent } from "../agent/core/openai";
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { inspect } from "node:util";
-import type { TelegramMessage } from "../telegram/types";
+import type { TelegramMessage } from "../types/message";
 import { system } from "../agent/prompt";
-import { RemoteAsyncIterable } from "../agent/remoteAsyncIterable";
-import type { AgentEnclaveClient } from "../agent/transport/enclave/protocol";
-import { createLocalEnclaveClient } from "../agent/transport/enclave/client";
+import { RemoteAsyncIterable } from "../types/remoteAsyncIterable";
+import type { AgentEnclaveClient } from "../enclave/protocol";
+// import { createLocalEnclaveClient } from "../enclave/client";
 import {
   createContextAssembler,
   createInMemoryContextStore,
   type ContextAssembler,
   type ContextStore,
 } from "./context";
-import { createOllamaLocalModel, createOpenAICloudModel } from "../llm";
-import { createOllamaDenseEmbedder } from "../embedding";
+import { createOllamaLocalModel, createOpenAICloudModel } from "../model/llm";
+import { createOllamaDenseEmbedder } from "../model/embedding";
 
 export interface ClientRuntime {
   recordMessage: (message: TelegramMessage) => Promise<void>;
@@ -39,7 +39,7 @@ const SESSION_DEBUG_LOG_PATH = join(
 
 export function createClientRuntime(options: CreateClientRuntimeOptions): ClientRuntime {
   const enclaveClient =
-    options.enclaveClient ?? (options.agent ? createLocalEnclaveClient(options.agent) : null);
+    options.enclaveClient;
   if (!enclaveClient) {
     throw new Error("createClientRuntime requires either agent or enclaveClient.");
   }
@@ -49,9 +49,7 @@ export function createClientRuntime(options: CreateClientRuntimeOptions): Client
       embedder: createOllamaDenseEmbedder({
         model: "qwen3-embedding:0.6b"
       }),
-      // localModel: createOllamaLocalModel({
-      //   model: "qwen3.5:2b"
-      // }),
+      localModel: createOllamaLocalModel(),
       cloudModel: createOpenAICloudModel({
         apiKey: process.env.ARK_API_KEY,
         baseURL: "https://ark.cn-beijing.volces.com/api/v3",

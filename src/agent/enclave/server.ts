@@ -2,19 +2,19 @@ import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { LLMMessage } from "../../core/openai";
-import { createOpenAIEnclaveRuntime } from "../../core/openai";
-import type { AgentLoopStreamEvent } from "../../core/loopRunner";
+import type { LLMMessage } from "../core/openai";
+import { createOpenAIEnclaveRuntime } from "../core/openai";
+import type { AgentLoopStreamEvent } from "../core/loopRunner";
 import {
   createFetchWebpageTool,
   createListFilesSafeTool,
   createReadFileSafeTool,
   createRunSafeBashTool,
   createWriteFileSafeTool,
-} from "../../tools";
+} from "../tools";
 
 const CURRENT_DIR = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_PROTO_PATH = resolve(CURRENT_DIR, "../../proto/enclave.proto");
+const DEFAULT_PROTO_PATH = resolve(CURRENT_DIR, "../proto/enclave.proto");
 const DEFAULT_BIND_ADDR = process.env.AGENT_ENCLAVE_BIND_ADDR ?? "0.0.0.0:50051";
 const MAX_GRPC_MESSAGE_BYTES = 16 * 1024 * 1024;
 

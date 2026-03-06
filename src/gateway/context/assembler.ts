@@ -1,4 +1,4 @@
-import type { LLMMessage } from "../../agent/core/openai";
+import type { LLMMessage } from "../../types/message";
 import type { ContextAssembler } from "./types";
 
 export function createContextAssembler(): ContextAssembler {

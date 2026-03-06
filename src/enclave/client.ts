@@ -7,17 +7,16 @@ import type {
   EnclaveStreamEvent,
   StreamReplyRequest,
 } from "./protocol";
-import type { OpenAIAgent } from "../../core/openai";
 
 const CURRENT_DIR = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_PROTO_PATH = resolve(CURRENT_DIR, "../../proto/enclave.proto");
+const DEFAULT_PROTO_PATH = resolve(CURRENT_DIR, "../agent/proto/enclave.proto");
+const MAX_GRPC_MESSAGE_BYTES = 16 * 1024 * 1024;
 
 interface CreateGrpcEnclaveClientOptions {
   target: string;
   protoPath?: string;
   metadata?: Record<string, string>;
 }
-const MAX_GRPC_MESSAGE_BYTES = 16 * 1024 * 1024;
 
 interface GrpcStreamReplyRequest {
   chat_id: string;
@@ -154,12 +153,6 @@ async function* streamFromGrpc(
   }
 }
 
-export function createLocalEnclaveClient(agent: OpenAIAgent): AgentEnclaveClient {
-  return {
-    streamReply: (request: StreamReplyRequest) => streamFromLocalAgent(agent, request),
-  };
-}
-
 export function createGrpcEnclaveClient(
   options: CreateGrpcEnclaveClientOptions
 ): AgentEnclaveClient {
@@ -178,28 +171,4 @@ export function createGrpcEnclaveClient(
     streamReply: (request: StreamReplyRequest) =>
       streamFromGrpc(client, request, metadata),
   };
-}
-
-async function* streamFromLocalAgent(
-  agent: OpenAIAgent,
-  request: StreamReplyRequest
-): AsyncGenerator<EnclaveStreamEvent, void, unknown> {
-  try {
-    for await (const chunk of agent.streamText(request.messages)) {
-      if (!chunk) {
-        continue;
-      }
-      yield {
-        type: "message_update",
-        role: "assistant",
-        delta: chunk,
-      };
-    }
-    yield { type: "completed" };
-  } catch (error) {
-    yield {
-      type: "failed",
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
 }

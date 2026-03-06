@@ -1,5 +1,5 @@
-import type { TelegramMessage } from "../../telegram/types";
-import type { LocalModel, CloudModel } from "../../llm";
+import type { TelegramMessage } from "../../types/message";
+import type { LocalModel, CloudModel } from "../../model/llm";
 
 export interface SessionSummary {
   sessionId: string;

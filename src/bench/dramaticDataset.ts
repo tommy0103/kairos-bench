@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import type { TelegramMessage } from "../telegram/types";
+import type { TelegramMessage } from "../types/message";
 
 interface DramaticRawDialogue {
   globalMsgId: string;
