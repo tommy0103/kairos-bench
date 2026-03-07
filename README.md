@@ -40,7 +40,7 @@ Sessions are organized in three layers:
 
 A session activates when one of its messages receives a reply. Layers promote and demote via LRU. When no in-memory session matches an incoming message, the runtime fetches from L2 — a page fault, in OS terms.
 
-> ⚠️ L0/L1 memory layer is implemented. L2 archival and retrieval is in progress.
+> ⚠️ L0/L1 memory layer and L2 archival is implemented. L2 retrieval is in progress.
 
 ### Execution Layer — Sandboxed, recoverable, self-evolving
 
@@ -70,7 +70,8 @@ This project is in early development. The memory layer (L0/L1) is the most compl
 | Component | Status |
 |-----------|--------|
 | L0/L1 session clustering | ✅ Implemented |
-| L2 archival (OpenViking alike VFS) | 🚧 In progress |
+| L2 archival (OpenViking alike VFS) | ✅ Implemented |
+| L2 retrieval (OpenViking alike VFS) | 🚧 In progress |
 | containerd sandbox | 🚧 In progress |
 | CRIU checkpoint/rollback | ⚠️ Experimental(In progress) |
 | evolute (self-writing tools) | ⚠️ Experimental(Implemented) |
