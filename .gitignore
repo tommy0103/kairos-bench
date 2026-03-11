@@ -43,14 +43,15 @@ package-lock.json
 **/*.bun
 
 # memory files
-src/agent/memory_files/*
-!src/agent/memory_files/Soul.md
+src/.runtime/memory_files/*
+!src/.runtime/memory_files/Soul.md
 
 
 # dev docs
 .dev.docs
+
+node_modules
 .evolute-modules
-src/agent/tools/evolutions
 
 # storage
 data/

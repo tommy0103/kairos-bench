@@ -1,12 +1,17 @@
 {
-  "name": "memoh-lite",
+  "name": "kairos-runtime",
   "version": "1.0.50",
+  "private": true,
+  "workspaces": [
+    "src/state-daemon",
+    "src/enclave-runtime"
+  ],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "test:embed": "bun run src/test-embed.ts",
-    "dev": "concurrently \"bun run dev:state\" \"bun run dev:enclave\"",
-    "dev:state": "AGENT_ENCLAVE_TARGET=127.0.0.1:50051 bun run --watch src/index.ts",
-    "dev:enclave": "bun run src/agent/enclave/server.ts",
+    "dev": "concurrently \"bun run --cwd src/state-daemon dev\" \"bun run --cwd src/enclave-runtime dev\"",
+    "dev:state": "bun run --cwd src/state-daemon dev",
+    "dev:enclave": "bun run --cwd src/enclave-runtime dev",
     "proto:gen:vfs": "grpc_tools_node_protoc --plugin=protoc-gen-ts_proto=./node_modules/.bin/protoc-gen-ts_proto --ts_proto_out=src/storage/vfs/generated --ts_proto_opt=esModuleInterop=true,env=node,forceLong=number,useExactTypes=false,outputServices=nice-grpc,outputServices=generic-definitions -I src/vfs/proto src/vfs/proto/vfs.proto",
     "proto:gen": "bun run proto:gen:vfs"
   },
@@ -16,6 +21,7 @@
     "@grpc/proto-loader": "^0.8.0",
     "@mariozechner/pi-agent-core": "^0.54.0",
     "@mariozechner/pi-ai": "^0.54.0",
+    "@sinclair/typebox": "^0.34.48",
     "@steipete/bird": "^0.8.0",
     "NeteaseCloudMusicApi": "^4.29.0",
     "asciichart": "^1.5.25",
