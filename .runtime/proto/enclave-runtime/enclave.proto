@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package kairos.enclave.v1;
+
+service AgentEnclaveService {
+  rpc StreamReply(StreamReplyRequest) returns (stream StreamReplyEvent);
+}
+
+message LlmMessage {
+  string role = 1;
+  string content = 2;
+}
+
+message StreamReplyRequest {
+  string chat_id = 1;
+  repeated LlmMessage messages = 2;
+}
+
+message StreamReplyEvent {
+  string type = 1;
+  string role = 2;
+  string delta = 3;
+  string tool_name = 4;
+  string tool_call_id = 5;
+  string result_json = 6;
+  string ts_code = 7;
+  string error = 8;
+}

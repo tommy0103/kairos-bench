@@ -1,0 +1,8 @@
+{
+    "enclaveRuntime": {
+      "tools": {
+        "enabled": "all"
+      }
+    }
+  }
+  

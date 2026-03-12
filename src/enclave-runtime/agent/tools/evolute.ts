@@ -16,8 +16,6 @@ interface EvoluteDetails {
 const CURRENT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(CURRENT_DIR, "../../../../");
 const ENCLAVE_WORKSPACE_DIR = resolve(CURRENT_DIR, "../../");
-const TOOL_CODE_DIR =
-  process.env.EVOLUTIONS_ROOT?.trim() || resolve(REPO_ROOT, ".runtime/evolutions");
 const configuredModuleDir = process.env.EVOLUTE_MODULE_DIR?.trim();
 const EVOLUTE_MODULE_DIR =
   configuredModuleDir && configuredModuleDir.length > 0
@@ -29,6 +27,14 @@ const BUILTIN_PLAIN_NAMES = new Set(builtinModules.map((name) => name.replace(/^
 const ESM_LEXER_READY = initEsmLexer;
 const pendingEvolutedTools = new Map<string, AgentTool<any>>();
 const requireResolver = createRequire(import.meta.url);
+
+function getToolCodeDirFromEnv(): string {
+  const toolCodeDir = process.env.EVOLUTIONS_ROOT?.trim();
+  if (!toolCodeDir) {
+    throw new Error("EVOLUTIONS_ROOT is required for evolute tool.");
+  }
+  return toolCodeDir;
+}
 
 const IGNORED_PACKAGE_NAMES = new Set<string>([
   "bun",
@@ -127,8 +133,9 @@ async function compileToolFromCode(code: string): Promise<AgentTool<any>> {
     }
 
     validatedTool = validateDynamicTool(tool);
-    await mkdir(TOOL_CODE_DIR, { recursive: true });
-    const codeUrl = `${TOOL_CODE_DIR}/${validatedTool.name}.ts`;
+    const toolCodeDir = getToolCodeDirFromEnv();
+    await mkdir(toolCodeDir, { recursive: true });
+    const codeUrl = `${toolCodeDir}/${validatedTool.name}.ts`;
     await writeFile(codeUrl, code, "utf8");
     await writeDependencySnapshot(validatedTool.name, detectedDeps);
     return validatedTool;

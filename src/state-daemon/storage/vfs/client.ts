@@ -15,7 +15,6 @@ import {
   type WriteResponse,
 } from "./generated/vfs";
 
-const DEFAULT_MEMORY_VFS_TARGET = process.env.MEMORY_VFS_TARGET ?? "/tmp/kairos-runtime-vfs.sock";
 const MAX_GRPC_MESSAGE_BYTES = 16 * 1024 * 1024;
 
 export interface CreateMemoryVfsClientOptions {
@@ -28,7 +27,7 @@ export class MemoryVfsClient {
   private readonly timeoutMs?: number;
 
   constructor(options: CreateMemoryVfsClientOptions = {}) {
-    const rawTarget = options.target ?? DEFAULT_MEMORY_VFS_TARGET;
+    const rawTarget = options.target ?? getDefaultMemoryVfsTarget();
     const target = normalizeGrpcTarget(rawTarget);
     const channel = createChannel(target, grpc.credentials.createInsecure(), {
       "grpc.max_send_message_length": MAX_GRPC_MESSAGE_BYTES,
@@ -70,6 +69,10 @@ export class MemoryVfsClient {
 
 export function createMemoryVfsClient(options?: CreateMemoryVfsClientOptions): MemoryVfsClient {
   return new MemoryVfsClient(options);
+}
+
+function getDefaultMemoryVfsTarget(): string {
+  return process.env.MEMORY_VFS_TARGET ?? "/tmp/kairos-runtime-vfs.sock";
 }
 
 function normalizeGrpcTarget(target: string): string {

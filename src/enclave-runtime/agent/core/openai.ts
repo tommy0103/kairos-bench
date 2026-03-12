@@ -1,6 +1,4 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { loadDynamicToolsFromDirectory } from "../dynamicToolsLoader";
 import {
   createAgentLoopRunner,
@@ -50,12 +48,16 @@ export interface OpenAIEnclaveRuntime {
   replaceTools: (tools: AgentTool<any>[]) => Promise<void>;
 }
 
-const DEFAULT_MODEL = "gpt-4o-mini";
+const DEFAULT_MODEL = "deepseek-chat";
 const DEFAULT_BASE_URL = "https://api.deepseek.com/v1";
-const CURRENT_DIR = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(CURRENT_DIR, "../../../../");
-const EVOLUTIONS_DIR =
-  process.env.EVOLUTIONS_ROOT?.trim() || resolve(REPO_ROOT, "src/.runtime/evolutions");
+
+function getEvolutionsDirFromEnv(): string {
+  const evolutionsDir = process.env.EVOLUTIONS_ROOT?.trim();
+  if (!evolutionsDir) {
+    throw new Error("EVOLUTIONS_ROOT is required for loading dynamic tools.");
+  }
+  return evolutionsDir;
+}
 
 export function createOpenAIAgent(
   options: CreateOpenAIAgentOptions = {}
@@ -163,7 +165,8 @@ function createAgentCore(options: CreateOpenAIAgentOptions): AgentCore {
   });
   toolsDocWriter.sync(toolsRegistry.getCurrentTools());
   void (async () => {
-    const loaded = await loadDynamicToolsFromDirectory(EVOLUTIONS_DIR);
+    const evolutionsDir = getEvolutionsDirFromEnv();
+    const loaded = await loadDynamicToolsFromDirectory(evolutionsDir);
     for (const tool of loaded.tools) {
       toolsRegistry.registerDynamicTool(tool);
     }

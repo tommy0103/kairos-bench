@@ -2,7 +2,7 @@ import { readdir } from "node:fs/promises";
 import { join, relative } from "node:path";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@mariozechner/pi-ai";
-import { resolveSafePath, SAFE_TOOLS_ROOT } from "./pathSafety";
+import { getSafeToolsRoot, resolveSafePath } from "./pathSafety";
 
 const DEFAULT_MAX_RESULTS = 200;
 const MAX_ALLOWED_RESULTS = 1000;
@@ -14,10 +14,11 @@ interface ListFilesSafeDetails {
 }
 
 export function createListFilesSafeTool(): AgentTool<any, ListFilesSafeDetails> {
+  const safeToolsRoot = getSafeToolsRoot();
   return {
     name: "list_files_safe",
     label: "List safe files",
-    description: `List files/directories only under ${SAFE_TOOLS_ROOT}.`,
+    description: `List files/directories only under ${safeToolsRoot}.`,
     parameters: Type.Object({
       path: Type.Optional(
         Type.String({
@@ -60,8 +61,8 @@ export function createListFilesSafeTool(): AgentTool<any, ListFilesSafeDetails> 
         }
         const entries = await readdir(currentDir, { withFileTypes: true });
         for (const entry of entries) {
-          const entryPath = resolveSafePath(relative(SAFE_TOOLS_ROOT, join(currentDir, entry.name)));
-          const rel = relative(SAFE_TOOLS_ROOT, entryPath) || ".";
+          const entryPath = resolveSafePath(relative(safeToolsRoot, join(currentDir, entry.name)));
+          const rel = relative(safeToolsRoot, entryPath) || ".";
           const rendered = entry.isDirectory() ? `${rel}/` : rel;
           if (!contains || rendered.toLowerCase().includes(contains)) {
             results.push(rendered);

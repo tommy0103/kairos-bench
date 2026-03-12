@@ -1,0 +1,11 @@
+node_modules
+src/sandbox/target
+target
+.git
+.cache
+.DS_Store
+*.log
+data
+.runtime
+.memoh-debug
+__pycache__

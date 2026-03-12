@@ -4,13 +4,24 @@ import {
   createMessageGateway,
   createReplyToMeTriggerPolicy,
 } from "./gateway";
+import { loadStateDaemonConfig } from "@kairos-runtime/app-config";
 import { createTelegramAdapter } from "./telegram/adapter";
 import { createUserRolesStore } from "./storage";
 import { createGrpcEnclaveClient } from "./enclave/client";
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const AGENT_ENCLAVE_TARGET = process.env.AGENT_ENCLAVE_TARGET;
-const OWNER_USER_ID = process.env.OWNER_USER_ID;
+const config = loadStateDaemonConfig();
+const BOT_TOKEN = config.telegram.botToken;
+const AGENT_ENCLAVE_TARGET = config.grpc.enclaveTarget;
+const OWNER_USER_ID = config.telegram.ownerUserId;
+
+process.env.AGENT_ENCLAVE_TARGET ??= AGENT_ENCLAVE_TARGET;
+process.env.MEMORY_VFS_TARGET ??= config.grpc.vfsTarget;
+process.env.MEMORY_FILES_ROOT ??= config.runtime.memoryFilesRoot;
+process.env.OLLAMA_BASE_URL ??= config.model.llm.ollama.baseUrl;
+process.env.OLLAMA_SESSION_MODEL ??= config.model.llm.ollama.model;
+process.env.OLLAMA_EMBED_MODEL ??= config.model.embedding.ollamaModel;
+process.env.EMBED_PROVIDER ??= config.model.embedding.provider;
+process.env.ARK_API_KEY ??= config.model.llm.cloud.apiKey;
 
 if (!BOT_TOKEN) {
   throw new Error("BOT_TOKEN is required to start telegram bot.");
@@ -31,6 +42,7 @@ if (OWNER_USER_ID) {
 
 const runtime = createClientRuntime({
   enclaveClient,
+  modelConfig: config.model,
 });
 
 const gateway = createMessageGateway({

@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@mariozechner/pi-ai";
-import { resolveSafePath, SAFE_TOOLS_ROOT } from "./pathSafety";
+import { getSafeToolsRoot, resolveSafePath } from "./pathSafety";
 
 const MAX_CONTENT_CHARS = 200_000;
 
@@ -14,13 +14,14 @@ interface WriteFileSafeDetails {
 }
 
 export function createWriteFileSafeTool(): AgentTool<any, WriteFileSafeDetails> {
+  const safeToolsRoot = getSafeToolsRoot();
   return {
     name: "write_file_safe",
     label: "Write safe file",
-    description: `Write UTF-8 content only under ${SAFE_TOOLS_ROOT}. Please use this tool to update Identity.md.`,
+    description: `Write UTF-8 content only under ${safeToolsRoot}. Please use this tool to update Identity.md.`,
     parameters: Type.Object({
       path: Type.String({
-        description: `Relative file path under ${SAFE_TOOLS_ROOT}.`,
+        description: `Relative file path under ${safeToolsRoot}.`,
       }),
       content: Type.String({
         description: "UTF-8 content to write.",

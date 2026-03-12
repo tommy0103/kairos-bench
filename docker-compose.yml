@@ -1,0 +1,49 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /workspace
+    user: root
+    volumes:
+      - .:/workspace
+      - /run/containerd/containerd.sock:/run/containerd/containerd.sock
+      - /tmp:/tmp
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      SANDBOX_DRY_RUN: "0"
+      SANDBOX_IMAGE: "debian:slim"
+      BOT_TOKEN: "${BOT_TOKEN:-}"
+      API_KEY: "${QWEN_API_KEY:-}"
+    command: >
+      bash -lc "
+      bun --version &&
+      bun install &&
+      bun run dev
+      "
+
+  sandboxd:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /workspace
+    user: root
+    depends_on:
+      - app
+    volumes:
+      - .:/workspace
+      - /run/containerd/containerd.sock:/run/containerd/containerd.sock
+      - /tmp:/tmp
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      SANDBOX_IMAGE: "debian:slim"
+      BOT_TOKEN: "${BOT_TOKEN:-}"
+      API_KEY: "${API_KEY:-}"
+    command: >
+      bash -lc "
+      cargo run --manifest-path src/sandbox/Cargo.toml
+      "
+    profiles:
+      - sandbox

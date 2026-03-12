@@ -1,0 +1,51 @@
+{
+    "runtime": {
+      "runtimeRoot": ".runtime",
+      "protoRoot": ".runtime/proto",
+      "memoryFilesRoot": ".runtime/memory_files",
+      "evolutionsRoot": ".runtime/evolutions"
+    },
+    "enclaveRuntime": {
+      "grpc": {
+        "bindAddr": "unix:///tmp/kairos-runtime-enclave.sock",
+        "protoPath": ".runtime/proto/enclave-runtime/enclave.proto"
+      },
+      "llm": {
+        "apiKey": "",
+        "baseURL": "https://coding.dashscope.aliyuncs.com/v1",
+        "model": "kimi-k2.5"
+      },
+      "tools": {
+        "enabled": "all"
+      }
+    },
+    "stateDaemon": {
+      "grpc": {
+        "enclaveTarget": "unix:///tmp/kairos-runtime-enclave.sock",
+        "vfsTarget": "/tmp/kairos-runtime-vfs.sock"
+      },
+      "telegram": {
+        "botToken": "${ENV:BOT_TOKEN}",
+        "ownerUserId": ""
+      },
+      "model": {
+        "llm": {
+          "ollama": {
+            "baseUrl": "http://host.docker.internal:11434",
+            "model": "qwen3.5:0.8b"
+          },
+          "cloud": {
+            "apiKey": "${ENV:API_KEY}",
+            "baseURL": "https://ark.cn-beijing.volces.com/api/v3",
+            "model": "doubao-seed-2-0-lite-260215"
+          }
+        },
+        "embedding": {
+          "provider": "ollama",
+          "ollamaBaseUrl": "http://host.docker.internal:11434",
+          "ollamaModel": "qwen3-embedding:0.6b"
+        }
+      }
+    }
+  }
+  

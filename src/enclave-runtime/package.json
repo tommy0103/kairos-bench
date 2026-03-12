@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "MEMORY_FILES_ROOT=${MEMORY_FILES_ROOT:-../.runtime/memory_files} EVOLUTIONS_ROOT=${EVOLUTIONS_ROOT:-../.runtime/evolutions} bun run --watch ./main.ts"
+    "dev": "bun run ./main.ts"
   },
   "dependencies": {
+    "@kairos-runtime/app-config": "workspace:*",
     "@grpc/grpc-js": "^1.14.3",
     "@grpc/proto-loader": "^0.8.0",
     "@mariozechner/pi-agent-core": "^0.54.0",

@@ -11,7 +11,7 @@ import {
   type ContextStore,
 } from "./context";
 import { createOllamaLocalModel, createOpenAICloudModel } from "../model/llm";
-import { createOllamaDenseEmbedder } from "../model/embedding";
+import { createDenseEmbedder } from "../model/embedding";
 import { system } from "./context";
 
 export interface ClientRuntime {
@@ -26,6 +26,24 @@ export interface CreateClientRuntimeOptions {
   enclaveClient?: AgentEnclaveClient;
   contextStore?: ContextStore;
   contextAssembler?: ContextAssembler;
+  modelConfig?: {
+    llm?: {
+      ollama?: {
+        baseUrl?: string;
+        model?: string;
+      };
+      cloud?: {
+        apiKey?: string;
+        baseURL?: string;
+        model?: string;
+      };
+    };
+    embedding?: {
+      provider?: "ollama" | "native";
+      ollamaBaseUrl?: string;
+      ollamaModel?: string;
+    };
+  };
 }
 
 const SESSION_DEBUG_LOG_PATH = join(
@@ -43,17 +61,19 @@ export function createClientRuntime(options: CreateClientRuntimeOptions): Client
 
   const contextStore =
     options.contextStore ?? createInMemoryContextStore({
-      embedder: createOllamaDenseEmbedder({
-        model: "qwen3-embedding:0.6b"
+      embedder: createDenseEmbedder({
+        provider: options.modelConfig?.embedding?.provider,
+        ollamaBaseUrl: options.modelConfig?.embedding?.ollamaBaseUrl,
+        ollamaModel: options.modelConfig?.embedding?.ollamaModel,
       }),
-      localModel: createOllamaLocalModel(),
+      localModel: createOllamaLocalModel({
+        baseUrl: options.modelConfig?.llm?.ollama?.baseUrl,
+        model: options.modelConfig?.llm?.ollama?.model,
+      }),
       cloudModel: createOpenAICloudModel({
-        apiKey: process.env.ARK_API_KEY,
-        baseURL: "https://ark.cn-beijing.volces.com/api/v3",
-        model: "doubao-seed-2-0-lite-260215",
-        // apiKey: process.env.DEEPSEEK_API_KEY,
-        // baseURL: "https://api.deepseek.com/v1",
-        // model: "deepseek-chat",
+        apiKey: options.modelConfig?.llm?.cloud?.apiKey,
+        baseURL: options.modelConfig?.llm?.cloud?.baseURL,
+        model: options.modelConfig?.llm?.cloud?.model,
       }),
     });
   const contextAssembler = options.contextAssembler ?? createContextAssembler();

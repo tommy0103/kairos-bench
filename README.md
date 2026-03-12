@@ -102,6 +102,32 @@ curl -fsSL https://ollama.com/install.sh | sh
 ollama serve
 ```
 
+### Run with Docker
+
+If your host user cannot access `containerd.sock`, run the project in Docker as root and mount the host socket:
+
+Set required secrets before starting:
+
+```bash
+export BOT_TOKEN="your_telegram_bot_token"
+export API_KEY="your_llm_api_key"
+```
+
+```bash
+docker compose up --build app
+```
+
+Run `sandboxd` in Docker as well:
+
+```bash
+docker compose --profile sandbox up --build sandboxd
+```
+
+Notes:
+
+- This setup mounts `/run/containerd/containerd.sock` from host into container.
+- `sandboxd` still talks to host containerd (not dind), which keeps CRIU/containerd flow aligned with later plans.
+
 ---
 
 ## License

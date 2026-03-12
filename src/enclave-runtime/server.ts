@@ -1,32 +1,47 @@
 import * as grpc from "@grpc/grpc-js";
 import * as protoLoader from "@grpc/proto-loader";
+import { loadEnclaveRuntimeConfig } from "@kairos-runtime/app-config";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { LLMMessage } from "./agent/core/openai";
-import { createOpenAIEnclaveRuntime } from "./agent/core/openai";
 import type { AgentLoopStreamEvent } from "./agent/core/loopRunner";
-import {
-  createFetchWebpageTool,
-  createListFilesSafeTool,
-  createReadFileSafeTool,
-  createRunSafeBashTool,
-  createWriteFileSafeTool,
-} from "./agent/tools";
+import { createOpenAIEnclaveRuntime } from "./agent/core/openai";
+import { createFetchWebpageTool, createListFilesSafeTool, createReadFileSafeTool, createRunSafeBashTool, createWriteFileSafeTool } from "./agent/tools";
 
 const CURRENT_DIR = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_PROTO_PATH = resolve(CURRENT_DIR, "./proto/enclave.proto");
-const DEFAULT_BIND_ADDR =
-  process.env.AGENT_ENCLAVE_BIND_ADDR ?? "unix:///tmp/kairos-runtime-enclave.sock";
+const WORKSPACE_ROOT = resolve(CURRENT_DIR, "../..");
+const config = loadEnclaveRuntimeConfig();
+const DEFAULT_PROTO_PATH = config.grpc.protoPath;
+const DEFAULT_BIND_ADDR = config.grpc.bindAddr;
 const MAX_GRPC_MESSAGE_BYTES = 16 * 1024 * 1024;
 
-const API_KEY = process.env.API_KEY ?? process.env.QWEN_API_KEY;
-const baseURL = process.env.BASE_URL ?? "https://coding.dashscope.aliyuncs.com/v1";
-const model = process.env.MODEL ?? "kimi-k2.5";
+const API_KEY = config.llm.apiKey;
+const baseURL = config.llm.baseURL;
+const model = config.llm.model;
 
 if (!API_KEY) {
   throw new Error("API_KEY (or QWEN_API_KEY) is required to start enclave server.");
 }
+
+process.env.API_KEY ??= API_KEY;
+process.env.BASE_URL ??= baseURL;
+process.env.MODEL ??= model;
+process.env.RUNTIME_ROOT ??= config.runtime.runtimeRoot;
+process.env.PROTO_ROOT ??= config.runtime.protoRoot;
+process.env.MEMORY_FILES_ROOT ??= config.runtime.memoryFilesRoot;
+process.env.EVOLUTIONS_ROOT ??= config.runtime.evolutionsRoot;
+process.env.READ_FILE_SAFE_ROOT ??= WORKSPACE_ROOT;
+process.env.ENABLED_TOOLS ??= config.tools.enabled;
+
+// const { createOpenAIEnclaveRuntime } = await import("./agent/core/openai");
+// const {
+//   createFetchWebpageTool,
+//   createListFilesSafeTool,
+//   createReadFileSafeTool,
+//   createRunSafeBashTool,
+//   createWriteFileSafeTool,
+// } = await import("./agent/tools");
 
 const toolFactories: Record<string, () => any> = {
   fetch_webpage: createFetchWebpageTool,
@@ -37,8 +52,11 @@ const toolFactories: Record<string, () => any> = {
 };
 
 function parseEnabledToolNames(): Set<string> {
-  const raw = process.env.ENABLED_TOOLS?.trim();
-  if (!raw || raw.toLowerCase() === "all") {
+  const raw = config.tools.enabled?.trim();
+  if (!raw) {
+    throw new Error("enclaveRuntime.tools.enabled is required and cannot be empty.");
+  }
+  if (raw.toLowerCase() === "all") {
     return new Set(Object.keys(toolFactories));
   }
   const names = raw

@@ -1,12 +1,11 @@
 import { spawn } from "node:child_process";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@mariozechner/pi-ai";
-import { SAFE_TOOLS_ROOT } from "./pathSafety";
+import { getSafeToolsRoot } from "./pathSafety";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_TIMEOUT_MS = 60_000;
 const MAX_OUTPUT_CHARS = 8_000;
-const ALLOWED_WORKING_DIRECTORY = SAFE_TOOLS_ROOT;
 
 const FORBIDDEN_PATTERNS: RegExp[] = [
   /\brm\b/i,
@@ -60,11 +59,12 @@ function truncate(text: string): string {
 }
 
 export function createRunSafeBashTool(): AgentTool<any, RunSafeBashDetails> {
+  const allowedWorkingDirectory = getSafeToolsRoot();
   return {
     name: "run_safe_bash",
     label: "Run safe bash command",
     description:
-      `Run a read-oriented bash command in ${SAFE_TOOLS_ROOT} with safety checks.`,
+      `Run a read-oriented bash command in ${allowedWorkingDirectory} with safety checks.`,
     parameters: Type.Object({
       command: Type.String({
         description: "Bash command to execute. Dangerous commands are blocked.",
@@ -86,7 +86,7 @@ export function createRunSafeBashTool(): AgentTool<any, RunSafeBashDetails> {
         signalName: string | null;
       }>((resolve, reject) => {
         const child = spawn("bash", ["-lc", params.command], {
-          cwd: ALLOWED_WORKING_DIRECTORY,
+          cwd: allowedWorkingDirectory,
           env: process.env,
         });
 
@@ -152,7 +152,7 @@ export function createRunSafeBashTool(): AgentTool<any, RunSafeBashDetails> {
         content: [{ type: "text", text }],
         details: {
           command: params.command,
-          cwd: ALLOWED_WORKING_DIRECTORY,
+          cwd: allowedWorkingDirectory,
           timeoutMs,
           exitCode: result.exitCode,
           signal: result.signalName,

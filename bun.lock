@@ -11,11 +11,15 @@
         "ts-proto": "^2.11.4",
       },
     },
+    "src/app-config": {
+      "name": "@kairos-runtime/app-config",
+    },
     "src/enclave-runtime": {
       "name": "@kairos-runtime/enclave-runtime",
       "dependencies": {
         "@grpc/grpc-js": "^1.14.3",
         "@grpc/proto-loader": "^0.8.0",
+        "@kairos-runtime/app-config": "workspace:*",
         "@mariozechner/pi-agent-core": "^0.54.0",
         "@mariozechner/pi-ai": "^0.54.0",
         "@sinclair/typebox": "^0.34.48",
@@ -39,6 +43,7 @@
         "@bufbuild/protobuf": "^2.11.0",
         "@grpc/grpc-js": "^1.14.3",
         "@grpc/proto-loader": "^0.8.0",
+        "@kairos-runtime/app-config": "workspace:*",
         "grammy": "^1.40.0",
         "nice-grpc": "^2.1.14",
       },
@@ -134,6 +139,8 @@
     "@isaacs/fs-minipass": ["@isaacs/fs-minipass@4.0.1", "https://registry.npmmirror.com/@isaacs/fs-minipass/-/fs-minipass-4.0.1.tgz", { "dependencies": { "minipass": "^7.0.4" } }, "sha512-wgm9Ehl2jpeqP3zw/7mo3kRHFp5MEDhqAdwy1fTGkHAwnkGOVsgpvQhL8B5n1qlb01jV3n/bI0ZfZp5lWA1k4w=="],
 
     "@js-sdsl/ordered-map": ["@js-sdsl/ordered-map@4.4.2", "https://registry.npmmirror.com/@js-sdsl/ordered-map/-/ordered-map-4.4.2.tgz", {}, "sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw=="],
+
+    "@kairos-runtime/app-config": ["@kairos-runtime/app-config@workspace:src/app-config"],
 
     "@kairos-runtime/enclave-runtime": ["@kairos-runtime/enclave-runtime@workspace:src/enclave-runtime"],
 

@@ -1,0 +1,20 @@
+{
+    "runtime": {
+      "runtimeRoot": ".runtime",
+      "protoRoot": ".runtime/proto",
+      "memoryFilesRoot": ".runtime/memory_files",
+      "evolutionsRoot": ".runtime/evolutions"
+    },
+    "enclaveRuntime": {
+      "grpc": {
+        "bindAddr": "unix:///tmp/kairos-runtime-enclave.sock"
+      }
+    },
+    "stateDaemon": {
+      "grpc": {
+        "enclaveTarget": "unix:///tmp/kairos-runtime-enclave.sock",
+        "vfsTarget": "/tmp/kairos-runtime-vfs.sock"
+      }
+    }
+  }
+  

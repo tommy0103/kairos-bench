@@ -1,12 +1,14 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
-const CURRENT_DIR = dirname(fileURLToPath(import.meta.url));
-const SHARED_MEMORY_DIR = resolve(CURRENT_DIR, "../../../../.runtime/memory_files");
-const DEFAULT_MEMORY_DIR = process.env.MEMORY_FILES_ROOT?.trim() || SHARED_MEMORY_DIR;
-export const DEFAULT_TOOLS_MEMORY_FILE = resolve(DEFAULT_MEMORY_DIR, "Tools.md");
+function getToolsMemoryFilePathFromEnv(): string {
+  const memoryRoot = process.env.MEMORY_FILES_ROOT?.trim();
+  if (!memoryRoot) {
+    throw new Error("MEMORY_FILES_ROOT is required for tools doc writer.");
+  }
+  return resolve(memoryRoot, "Tools.md");
+}
 
 function schemaTypeToText(schema: any): string {
   if (!schema || typeof schema !== "object") {
@@ -81,7 +83,7 @@ export interface ToolsDocWriter {
 }
 
 export function createToolsDocWriter(
-  toolsMemoryFilePath: string = DEFAULT_TOOLS_MEMORY_FILE
+  toolsMemoryFilePath: string = getToolsMemoryFilePathFromEnv()
 ): ToolsDocWriter {
   return {
     sync: (tools) => {
