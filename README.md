@@ -2,6 +2,9 @@
   <img src="./assets/logo.png" alt="Memoh" width="100" height="100">
   <h1>Kairos-Runtime</h1>
   <p>An agent runtime that treats context, execution, and permissions as OS primitives — not LLM problems.</p>
+
+  <p>📌 <a href="./docs/brand/001-logo.md">Logo Design Philosophy</a></p>
+
   <div align="center">
     <img src="https://img.shields.io/github/package-json/v/tommy0103/kairos-runtime" alt="Version" />
     <img src="https://img.shields.io/github/license/tommy0103/kairos-runtime" alt="License" />
