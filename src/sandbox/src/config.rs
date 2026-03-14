@@ -33,6 +33,7 @@ pub enum BunMode {
 
 impl SandboxConfig {
     pub fn from_env() -> Self {
+        load_repo_env_file();
         let project_root = resolve_project_root();
 
         let host_runtime_dir =
@@ -54,9 +55,15 @@ impl SandboxConfig {
             snapshot_parent: resolve_optional_env("SANDBOX_SNAPSHOT_PARENT"),
             image: resolve_image(),
             enclave_socket: env::var("ENCLAVE_LISTEN")
-                .unwrap_or_else(|_| "unix:///tmp/kairos-runtime-enclave.sock".to_string()),
+                .or_else(|_| env::var("KAIROS_ENCLAVE_SOCKET"))
+                .unwrap_or_else(|_| {
+                    "unix:///run/kairos-runtime/sockets/kairos-runtime-enclave.sock".to_string()
+                }),
             vfs_socket: env::var("VFS_LISTEN")
-                .unwrap_or_else(|_| "unix:///tmp/kairos-runtime-vfs.sock".to_string()),
+                .or_else(|_| env::var("KAIROS_VFS_SOCKET"))
+                .unwrap_or_else(|_| {
+                    "unix:///run/kairos-runtime/sockets/kairos-runtime-vfs.sock".to_string()
+                }),
             host_workspace_dir,
             host_runtime_dir,
             host_enclave_runtime_dir,
@@ -178,6 +185,11 @@ impl SandboxConfig {
 
         Ok(())
     }
+}
+
+fn load_repo_env_file() {
+    let env_path = resolve_project_root().join(".env");
+    let _ = dotenvy::from_path(env_path);
 }
 
 fn resolve_project_root() -> PathBuf {

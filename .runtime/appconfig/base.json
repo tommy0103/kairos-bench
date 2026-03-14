@@ -7,7 +7,7 @@
     },
     "enclaveRuntime": {
       "grpc": {
-        "bindAddr": "unix:///tmp/kairos-runtime-enclave.sock",
+        "bindAddr": "${ENV:KAIROS_ENCLAVE_SOCKET:-unix:///run/kairos-runtime/sockets/kairos-runtime-enclave.sock}",
         "protoPath": ".runtime/proto/enclave-runtime/enclave.proto"
       },
       "llm": {
@@ -21,8 +21,8 @@
     },
     "stateDaemon": {
       "grpc": {
-        "enclaveTarget": "unix:///tmp/kairos-runtime-enclave.sock",
-        "vfsTarget": "/tmp/kairos-runtime-vfs.sock"
+        "enclaveTarget": "${ENV:KAIROS_ENCLAVE_SOCKET:-unix:///run/kairos-runtime/sockets/kairos-runtime-enclave.sock}",
+        "vfsTarget": "${ENV:KAIROS_VFS_SOCKET:-unix:///run/kairos-runtime/sockets/kairos-runtime-vfs.sock}"
       },
       "telegram": {
         "botToken": "${ENV:BOT_TOKEN}",

@@ -83,6 +83,18 @@ fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MANIFEST_PATH="$ROOT_DIR/src/sandbox/Cargo.toml"
 
+if [[ -f "$ROOT_DIR/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT_DIR/.env"
+  set +a
+fi
+
+: "${ENCLAVE_LISTEN:=${KAIROS_ENCLAVE_SOCKET:-unix:///run/kairos-runtime/sockets/kairos-runtime-enclave.sock}}"
+: "${VFS_LISTEN:=${KAIROS_VFS_SOCKET:-unix:///run/kairos-runtime/sockets/kairos-runtime-vfs.sock}}"
+export ENCLAVE_LISTEN
+export VFS_LISTEN
+
 if [[ "$MODE" == "release" ]]; then
   echo "[run-sandbox-host] building sandboxd (release)..."
   cargo build --manifest-path "$MANIFEST_PATH" --release

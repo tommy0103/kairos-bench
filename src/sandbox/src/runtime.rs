@@ -661,12 +661,10 @@ fn build_oci_spec(spec: &OciSpecDraft) -> serde_json::Value {
         .map(|(key, value)| format!("{key}={value}"))
         .collect::<Vec<_>>();
 
-    let mut mounts = spec
-        .mounts
-        .iter()
-        .map(bind_mount_to_json)
-        .collect::<Vec<_>>();
-    mounts.extend(default_oci_system_mounts());
+    // Mount ordering matters: place system mounts first, then user bind mounts.
+    // Otherwise a later `/run` tmpfs mount can shadow `/run/...` bind targets.
+    let mut mounts = default_oci_system_mounts();
+    mounts.extend(spec.mounts.iter().map(bind_mount_to_json));
 
     serde_json::json!({
         "ociVersion": "1.0.2",

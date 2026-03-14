@@ -152,11 +152,12 @@ docker compose up --build app
 - Verify socket visibility and permissions on host:
 
 ```bash
-ls -l /tmp/kairos-runtime-enclave.sock
-lsof -U /tmp/kairos-runtime-enclave.sock
+ls -l /run/kairos-runtime/sockets/kairos-runtime-enclave.sock
+lsof -U /run/kairos-runtime/sockets/kairos-runtime-enclave.sock
 ```
 
-- In containerd sandbox mode, enclave may create the UDS as `root`; host non-root clients can fail to connect if permissions are too strict.
+- In containerd sandbox mode, prefer a dedicated socket directory such as `/run/kairos-runtime/sockets` instead of exposing `/tmp`.
+- Enclave may create the UDS as `root`; host non-root clients can fail to connect if permissions are too strict.
 - Current runtime sets socket mode to `666` after bind to avoid host/client user mismatch.
 
 ### Run sandboxd on host (without Docker)

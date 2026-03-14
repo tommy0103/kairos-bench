@@ -11,7 +11,7 @@
   },
   "private": true,
   "scripts": {
-    "dev": "AGENT_ENCLAVE_TARGET=unix:///tmp/kairos-runtime-enclave.sock MEMORY_FILES_ROOT=${MEMORY_FILES_ROOT:-../../.runtime/memory_files} bun run --watch ./main.ts"
+    "dev": "MEMORY_FILES_ROOT=${MEMORY_FILES_ROOT:-../../.runtime/memory_files} bun run --watch ./main.ts"
   },
   "type": "module",
   "devDependencies": {

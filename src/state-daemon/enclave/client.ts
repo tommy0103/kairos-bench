@@ -13,7 +13,9 @@ const CURRENT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PROTO_PATH = resolve(CURRENT_DIR, "./proto/enclave.proto");
 const MAX_GRPC_MESSAGE_BYTES = 16 * 1024 * 1024;
 const DEFAULT_ENCLAVE_TARGET =
-  process.env.AGENT_ENCLAVE_TARGET ?? "unix:///tmp/kairos-runtime-enclave.sock";
+  process.env.AGENT_ENCLAVE_TARGET ??
+  process.env.KAIROS_ENCLAVE_SOCKET ??
+  "unix:///run/kairos-runtime/sockets/kairos-runtime-enclave.sock";
 
 interface CreateGrpcEnclaveClientOptions {
   target?: string;

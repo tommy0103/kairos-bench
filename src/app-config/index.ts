@@ -77,6 +77,45 @@ const CURRENT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(CURRENT_DIR, "../..");
 const DEFAULT_CONFIG_ROOT = resolve(REPO_ROOT, ".runtime/appconfig");
 
+loadRootDotenv();
+
+function loadRootDotenv(): void {
+  const envPath = resolve(REPO_ROOT, ".env");
+  let raw: string;
+  try {
+    raw = readFileSync(envPath, "utf-8");
+  } catch {
+    return;
+  }
+
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+    const equalIdx = trimmed.indexOf("=");
+    if (equalIdx <= 0) {
+      continue;
+    }
+    const key = trimmed.slice(0, equalIdx).trim();
+    if (!key || process.env[key] !== undefined) {
+      continue;
+    }
+    const rawValue = trimmed.slice(equalIdx + 1).trim();
+    process.env[key] = unquoteEnvValue(rawValue);
+  }
+}
+
+function unquoteEnvValue(value: string): string {
+  if (value.length >= 2) {
+    const quote = value[0];
+    if ((quote === "\"" || quote === "'") && value[value.length - 1] === quote) {
+      return value.slice(1, -1);
+    }
+  }
+  return value;
+}
+
 function normalizePath(input: string, repoRoot: string): string {
   return isAbsolute(input) ? input : resolve(repoRoot, input);
 }
