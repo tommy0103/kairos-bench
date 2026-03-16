@@ -5,7 +5,7 @@ import {
   type AgentTool,
 } from "@mariozechner/pi-agent-core";
 import type { Message, Model } from "@mariozechner/pi-ai";
-import { getLLMHeaders } from "../../../utils/llm-adapter";
+import { createLlmFetcher, getLLMHeaders } from "../../../utils/llm-adapter";
 import { consumePendingEvolutedTool } from "../tools/evolute";
 
 export interface AgentLoopMessage {
@@ -138,6 +138,13 @@ interface ApoptosisToolResult {
   };
 }
 
+interface AgentEndMessage {
+  role?: string;
+  content?: Array<{ type?: string; text?: string }>;
+  stopReason?: string;
+  errorMessage?: string;
+}
+
 function extractApoptosisTargetToolName(result: unknown): string | null {
   const targetToolName = (result as ApoptosisToolResult | undefined)?.details?.targetToolName;
   if (typeof targetToolName !== "string") {
@@ -177,39 +184,17 @@ function detectImageMime(buf: Buffer, headerType: string | null, url: string): s
   return "image/jpeg";
 }
 
-async function callVisionApi(
-  imageRefs: string[],
-  apiKey: string,
-  baseURL: string,
-  modelId: string,
-): Promise<string | null> {
-  const endpoint = `${baseURL.replace(/\/+$/, "")}/chat/completions`;
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-      ...(FORCE_UA ? { "User-Agent": FORCE_UA } : {}),
-    },
-    body: JSON.stringify({
-      model: modelId,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "text", text: "Describe this image concisely. Include visible text, objects, and notable details. Use Chinese if appropriate." },
-          ...imageRefs.map((u) => ({ type: "image_url", image_url: { url: u } })),
-        ],
-      }],
-      max_tokens: 800,
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    console.warn(`[vision] HTTP ${res.status}: ${body}`);
-    return null;
+function injectVisionDescription(messages: AgentLoopMessage[], description: string): AgentLoopMessage[] {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") {
+      return messages.map((m, idx) =>
+        idx === i
+          ? { ...m, content: m.content.replace(/\[photo(?:\s*x\d+)?\]/g, `[图片内容: ${description}]`) }
+          : m
+      );
+    }
   }
-  const json: any = await res.json();
-  return json?.choices?.[0]?.message?.content ?? null;
+  return messages;
 }
 
 async function preprocessVisionContent(
@@ -225,7 +210,20 @@ async function preprocessVisionContent(
       console.warn("[vision] failed to download images for base64 encoding");
       return null;
     }
-    return await callVisionApi(valid, apiKey, baseURL, modelId);
+
+    const fetcher = createLlmFetcher({ apiKey, baseURL });
+    const json: any = await fetcher("/chat/completions", {
+      model: modelId,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "Describe this image concisely. Include visible text, objects, and notable details. Use Chinese if appropriate." },
+          ...valid.map((u) => ({ type: "image_url", image_url: { url: u } })),
+        ],
+      }],
+      max_tokens: 800,
+    });
+    return json?.choices?.[0]?.message?.content ?? null;
   } catch (err) {
     console.warn("[vision] preprocessing failed:", err);
     return null;
@@ -253,17 +251,7 @@ export function createAgentLoopRunner(options: CreateAgentLoopRunnerOptions): Ag
         imageUrls, options.apiKey, options.baseURL, model.id,
       );
       if (description) {
-        let lastUserIdx = -1;
-        for (let i = messages.length - 1; i >= 0; i--) {
-          if (messages[i].role === "user") { lastUserIdx = i; break; }
-        }
-        if (lastUserIdx >= 0) {
-          messages = messages.map((m, i) =>
-            i === lastUserIdx
-              ? { ...m, content: m.content.replace(/\[photo(?:\s*x\d+)?\]/g, `[图片内容: ${description}]`) }
-              : m
-          );
-        }
+        messages = injectVisionDescription(messages, description);
       }
     }
 
@@ -281,6 +269,7 @@ export function createAgentLoopRunner(options: CreateAgentLoopRunnerOptions): Ag
     let currentMessageTextBuffer = "";
     let globalMessageHasEmitted = false;
     try {
+      console.log("[loopRunner] calling agentLoop with messages:", messages.length);
       const stream = agentLoop(
         messages as AgentMessage[],
         loopContext,
@@ -292,12 +281,15 @@ export function createAgentLoopRunner(options: CreateAgentLoopRunnerOptions): Ag
         },
         abortController.signal
       );
+      console.log("[loopRunner] agentLoop returned stream");
 
       for await (const event of stream) {
+        console.log("[loopRunner] event:", event.type, event);
         if (event.type === "message_update") {
           const assistantEvent = event.assistantMessageEvent;
           if (assistantEvent.type === "text_delta" && assistantEvent.delta) {
             currentMessageTextBuffer += assistantEvent.delta;
+            console.log("[loopRunner] text_delta:", assistantEvent.delta);
             continue;
           }
           if (assistantEvent.type === "text_end" && assistantEvent.content) {
@@ -317,11 +309,24 @@ export function createAgentLoopRunner(options: CreateAgentLoopRunnerOptions): Ag
         }
 
         if (event.type === "message_end") {
-          const message = event.message as {
-            role?: string;
-            content?: Array<{ type?: string; text?: string }>;
-          };
+          console.log("[loopRunner] message_end, buffer:", currentMessageTextBuffer, "hasToolCall:", currentMessageHasToolCall);
+          const message = event.message as AgentEndMessage;
           if (message.role !== "assistant") {
+            console.log("[loopRunner] message_end: role is not assistant:", message.role);
+            currentMessageHasToolCall = false;
+            currentMessageTextBuffer = "";
+            continue;
+          }
+          // 处理错误情况
+          if (message.stopReason === "error") {
+            const errorMsg = message.errorMessage || "Unknown error";
+            console.log("[loopRunner] message_end error:", errorMsg);
+            globalMessageHasEmitted = true;
+            yield {
+              type: "message_update",
+              role: "assistant",
+              delta: `(模型调用失败: ${errorMsg})`,
+            };
             currentMessageHasToolCall = false;
             currentMessageTextBuffer = "";
             continue;
@@ -334,6 +339,7 @@ export function createAgentLoopRunner(options: CreateAgentLoopRunnerOptions): Ag
                 .map((block) => block.text as string)
                 .join("");
             }
+            console.log("[loopRunner] message_end output:", output);
             if (output) {
               globalMessageHasEmitted = true;
               yield {
@@ -349,24 +355,26 @@ export function createAgentLoopRunner(options: CreateAgentLoopRunnerOptions): Ag
         }
 
         if (event.type === "tool_execution_end") {
+          let toolsChanged = false;
           if (event.toolName === "evolute") {
             const pendingTool = consumePendingEvolutedTool(event.toolCallId);
             if (pendingTool) {
               await options.registerDynamicTool(pendingTool);
+              toolsChanged = true;
             } else {
               console.warn(
                 `[evolute] pending tool not found for toolCallId=${String(event.toolCallId)}`
               );
             }
-            const latestTools = options.getCurrentTools();
-            syncToolsInPlace(loopContext, latestTools);
           } else if (event.toolName === "apoptosis") {
             const targetToolName = extractApoptosisTargetToolName(event.result);
             if (targetToolName) {
               await options.unregisterTool(targetToolName);
-              const latestTools = options.getCurrentTools();
-              syncToolsInPlace(loopContext, latestTools);
+              toolsChanged = true;
             }
+          }
+          if (toolsChanged) {
+            syncToolsInPlace(loopContext, options.getCurrentTools());
           }
           console.log("tool_execution_end", event.result);
           yield {
@@ -405,9 +413,11 @@ export function createAgentLoopRunner(options: CreateAgentLoopRunnerOptions): Ag
       }
       yield { type: "completed" };
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.log("[loopRunner] caught error:", errorMsg);
       yield {
         type: "failed",
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMsg,
       };
     } finally {
       abortController.abort();
