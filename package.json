@@ -19,7 +19,7 @@
   "devDependencies": {
     "bun-types": "latest",
     "concurrently": "^9.2.1",
-    "grpc-tools": "^1.13.1",
+    "grpc-tools": "^1.13.1"
   },
   "module": "src/index.js"
 }
