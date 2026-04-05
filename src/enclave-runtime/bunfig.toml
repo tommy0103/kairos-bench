@@ -1,4 +1,4 @@
 [install]
 
-# 设置为淘宝源
-registry = "https://registry.npmmirror.com"
+# Use the official npm registry by default.
+registry = "https://registry.npmjs.org"

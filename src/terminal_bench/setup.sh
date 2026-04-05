@@ -19,7 +19,7 @@ for i in 1 2 3; do
 done
 
 if ! command -v bun &> /dev/null; then
-    echo "[logos-agent] installing Bun via npmmirror..."
+    echo "[logos-agent] installing Bun..."
     BUN_INSTALL="$HOME/.bun"
     mkdir -p "$BUN_INSTALL/bin"
     ARCH=$(uname -m)
@@ -28,7 +28,15 @@ if ! command -v bun &> /dev/null; then
         aarch64) BUN_PKG="@oven/bun-linux-aarch64" ;;
         *)       echo "[logos-agent] unsupported arch: $ARCH"; exit 1 ;;
     esac
-    TARBALL_URL=$(curl -fsSL "https://registry.npmmirror.com/${BUN_PKG}/latest" | grep -o '"tarball":"[^"]*"' | head -1 | cut -d'"' -f4)
+    TARBALL_URL=""
+    for BUN_REGISTRY in "https://registry.npmjs.org" "https://registry.npmmirror.com"; do
+        TARBALL_URL=$(curl -fsSL "${BUN_REGISTRY}/${BUN_PKG}/latest" | grep -o '"tarball":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+        [ -n "$TARBALL_URL" ] && break
+    done
+    if [ -z "$TARBALL_URL" ]; then
+        echo "[logos-agent] failed to resolve Bun tarball URL"
+        exit 1
+    fi
     curl -fsSL "$TARBALL_URL" | tar xz -C /tmp
     cp /tmp/package/bin/bun "$BUN_INSTALL/bin/bun"
     chmod +x "$BUN_INSTALL/bin/bun"

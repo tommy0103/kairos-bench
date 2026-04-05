@@ -86,7 +86,7 @@ class LogosAgent(BaseInstalledAgent):
             ),
         )
 
-        # 2. Bun (from npmmirror)
+        # 2. Bun (prefer npmjs, fall back to npmmirror)
         await self.exec_as_agent(
             environment,
             command=(
@@ -94,7 +94,12 @@ class LogosAgent(BaseInstalledAgent):
                 '  BUN_INSTALL="$HOME/.bun" && mkdir -p "$BUN_INSTALL/bin" && '
                 '  ARCH=$(uname -m) && '
                 '  case "$ARCH" in x86_64) BUN_PKG="@oven/bun-linux-x64";; aarch64) BUN_PKG="@oven/bun-linux-aarch64";; esac && '
-                '  TARBALL_URL=$(curl -fsSL "https://registry.npmmirror.com/${BUN_PKG}/latest" | grep -o \'\"tarball\":\"[^\"]*\"\' | head -1 | cut -d\'"\' -f4) && '
+                '  TARBALL_URL="" && '
+                '  for BUN_REGISTRY in "https://registry.npmjs.org" "https://registry.npmmirror.com"; do '
+                '    TARBALL_URL=$(curl -fsSL "${BUN_REGISTRY}/${BUN_PKG}/latest" | grep -o \'\"tarball\":\"[^\"]*\"\' | head -1 | cut -d\'"\' -f4 || true) && '
+                '    [ -n "$TARBALL_URL" ] && break; '
+                '  done && '
+                '  [ -n "$TARBALL_URL" ] || { echo "failed to resolve Bun tarball URL"; exit 1; } && '
                 '  curl -fsSL "$TARBALL_URL" | tar xz -C /tmp && '
                 '  cp /tmp/package/bin/bun "$BUN_INSTALL/bin/bun" && '
                 '  chmod +x "$BUN_INSTALL/bin/bun" && '
