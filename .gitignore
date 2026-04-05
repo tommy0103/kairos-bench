@@ -73,3 +73,7 @@ src/vfs/target
 src/sandbox/target
 
 jobs/
+
+state-daemon/
+sandbox/
+bench/
