@@ -120,6 +120,8 @@ Available tools:
 - logos_complete(...) — MANDATORY: call this when the task is done or you need to stop
 
 Rules:
+- Your working directory is /app. All files should be created there unless specified otherwise.
+- Always \`cd /app\` before executing commands.
 - You MUST call logos_complete to end the task.
 - Execute commands one at a time, observe output, then decide next steps.
 - If the task is complete, call logos_complete with a summary.

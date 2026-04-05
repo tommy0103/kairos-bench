@@ -134,6 +134,38 @@ class LogosAgent(BaseInstalledAgent):
             ),
         )
 
+        # 4. Start logos-kernel daemon
+        state_dir = f"{LOGOS_BIN_DIR}/state"
+        logos_sock = f"{state_dir}/sandbox/logos.sock"
+        await self.exec_as_agent(
+            environment,
+            command=(
+                f"mkdir -p {state_dir}/sandbox {state_dir}/entities {state_dir}/memory "
+                f"  {state_dir}/proc-store {state_dir}/svc-store && "
+                f"rm -f {logos_sock} && "
+                f"VFS_SANDBOX_ROOT={state_dir}/sandbox "
+                f"VFS_SYSTEM_DB={state_dir}/system.db "
+                f"VFS_USERS_ROOT={state_dir}/entities "
+                f"VFS_MEMORY_ROOT={state_dir}/memory "
+                f"VFS_PROC_STORE_ROOT={state_dir}/proc-store "
+                f"VFS_SVC_STORE_ROOT={state_dir}/svc-store "
+                f"SANDBOX_MODE=host "
+                f"nohup {LOGOS_BIN_DIR}/logos-kernel > /tmp/logos-kernel.log 2>&1 & "
+                f"echo \"[logos-agent] waiting for kernel socket...\" && "
+                f"for i in $(seq 1 30); do "
+                f"  [ -S {logos_sock} ] && break; "
+                f"  sleep 1; "
+                f"done && "
+                f"if [ -S {logos_sock} ]; then "
+                f"  echo '[logos-agent] kernel ready'; "
+                f"else "
+                f"  echo '[logos-agent] ERROR: kernel failed to start:' && "
+                f"  cat /tmp/logos-kernel.log && "
+                f"  exit 1; "
+                f"fi"
+            ),
+        )
+
     @with_prompt_template
     async def run(
         self,
@@ -143,29 +175,10 @@ class LogosAgent(BaseInstalledAgent):
     ) -> None:
         env_exports = self._build_env_exports()
         escaped = shlex.quote(instruction)
-
-        state_dir = f"{LOGOS_BIN_DIR}/state"
-        logos_sock = f"{state_dir}/sandbox/logos.sock"
-        kernel_bin = f"{LOGOS_BIN_DIR}/logos-kernel"
-
-        kernel_boot = (
-            f"if [ -x {shlex.quote(kernel_bin)} ] && [ ! -S {shlex.quote(logos_sock)} ]; then "
-            f"  rm -f {shlex.quote(logos_sock)} && "
-            f"  mkdir -p {state_dir}/sandbox {state_dir}/entities {state_dir}/memory {state_dir}/proc-store {state_dir}/svc-store && "
-            f"  VFS_SANDBOX_ROOT={state_dir}/sandbox "
-            f"  VFS_SYSTEM_DB={state_dir}/system.db "
-            f"  VFS_USERS_ROOT={state_dir}/entities "
-            f"  VFS_MEMORY_ROOT={state_dir}/memory "
-            f"  VFS_PROC_STORE_ROOT={state_dir}/proc-store "
-            f"  VFS_SVC_STORE_ROOT={state_dir}/svc-store "
-            f"  nohup {shlex.quote(kernel_bin)} > /tmp/logos-kernel.log 2>&1 & "
-            f"  for i in $(seq 1 30); do [ -S {shlex.quote(logos_sock)} ] && break; sleep 1; done; "
-            f"fi"
-        )
+        logos_sock = f"{LOGOS_BIN_DIR}/state/sandbox/logos.sock"
 
         cmd_parts = [
             "export PATH=$HOME/.bun/bin:$PATH",
-            kernel_boot,
         ]
         if env_exports:
             cmd_parts.append(env_exports)
