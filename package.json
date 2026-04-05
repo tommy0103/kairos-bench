@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "src/enclave-runtime"
+    "src/enclave-runtime",
+    "src/app-config"
   ],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
