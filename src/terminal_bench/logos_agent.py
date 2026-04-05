@@ -108,7 +108,7 @@ class LogosAgent(BaseInstalledAgent):
             ),
         )
 
-        # 3. Clone repo + install deps + download pre-built kernel
+        # 3. Clone repo
         kairos_repo = os.environ.get(
             "KAIROS_REPO_URL",
             "https://github.com/tommy0103/kairos-bench.git",
@@ -117,29 +117,54 @@ class LogosAgent(BaseInstalledAgent):
             environment,
             command=(
                 f"export PATH=$HOME/.bun/bin:$PATH && "
-                # Clone repo
-                f"if [ ! -d {KAIROS_DIR} ]; then "
-                f"  git clone --depth 1 {shlex.quote(kairos_repo)} {KAIROS_DIR}; "
+                f"echo '[logos-agent] ensuring kairos repo...' && "
+                f"if [ ! -f {KAIROS_DIR}/package.json ]; then "
+                f"  rm -rf {KAIROS_DIR} && "
+                f"  for i in 1 2 3; do "
+                f"    git -c http.version=HTTP/1.1 clone --depth 1 {shlex.quote(kairos_repo)} {KAIROS_DIR} && break; "
+                f"    printf '[logos-agent] git clone retry %s/3...\\n' \"$i\" && "
+                f"    rm -rf {KAIROS_DIR} && "
+                f"    sleep 5; "
+                f"  done; "
                 f"fi && "
-                f"cd {KAIROS_DIR} && "
-                # npm deps (production only, skip playwright browsers)
-                f"PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 "
-                f"bun install --production --frozen-lockfile 2>/dev/null || "
-                f"PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 bun install --production && "
-                # Download pre-built logos-kernel + logos-mcp + logos.proto
-                f"mkdir -p {LOGOS_BIN_DIR} && "
-                f"if [ ! -x {LOGOS_BIN_DIR}/logos-kernel ]; then "
-                f"  echo '[logos-agent] downloading pre-built kernel...' && "
-                f"  curl -fsSL {shlex.quote(LOGOS_RELEASE_URL)} | tar xz -C {LOGOS_BIN_DIR} && "
-                f"  chmod +x {LOGOS_BIN_DIR}/logos-kernel {LOGOS_BIN_DIR}/logos-mcp; "
-                f"fi && "
-                # Place proto where logosClient.ts expects it
-                f"mkdir -p {KAIROS_DIR}/src/vfs/proto && "
-                f"cp {LOGOS_BIN_DIR}/logos.proto {KAIROS_DIR}/src/vfs/proto/logos.proto"
+                f"[ -f {KAIROS_DIR}/package.json ] || "
+                f"{{ echo '[logos-agent] ERROR: failed to clone kairos repo'; exit 1; }}"
             ),
         )
 
-        # 4. Start logos-kernel daemon
+        # 4. Install dependencies
+        await self.exec_as_agent(
+            environment,
+            command=(
+                f"export PATH=$HOME/.bun/bin:$PATH && "
+                f"echo '[logos-agent] installing kairos dependencies...' && "
+                f"cd {KAIROS_DIR} && "
+                f"(PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 "
+                f"bun install --production --frozen-lockfile || "
+                f"PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 bun install --production) && "
+                f"echo '[logos-agent] dependency install complete'"
+            ),
+        )
+
+        # 5. Download pre-built logos-kernel + logos-mcp + logos.proto
+        await self.exec_as_agent(
+            environment,
+            command=(
+                f"export PATH=$HOME/.bun/bin:$PATH && "
+                f"echo '[logos-agent] ensuring logos binaries...' && "
+                f"mkdir -p {LOGOS_BIN_DIR} && "
+                f"if [ ! -x {LOGOS_BIN_DIR}/logos-kernel ]; then "
+                f"  echo '[logos-agent] downloading pre-built kernel...' && "
+                f"  curl --retry 3 --retry-all-errors --retry-delay 2 -fsSL {shlex.quote(LOGOS_RELEASE_URL)} | tar xz -C {LOGOS_BIN_DIR} && "
+                f"  chmod +x {LOGOS_BIN_DIR}/logos-kernel {LOGOS_BIN_DIR}/logos-mcp; "
+                f"fi && "
+                f"mkdir -p {KAIROS_DIR}/src/vfs/proto && "
+                f"cp {LOGOS_BIN_DIR}/logos.proto {KAIROS_DIR}/src/vfs/proto/logos.proto && "
+                f"echo '[logos-agent] logos binaries ready'"
+            ),
+        )
+
+        # 6. Start logos-kernel daemon
         state_dir = f"{LOGOS_BIN_DIR}/state"
         logos_sock = f"{state_dir}/sandbox/logos.sock"
         await self.exec_as_agent(

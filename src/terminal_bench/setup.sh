@@ -6,6 +6,9 @@ set -euo pipefail
 
 KAIROS_DIR="${KAIROS_DIR:-/opt/kairos}"
 
+export HTTP_PROXY=http://127.0.0.1:7900
+export HTTPS_PROXY=http://127.0.0.1:7900
+
 echo "[logos-agent] configuring apt mirror..."
 sed -i 's|http://archive.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true
 sed -i 's|http://security.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true
@@ -48,16 +51,27 @@ fi
 
 export PATH="$HOME/.bun/bin:$PATH"
 
-if [ ! -d "$KAIROS_DIR" ]; then
+if [ ! -f "$KAIROS_DIR/package.json" ]; then
     echo "[logos-agent] cloning kairos-runtime..."
     if [ -n "${KAIROS_REPO_URL:-}" ]; then
-        git clone --depth 1 "$KAIROS_REPO_URL" "$KAIROS_DIR"
+        rm -rf "$KAIROS_DIR"
+        for i in 1 2 3; do
+            git -c http.version=HTTP/1.1 clone --depth 1 "$KAIROS_REPO_URL" "$KAIROS_DIR" && break
+            echo "[logos-agent] git clone retry $i/3..."
+            rm -rf "$KAIROS_DIR"
+            sleep 5
+        done
+        if [ ! -f "$KAIROS_DIR/package.json" ]; then
+            echo "[logos-agent] ERROR: failed to clone kairos-runtime"
+            exit 1
+        fi
     else
         echo "[logos-agent] ERROR: set KAIROS_REPO_URL or mount repo at $KAIROS_DIR"
         exit 1
     fi
 fi
 
+echo "[logos-agent] kairos repo ready"
 cd "$KAIROS_DIR"
 
 # ── Init VFS submodule ────────────────────────────────────────
@@ -72,8 +86,11 @@ fi
 
 # ── Install npm dependencies ─────────────────────────────────
 echo "[logos-agent] installing npm dependencies..."
-PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 bun install --frozen-lockfile 2>/dev/null || \
-PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 bun install
+(
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 bun install --frozen-lockfile 2>/dev/null || \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 bun install
+)
+echo "[logos-agent] dependency install complete"
 
 echo "[logos-agent] verifying build..."
 bun build src/enclave-runtime/bench-runner.ts --target bun --outdir /tmp/_bench_verify > /dev/null 2>&1
