@@ -11,15 +11,9 @@
     "@grpc/proto-loader": "^0.8.0",
     "@sinclair/typebox": "^0.34.48",
     "asciichart": "^1.5.25",
-    "cheerio": "^1.2.0",
     "elysia": "latest",
-    "es-module-lexer": "^2.0.0",
-    "hyparquet": "^1.25.1",
-    "mathjs": "^15.1.1",
     "openai": "^6.22.0",
-    "playwright": "^1.58.2",
     "protobufjs": "^8.0.0",
-    "typescript": "^5.9.3",
-    "zod": "^4.3.6"
+    "typescript": "^5.9.3"
   }
 }

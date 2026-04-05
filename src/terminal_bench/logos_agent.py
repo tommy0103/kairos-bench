@@ -144,14 +144,20 @@ class LogosAgent(BaseInstalledAgent):
         env_exports = self._build_env_exports()
         escaped = shlex.quote(instruction)
 
-        logos_sock = f"{LOGOS_BIN_DIR}/logos.sock"
+        state_dir = f"{LOGOS_BIN_DIR}/state"
+        logos_sock = f"{state_dir}/sandbox/logos.sock"
         kernel_bin = f"{LOGOS_BIN_DIR}/logos-kernel"
 
         kernel_boot = (
             f"if [ -x {shlex.quote(kernel_bin)} ] && [ ! -S {shlex.quote(logos_sock)} ]; then "
             f"  rm -f {shlex.quote(logos_sock)} && "
-            f"  VFS_LISTEN=unix://{logos_sock} "
-            f"  VFS_STATE_DIR={LOGOS_BIN_DIR}/state "
+            f"  mkdir -p {state_dir}/sandbox {state_dir}/entities {state_dir}/memory {state_dir}/proc-store {state_dir}/svc-store && "
+            f"  VFS_SANDBOX_ROOT={state_dir}/sandbox "
+            f"  VFS_SYSTEM_DB={state_dir}/system.db "
+            f"  VFS_USERS_ROOT={state_dir}/entities "
+            f"  VFS_MEMORY_ROOT={state_dir}/memory "
+            f"  VFS_PROC_STORE_ROOT={state_dir}/proc-store "
+            f"  VFS_SVC_STORE_ROOT={state_dir}/svc-store "
             f"  nohup {shlex.quote(kernel_bin)} > /tmp/logos-kernel.log 2>&1 & "
             f"  for i in $(seq 1 30); do [ -S {shlex.quote(logos_sock)} ] && break; sleep 1; done; "
             f"fi"
