@@ -64,7 +64,7 @@ class LogosAgent(BaseInstalledAgent):
                 pairs["API_KEY"] = val
                 break
 
-        for key in ("MODEL", "BASE_URL", "MAX_TURNS", "LOGOS_SOCKET"):
+        for key in ("MODEL", "BASE_URL", "MAX_TURNS"):
             val = os.environ.get(key)
             if val:
                 pairs[key] = val
@@ -115,9 +115,39 @@ class LogosAgent(BaseInstalledAgent):
                 f"  git clone --depth 1 {shlex.quote(kairos_repo)} {KAIROS_DIR}; "
                 f"fi && "
                 f"cd {KAIROS_DIR} && "
+                # Init VFS submodule (try SSH then HTTPS)
+                f"(git submodule update --init --depth 1 src/vfs 2>/dev/null || "
+                f" (git submodule set-url src/vfs https://github.com/kairos-plan9/logos-fs.git 2>/dev/null && "
+                f"  git submodule update --init --depth 1 src/vfs 2>/dev/null) || true) && "
                 f"PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 "
                 f"bun install --frozen-lockfile 2>/dev/null || "
                 f"PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 bun install"
+            ),
+        )
+
+        # Build Logos kernel if VFS submodule + Rust available
+        await self.exec_as_agent(
+            environment,
+            command=(
+                f"cd {KAIROS_DIR} && "
+                f"if [ -f src/vfs/Cargo.toml ]; then "
+                # Install Rust if needed (rsproxy mirror for China)
+                f"  if ! command -v cargo &>/dev/null; then "
+                f"    export RUSTUP_DIST_SERVER=https://rsproxy.cn && "
+                f"    export RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup && "
+                f"    curl --proto '=https' --tlsv1.2 -sSf https://rsproxy.cn/rustup-init.sh | sh -s -- -y --default-toolchain stable 2>&1 | tail -3 && "
+                f"    source $HOME/.cargo/env && "
+                f'    mkdir -p $HOME/.cargo && '
+                f'    printf \'[source.crates-io]\\nreplace-with = "rsproxy-sparse"\\n[source.rsproxy-sparse]\\nregistry = "sparse+https://rsproxy.cn/index/"\\n\' > $HOME/.cargo/config.toml; '
+                f"  fi && "
+                f"  source $HOME/.cargo/env 2>/dev/null; "
+                f"  echo '[logos-agent] building logos-kernel...' && "
+                f"  cargo build --manifest-path src/vfs/Cargo.toml --bin logos-kernel --release 2>&1 | tail -5 && "
+                f"  echo '[logos-agent] building logos-mcp...' && "
+                f"  cargo build --manifest-path src/vfs/Cargo.toml --bin logos-mcp --release 2>&1 | tail -5; "
+                f"else "
+                f"  echo '[logos-agent] vfs not available, skipping kernel build'; "
+                f"fi"
             ),
         )
 
@@ -131,11 +161,29 @@ class LogosAgent(BaseInstalledAgent):
         env_exports = self._build_env_exports()
         escaped = shlex.quote(instruction)
 
+        logos_sock = f"{KAIROS_DIR}/src/vfs/data/state/sandbox/logos.sock"
+        kernel_bin = f"{KAIROS_DIR}/src/vfs/target/release/logos-kernel"
+
+        kernel_boot = (
+            f"KERNEL_BIN={shlex.quote(kernel_bin)} && "
+            f"LOGOS_SOCK={shlex.quote(logos_sock)} && "
+            f"if [ -x \"$KERNEL_BIN\" ] && [ ! -S \"$LOGOS_SOCK\" ]; then "
+            f"  rm -f \"$LOGOS_SOCK\" && "
+            f"  nohup \"$KERNEL_BIN\" > /tmp/logos-kernel.log 2>&1 & "
+            f"  for i in $(seq 1 30); do [ -S \"$LOGOS_SOCK\" ] && break; sleep 1; done; "
+            f"fi && "
+            f"if [ -S \"$LOGOS_SOCK\" ]; then "
+            f"  export LOGOS_SOCKET=\"$LOGOS_SOCK\"; "
+            f"fi"
+        )
+
         cmd_parts = [
             "export PATH=$HOME/.bun/bin:$PATH",
+            "source $HOME/.cargo/env 2>/dev/null || true",
         ]
         if env_exports:
             cmd_parts.append(env_exports)
+        cmd_parts.append(kernel_boot)
         cmd_parts.append(
             f"cd {KAIROS_DIR} && "
             f"bun run src/enclave-runtime/bench-runner.ts {escaped}"
