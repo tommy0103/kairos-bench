@@ -1,4 +1,4 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "./types";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
@@ -38,7 +38,7 @@ function schemaTypeToText(schema: any): string {
   return "unknown";
 }
 
-function renderToolSignature(tool: AgentTool<any>): string {
+function renderToolSignature(tool: AgentTool): string {
   const schema: any = tool.parameters ?? {};
   const properties = (schema.properties ?? {}) as Record<string, any>;
   const required = new Set<string>(Array.isArray(schema.required) ? schema.required : []);
@@ -49,7 +49,7 @@ function renderToolSignature(tool: AgentTool<any>): string {
   return `${tool.name}(${params.join(", ")}): string`;
 }
 
-function renderToolsMemory(tools: AgentTool<any>[]): string {
+function renderToolsMemory(tools: AgentTool[]): string {
   if (tools.length === 0) {
     return "# Tools\n\nNo tools are currently registered.\n";
   }
@@ -79,7 +79,7 @@ function renderToolsMemory(tools: AgentTool<any>[]): string {
 }
 
 export interface ToolsDocWriter {
-  sync: (tools: AgentTool<any>[]) => void;
+  sync: (tools: AgentTool[]) => void;
 }
 
 export function createToolsDocWriter(

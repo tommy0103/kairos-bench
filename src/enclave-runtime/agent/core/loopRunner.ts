@@ -1,11 +1,7 @@
-import {
-  agentLoop,
-  type AgentContext,
-  type AgentMessage,
-  type AgentTool,
-} from "@mariozechner/pi-agent-core";
-import type { Message, Model } from "@mariozechner/pi-ai";
-import { createLlmFetcher, getLLMHeaders } from "../../../utils/llm-adapter";
+import OpenAI from "openai";
+import type { AgentTool } from "./types";
+import { reactLoop, type ReactLoopEvent } from "./reactLoop";
+import { createLlmFetcher, customLlmFetch, getLLMHeaders } from "../../../utils/llm-adapter";
 import { consumePendingEvolutedTool } from "../tools/evolute";
 
 export interface AgentLoopMessage {
@@ -49,6 +45,11 @@ export type AgentLoopStreamEvent =
       result?: unknown;
     }
   | {
+      type: "turn_outcome";
+      outcome: "finished" | "sleep" | "resume" | "plan" | "timeout";
+      params?: import("./types").LogosCompleteParams;
+    }
+  | {
       type: "completed";
     }
   | {
@@ -60,32 +61,9 @@ export interface CreateAgentLoopRunnerOptions {
   apiKey: string;
   baseURL: string;
   defaultModel: string;
-  getCurrentTools: () => AgentTool<any>[];
-  registerDynamicTool: (tool: AgentTool<any>) => Promise<void>;
+  getCurrentTools: () => AgentTool[];
+  registerDynamicTool: (tool: AgentTool) => Promise<void>;
   unregisterTool: (name: string) => Promise<boolean>;
-}
-
-const DEFAULT_PROVIDER = "openai";
-
-function createCompatibleModel(modelId: string, baseURL: string): Model<"openai-completions"> {
-  return {
-    id: modelId,
-    name: modelId,
-    api: "openai-completions",
-    provider: DEFAULT_PROVIDER,
-    baseUrl: baseURL,
-    reasoning: false,
-    input: ["text", "image"],
-    cost: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-    },
-    contextWindow: 128000,
-    maxTokens: 4096,
-    headers: getLLMHeaders(),
-  };
 }
 
 function extractSystemPrompt(messages: AgentLoopMessage[]): string {
@@ -96,40 +74,20 @@ function extractSystemPrompt(messages: AgentLoopMessage[]): string {
     .trim();
 }
 
-function extractAssistantTextFromMessages(messages: AgentMessage[]): string {
-  for (const message of [...messages].reverse()) {
-    if ((message as any)?.role !== "assistant") {
-      continue;
-    }
-    const content = (message as { content?: unknown }).content;
-    if (typeof content === "string" && content) {
-      return content;
-    }
-    if (!Array.isArray(content)) {
-      continue;
-    }
-    const text = (content as Array<{ type?: string; text?: string }>)
-      .filter((block) => block.type === "text" && typeof block.text === "string")
-      .map((block) => block.text as string)
-      .join("");
-    if (text) {
-      return text;
-    }
-  }
-  return "";
-}
+function toOpenAIMessages(
+  messages: AgentLoopMessage[]
+): OpenAI.Chat.ChatCompletionMessageParam[] {
+  const systemPrompt = extractSystemPrompt(messages);
+  const nonSystem = messages.filter((m) => m.role !== "system");
 
-function syncToolsInPlace(context: AgentContext, tools: AgentTool<any>[]) {
-  if (!Array.isArray(context.tools)) {
-    context.tools = [...tools];
-    return;
+  const result: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+  if (systemPrompt) {
+    result.push({ role: "system" as const, content: systemPrompt });
   }
-  context.tools.splice(0, context.tools.length, ...tools);
-}
-
-function isLlmMessage(message: AgentMessage): message is Message {
-  const role = (message as any)?.role;
-  return role === "user" || role === "assistant" || role === "toolResult";
+  for (const m of nonSystem) {
+    result.push({ role: m.role as "user" | "assistant", content: m.content });
+  }
+  return result;
 }
 
 interface ApoptosisToolResult {
@@ -138,18 +96,10 @@ interface ApoptosisToolResult {
   };
 }
 
-interface AgentEndMessage {
-  role?: string;
-  content?: Array<{ type?: string; text?: string }>;
-  stopReason?: string;
-  errorMessage?: string;
-}
-
 function extractApoptosisTargetToolName(result: unknown): string | null {
-  const targetToolName = (result as ApoptosisToolResult | undefined)?.details?.targetToolName;
-  if (typeof targetToolName !== "string") {
-    return null;
-  }
+  const targetToolName = (result as ApoptosisToolResult | undefined)?.details
+    ?.targetToolName;
+  if (typeof targetToolName !== "string") return null;
   const normalized = targetToolName.trim();
   return normalized.length > 0 ? normalized : null;
 }
@@ -160,15 +110,23 @@ async function downloadImageAsBase64(url: string): Promise<string | null> {
     if (!res.ok) return null;
     const buf = Buffer.from(await res.arrayBuffer());
     const base64 = buf.toString("base64");
-    const contentType = detectImageMime(buf, res.headers.get("content-type"), url);
+    const contentType = detectImageMime(
+      buf,
+      res.headers.get("content-type"),
+      url
+    );
     return `data:${contentType};base64,${base64}`;
   } catch {
     return null;
   }
 }
 
-function detectImageMime(buf: Buffer, headerType: string | null, url: string): string {
-  if (buf[0] === 0xFF && buf[1] === 0xD8) return "image/jpeg";
+function detectImageMime(
+  buf: Buffer,
+  headerType: string | null,
+  url: string
+): string {
+  if (buf[0] === 0xff && buf[1] === 0xd8) return "image/jpeg";
   if (buf[0] === 0x89 && buf[1] === 0x50) return "image/png";
   if (buf[0] === 0x47 && buf[1] === 0x49) return "image/gif";
   if (buf[0] === 0x52 && buf[1] === 0x49) return "image/webp";
@@ -184,12 +142,21 @@ function detectImageMime(buf: Buffer, headerType: string | null, url: string): s
   return "image/jpeg";
 }
 
-function injectVisionDescription(messages: AgentLoopMessage[], description: string): AgentLoopMessage[] {
+function injectVisionDescription(
+  messages: AgentLoopMessage[],
+  description: string
+): AgentLoopMessage[] {
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === "user") {
       return messages.map((m, idx) =>
         idx === i
-          ? { ...m, content: m.content.replace(/\[photo(?:\s*x\d+)?\]/g, `[图片内容: ${description}]`) }
+          ? {
+              ...m,
+              content: m.content.replace(
+                /\[photo(?:\s*x\d+)?\]/g,
+                `[图片内容: ${description}]`
+              ),
+            }
           : m
       );
     }
@@ -201,7 +168,7 @@ async function preprocessVisionContent(
   imageUrls: string[],
   apiKey: string,
   baseURL: string,
-  modelId: string,
+  modelId: string
 ): Promise<string | null> {
   try {
     const base64Urls = await Promise.all(imageUrls.map(downloadImageAsBase64));
@@ -214,13 +181,21 @@ async function preprocessVisionContent(
     const fetcher = createLlmFetcher({ apiKey, baseURL });
     const json: any = await fetcher("/chat/completions", {
       model: modelId,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "text", text: "Describe this image concisely. Include visible text, objects, and notable details. Use Chinese if appropriate." },
-          ...valid.map((u) => ({ type: "image_url", image_url: { url: u } })),
-        ],
-      }],
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Describe this image concisely. Include visible text, objects, and notable details. Use Chinese if appropriate.",
+            },
+            ...valid.map((u) => ({
+              type: "image_url",
+              image_url: { url: u },
+            })),
+          ],
+        },
+      ],
       max_tokens: 800,
     });
     return json?.choices?.[0]?.message?.content ?? null;
@@ -230,14 +205,19 @@ async function preprocessVisionContent(
   }
 }
 
-export function createAgentLoopRunner(options: CreateAgentLoopRunnerOptions): AgentLoopRunner {
-  const activeAgentLoops = new Set<AgentContext>();
+export function createAgentLoopRunner(
+  options: CreateAgentLoopRunnerOptions
+): AgentLoopRunner {
+  const openaiClient = new OpenAI({
+    apiKey: options.apiKey,
+    baseURL: options.baseURL,
+    defaultHeaders: getLLMHeaders(),
+    fetch: customLlmFetch,
+  });
 
   const applyToolsToActiveLoops = () => {
-    const tools = options.getCurrentTools();
-    for (const activeAgentLoop of activeAgentLoops) {
-      syncToolsInPlace(activeAgentLoop, tools);
-    }
+    // In the new architecture, tools are fetched fresh each reactLoop iteration
+    // via getCurrentTools(). No need to sync in-place.
   };
 
   const streamEvents: AgentLoopRunner["streamEvents"] = async function* (
@@ -245,184 +225,134 @@ export function createAgentLoopRunner(options: CreateAgentLoopRunnerOptions): Ag
     generateOptions = {}
   ) {
     const { imageUrls, ...genOpts } = generateOptions;
-    const model = createCompatibleModel(genOpts.model ?? options.defaultModel, options.baseURL);
+    const modelId = genOpts.model ?? options.defaultModel;
+
     if (imageUrls?.length) {
       const description = await preprocessVisionContent(
-        imageUrls, options.apiKey, options.baseURL, model.id,
+        imageUrls,
+        options.apiKey,
+        options.baseURL,
+        modelId
       );
       if (description) {
         messages = injectVisionDescription(messages, description);
       }
     }
 
-    const systemPrompt = extractSystemPrompt(messages);
-
-    const loopContext: AgentContext = {
-      systemPrompt,
-      messages: [],
-      tools: options.getCurrentTools(),
-    };
+    const openaiMessages = toOpenAIMessages(messages);
     const abortController = new AbortController();
-    activeAgentLoops.add(loopContext);
 
-    let currentMessageHasToolCall = false;
-    let currentMessageTextBuffer = "";
-    let globalMessageHasEmitted = false;
     try {
-      console.log("[loopRunner] calling agentLoop with messages:", messages.length);
-      const stream = agentLoop(
-        messages as AgentMessage[],
-        loopContext,
-        {
-          model,
-          apiKey: options.apiKey,
-          temperature: genOpts.temperature,
-          convertToLlm: async (agentMessages) => agentMessages.filter(isLlmMessage),
-        },
-        abortController.signal
+      console.log(
+        "[loopRunner] starting reactLoop, messages:",
+        openaiMessages.length
       );
-      console.log("[loopRunner] agentLoop returned stream");
 
-      for await (const event of stream) {
-        console.log("[loopRunner] event:", event.type, event);
-        if (event.type === "message_update") {
-          const assistantEvent = event.assistantMessageEvent;
-          if (assistantEvent.type === "text_delta" && assistantEvent.delta) {
-            currentMessageTextBuffer += assistantEvent.delta;
-            console.log("[loopRunner] text_delta:", assistantEvent.delta);
-            continue;
-          }
-          if (assistantEvent.type === "text_end" && assistantEvent.content) {
-            if (!currentMessageTextBuffer) {
-              currentMessageTextBuffer = assistantEvent.content;
-            }
-            continue;
-          }
-          if (
-            assistantEvent.type === "toolcall_start" ||
-            assistantEvent.type === "toolcall_delta" ||
-            assistantEvent.type === "toolcall_end"
-          ) {
-            currentMessageHasToolCall = true;
-          }
-          continue;
-        }
+      const loop = reactLoop({
+        client: openaiClient,
+        model: modelId,
+        messages: openaiMessages,
+        tools: options.getCurrentTools(),
+        signal: abortController.signal,
+        temperature: genOpts.temperature,
+      });
 
-        if (event.type === "message_end") {
-          console.log("[loopRunner] message_end, buffer:", currentMessageTextBuffer, "hasToolCall:", currentMessageHasToolCall);
-          const message = event.message as AgentEndMessage;
-          if (message.role !== "assistant") {
-            console.log("[loopRunner] message_end: role is not assistant:", message.role);
-            currentMessageHasToolCall = false;
-            currentMessageTextBuffer = "";
-            continue;
-          }
-          // 处理错误情况
-          if (message.stopReason === "error") {
-            const errorMsg = message.errorMessage || "Unknown error";
-            console.log("[loopRunner] message_end error:", errorMsg);
-            globalMessageHasEmitted = true;
+      let hasReply = false;
+
+      for await (const event of loop) {
+        switch (event.type) {
+          case "tool_execution_start":
             yield {
-              type: "message_update",
-              role: "assistant",
-              delta: `(模型调用失败: ${errorMsg})`,
+              type: "tool_execution_start",
+              toolName: event.toolName,
+              toolCallId: event.toolCallId,
             };
-            currentMessageHasToolCall = false;
-            currentMessageTextBuffer = "";
-            continue;
-          }
-          if (!currentMessageHasToolCall) {
-            let output = currentMessageTextBuffer;
-            if (!output && Array.isArray(message.content)) {
-              output = message.content
-                .filter((block) => block.type === "text" && typeof block.text === "string")
-                .map((block) => block.text as string)
-                .join("");
+            break;
+
+          case "tool_execution_end": {
+            let toolsChanged = false;
+            if (event.toolName === "evolute") {
+              const pendingTool = consumePendingEvolutedTool(event.toolCallId);
+              if (pendingTool) {
+                await options.registerDynamicTool(pendingTool);
+                toolsChanged = true;
+              } else {
+                console.warn(
+                  `[evolute] pending tool not found for toolCallId=${event.toolCallId}`
+                );
+              }
+            } else if (event.toolName === "apoptosis") {
+              const targetToolName = extractApoptosisTargetToolName(
+                event.result
+              );
+              if (targetToolName) {
+                await options.unregisterTool(targetToolName);
+                toolsChanged = true;
+              }
             }
-            console.log("[loopRunner] message_end output:", output);
-            if (output) {
-              globalMessageHasEmitted = true;
+            if (toolsChanged) {
+              // Tools changed but loop already has them via reference
+            }
+            yield {
+              type: "tool_execution_end",
+              toolName: event.toolName,
+              toolCallId: event.toolCallId,
+              result: event.result,
+            };
+            break;
+          }
+
+          case "message_update":
+            // Internal reasoning text from LLM — skip for now.
+            // Only the reply from logos_complete is delivered.
+            break;
+
+          case "logos_complete": {
+            const { reply, sleep, resume, plan } = event.params;
+            if (reply) {
+              hasReply = true;
               yield {
                 type: "message_update",
                 role: "assistant",
-                delta: output,
+                delta: reply,
               };
             }
+            const outcome = plan?.length
+              ? "plan"
+              : resume
+                ? "resume"
+                : sleep
+                  ? "sleep"
+                  : "finished";
+            yield {
+              type: "turn_outcome",
+              outcome,
+              params: event.params,
+            };
+            break;
           }
-          currentMessageHasToolCall = false;
-          currentMessageTextBuffer = "";
-          continue;
-        }
 
-        if (event.type === "tool_execution_end") {
-          let toolsChanged = false;
-          if (event.toolName === "evolute") {
-            const pendingTool = consumePendingEvolutedTool(event.toolCallId);
-            if (pendingTool) {
-              await options.registerDynamicTool(pendingTool);
-              toolsChanged = true;
-            } else {
-              console.warn(
-                `[evolute] pending tool not found for toolCallId=${String(event.toolCallId)}`
-              );
+          case "max_turns_reached":
+            if (!hasReply) {
+              yield {
+                type: "message_update",
+                role: "assistant",
+                delta: "(max turns reached without logos_complete)",
+              };
             }
-          } else if (event.toolName === "apoptosis") {
-            const targetToolName = extractApoptosisTargetToolName(event.result);
-            if (targetToolName) {
-              await options.unregisterTool(targetToolName);
-              toolsChanged = true;
-            }
-          }
-          if (toolsChanged) {
-            syncToolsInPlace(loopContext, options.getCurrentTools());
-          }
-          console.log("tool_execution_end", event.result);
-          yield {
-            type: "tool_execution_end",
-            toolName: event.toolName,
-            toolCallId: event.toolCallId,
-            result: event.result,
-          };
-          continue;
-        }
-
-        if (event.type === "tool_execution_start") {
-          console.log("tool_execution_start", event);
-          yield {
-            type: "tool_execution_start",
-            toolName: event.toolName,
-            toolCallId: event.toolCallId,
-          };
-          continue;
+            yield { type: "turn_outcome", outcome: "timeout" };
+            break;
         }
       }
 
-      if (!globalMessageHasEmitted) {
-        const newMessages = await stream.result();
-        const fallbackText = extractAssistantTextFromMessages(newMessages);
-        console.log(
-          `[loopRunner] fallback extraction: found=${Boolean(fallbackText)} length=${fallbackText.length}`
-        );
-        if (fallbackText) {
-          yield {
-            type: "message_update",
-            role: "assistant",
-            delta: fallbackText,
-          };
-        }
-      }
       yield { type: "completed" };
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      console.log("[loopRunner] caught error:", errorMsg);
-      yield {
-        type: "failed",
-        error: errorMsg,
-      };
+      const errorMsg =
+        error instanceof Error ? error.message : String(error);
+      console.error("[loopRunner] error:", errorMsg);
+      yield { type: "failed", error: errorMsg };
     } finally {
       abortController.abort();
-      activeAgentLoops.delete(loopContext);
-      loopContext.messages.splice(0, loopContext.messages.length);
     }
   };
 
@@ -447,4 +377,3 @@ export function createAgentLoopRunner(options: CreateAgentLoopRunnerOptions): Ag
     applyToolsToActiveLoops,
   };
 }
-

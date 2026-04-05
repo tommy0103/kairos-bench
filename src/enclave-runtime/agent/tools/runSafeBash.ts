@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { Type } from "@mariozechner/pi-ai";
+import type { AgentTool } from "../core/types";
+import { Type } from "@sinclair/typebox";
 import { getSafeToolsRoot } from "./pathSafety";
 
 const DEFAULT_TIMEOUT_MS = 15_000;

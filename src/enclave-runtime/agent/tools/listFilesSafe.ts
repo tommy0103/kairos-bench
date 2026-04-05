@@ -1,7 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { join, relative } from "node:path";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { Type } from "@mariozechner/pi-ai";
+import type { AgentTool } from "../core/types";
+import { Type } from "@sinclair/typebox";
 import { getSafeToolsRoot, resolveSafePath } from "./pathSafety";
 
 const DEFAULT_MAX_RESULTS = 200;

@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { Type } from "@mariozechner/pi-ai";
+import type { AgentTool } from "../core/types";
+import { Type } from "@sinclair/typebox";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 

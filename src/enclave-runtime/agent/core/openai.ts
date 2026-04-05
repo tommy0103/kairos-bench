@@ -1,4 +1,4 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "./types";
 import { loadDynamicToolsFromDirectory } from "../dynamicToolsLoader";
 import {
   createAgentLoopRunner,
@@ -7,6 +7,7 @@ import {
 } from "./loopRunner";
 import { createApoptosisTool } from "../tools/apoptosis";
 import { createEvoluteTool } from "../tools/evolute";
+import { createLogosCompleteTool } from "../tools/logosComplete";
 import { createToolsRegistry } from "./toolsRegistry";
 import { createToolsDocWriter } from "./toolsDocWriter";
 
@@ -19,7 +20,7 @@ export interface CreateOpenAIAgentOptions {
   apiKey?: string;
   model?: string;
   baseURL?: string;
-  tools?: AgentTool<any>[];
+  tools?: AgentTool[];
 }
 
 export interface GenerateTextOptions {
@@ -33,9 +34,9 @@ export interface OpenAIAgent {
     messages: LLMMessage[],
     options?: GenerateTextOptions
   ) => AsyncGenerator<string, void, unknown>;
-  registerTool: (tool: AgentTool<any>) => Promise<void>;
+  registerTool: (tool: AgentTool) => Promise<void>;
   unregisterTool: (name: string) => Promise<boolean>;
-  replaceTools: (tools: AgentTool<any>[]) => Promise<void>;
+  replaceTools: (tools: AgentTool[]) => Promise<void>;
   listTools: () => string[];
 }
 
@@ -49,7 +50,7 @@ export interface OpenAIEnclaveRuntime {
     options?: EnclaveStreamOptions
   ) => AsyncGenerator<AgentLoopStreamEvent, void, unknown>;
   listTools: () => string[];
-  replaceTools: (tools: AgentTool<any>[]) => Promise<void>;
+  replaceTools: (tools: AgentTool[]) => Promise<void>;
 }
 
 const DEFAULT_MODEL = "deepseek-chat";
@@ -90,7 +91,8 @@ export function createOpenAIAgent(
     await core.registerDynamicTool(tool);
   };
 
-  const unregisterToolApi: OpenAIAgent["unregisterTool"] = async (name) => core.unregisterTool(name);
+  const unregisterToolApi: OpenAIAgent["unregisterTool"] = async (name) =>
+    core.unregisterTool(name);
 
   const replaceTools: OpenAIAgent["replaceTools"] = async (tools) => {
     await core.replaceTools(tools);
@@ -116,9 +118,13 @@ export function createOpenAIEnclaveRuntime(
   return {
     streamEvents: async function* (messages, streamOptions = {}) {
       const { imageUrls, ...generateOptions } = streamOptions;
-      yield* core.loopRunner.streamEvents(messages, { ...generateOptions, imageUrls });
+      yield* core.loopRunner.streamEvents(messages, {
+        ...generateOptions,
+        imageUrls,
+      });
     },
-    listTools: () => core.toolsRegistry.getCurrentTools().map((tool) => tool.name),
+    listTools: () =>
+      core.toolsRegistry.getCurrentTools().map((tool) => tool.name),
     replaceTools: core.replaceTools,
   };
 }
@@ -126,9 +132,9 @@ export function createOpenAIEnclaveRuntime(
 interface AgentCore {
   loopRunner: AgentLoopRunner;
   toolsRegistry: ReturnType<typeof createToolsRegistry>;
-  registerDynamicTool: (tool: AgentTool<any>) => Promise<void>;
+  registerDynamicTool: (tool: AgentTool) => Promise<void>;
   unregisterTool: (name: string) => Promise<boolean>;
-  replaceTools: (tools: AgentTool<any>[]) => Promise<void>;
+  replaceTools: (tools: AgentTool[]) => Promise<void>;
 }
 
 function createAgentCore(options: CreateOpenAIAgentOptions): AgentCore {
@@ -143,16 +149,22 @@ function createAgentCore(options: CreateOpenAIAgentOptions): AgentCore {
   const toolsRegistry = createToolsRegistry(initialTools);
   const toolsDocWriter = createToolsDocWriter();
   let loopRunner: AgentLoopRunner;
-  const registerDynamicTool = async (tool: AgentTool<any>) => {
+
+  const registerDynamicTool = async (tool: AgentTool) => {
     toolsRegistry.registerDynamicTool(tool);
     loopRunner.applyToolsToActiveLoops();
     toolsDocWriter.sync(toolsRegistry.getCurrentTools());
   };
+
+  const logosCompleteTool = createLogosCompleteTool();
   const evoluteTool = createEvoluteTool();
   const apoptosisTool = createApoptosisTool();
+  toolsRegistry.registerStaticTool(logosCompleteTool);
   toolsRegistry.registerStaticTool(evoluteTool);
   toolsRegistry.registerStaticTool(apoptosisTool);
+
   const unregisterTool = async (name: string): Promise<boolean> => {
+    if (name === "logos_complete") return false;
     const deleted = toolsRegistry.unregisterTool(name);
     if (deleted) {
       loopRunner.applyToolsToActiveLoops();
@@ -160,6 +172,7 @@ function createAgentCore(options: CreateOpenAIAgentOptions): AgentCore {
     }
     return deleted;
   };
+
   loopRunner = createAgentLoopRunner({
     apiKey,
     baseURL,
@@ -169,6 +182,7 @@ function createAgentCore(options: CreateOpenAIAgentOptions): AgentCore {
     unregisterTool,
   });
   toolsDocWriter.sync(toolsRegistry.getCurrentTools());
+
   void (async () => {
     const evolutionsDir = getEvolutionsDirFromEnv();
     const loaded = await loadDynamicToolsFromDirectory(evolutionsDir);
@@ -183,15 +197,24 @@ function createAgentCore(options: CreateOpenAIAgentOptions): AgentCore {
       );
     }
     for (const item of loaded.errors) {
-      console.error(`[dynamic-tools] failed loading ${item.filePath}:`, item.error);
+      console.error(
+        `[dynamic-tools] failed loading ${item.filePath}:`,
+        item.error
+      );
     }
   })();
 
-  const replaceTools = async (tools: AgentTool<any>[]) => {
-    toolsRegistry.replaceStaticTools([...tools, evoluteTool, apoptosisTool]);
+  const replaceTools = async (tools: AgentTool[]) => {
+    toolsRegistry.replaceStaticTools([
+      ...tools,
+      logosCompleteTool,
+      evoluteTool,
+      apoptosisTool,
+    ]);
     loopRunner.applyToolsToActiveLoops();
     toolsDocWriter.sync(toolsRegistry.getCurrentTools());
   };
+
   return {
     loopRunner,
     toolsRegistry,

@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { Type } from "@mariozechner/pi-ai";
+import type { AgentTool } from "../core/types";
+import { Type } from "@sinclair/typebox";
 import { getSafeToolsRoot, resolveSafePath } from "./pathSafety";
 
 const MAX_CONTENT_CHARS = 200_000;

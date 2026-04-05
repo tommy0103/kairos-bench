@@ -1,5 +1,5 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { Type } from "@mariozechner/pi-ai";
+import type { AgentTool } from "../core/types";
+import { Type } from "@sinclair/typebox";
 
 interface FetchWebpageToolDetails {
   sourceUrl: string;

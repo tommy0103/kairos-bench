@@ -1,5 +1,5 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
-import { Type } from "@mariozechner/pi-ai";
+import type { AgentTool } from "../core/types";
+import { Type } from "@sinclair/typebox";
 import { Value } from "@sinclair/typebox/value";
 import { init as initEsmLexer, parse as parseEsm } from "es-module-lexer";
 import { $ } from "bun";
@@ -40,8 +40,6 @@ const IGNORED_PACKAGE_NAMES = new Set<string>([
   "bun",
   "node",
   "typescript",
-  "@mariozechner/pi-agent-core",
-  "@mariozechner/pi-ai",
   "@sinclair/typebox",
 ]);
 
@@ -168,7 +166,7 @@ function buildModuleSource(source: string): string {
 
   if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
     return `
-import { Type } from "@mariozechner/pi-ai";
+import { Type } from "@sinclair/typebox";
 const __tool = (
 ${source}
 );
@@ -351,7 +349,7 @@ export function createEvoluteTool(): AgentTool<any, EvoluteDetails> {
                 - DON't USE REQUIRE TO IMPORT ANYTHING.
               4. **Structure:** - Your code MUST export a factory function that returns the tool object.
                 - Keep the code self-contained in a single file.
-              5. DON'T IMPORT ANYTHING TWICE (e.g. import type { AgentTool } from "@mariozechner/pi-ai" and import  from "@mariozechner/pi-ai" is not allowed).
+              5. DON'T IMPORT ANYTHING TWICE.
     
               Typescript code for a tool. You can either provide:
               1) a module with imports + export default,
@@ -360,8 +358,7 @@ export function createEvoluteTool(): AgentTool<any, EvoluteDetails> {
               
               Here is an example:
               \`\`\`ts
-              import { Type } from "@mariozechner/pi-ai";
-              import type { AgentTool } from "@mariozechner/pi-agent-core";
+              import { Type } from "@sinclair/typebox";
     
               interface EvoluteDetails {
                 EvoluteToolName: string;
