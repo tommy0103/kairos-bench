@@ -76,15 +76,29 @@ class LogosAgent(BaseInstalledAgent):
     async def install(self, environment: BaseEnvironment) -> None:
         await self.exec_as_root(
             environment,
-            command="apt-get update -qq && apt-get install -y -qq curl unzip git ca-certificates",
+            command=(
+                "sed -i 's|http://archive.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true && "
+                "sed -i 's|http://security.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true && "
+                "for i in 1 2 3; do "
+                "  apt-get update -qq && "
+                "  apt-get install -y -qq --fix-missing curl unzip git ca-certificates && break; "
+                "  echo \"apt retry $i/3...\"; sleep 5; "
+                "done"
+            ),
         )
 
         await self.exec_as_agent(
             environment,
             command=(
                 'if ! command -v bun &>/dev/null; then '
-                "  curl -fsSL https://bun.sh/install | bash && "
-                "  source $HOME/.bun/env; "
+                '  BUN_INSTALL="$HOME/.bun" && mkdir -p "$BUN_INSTALL/bin" && '
+                '  ARCH=$(uname -m) && '
+                '  case "$ARCH" in x86_64) BUN_PKG="@oven/bun-linux-x64";; aarch64) BUN_PKG="@oven/bun-linux-aarch64";; esac && '
+                '  TARBALL_URL=$(curl -fsSL "https://registry.npmmirror.com/${BUN_PKG}/latest" | grep -o \'\"tarball\":\"[^\"]*\"\' | head -1 | cut -d\'"\' -f4) && '
+                '  curl -fsSL "$TARBALL_URL" | tar xz -C /tmp && '
+                '  cp /tmp/package/bin/bun "$BUN_INSTALL/bin/bun" && '
+                '  chmod +x "$BUN_INSTALL/bin/bun" && '
+                '  rm -rf /tmp/package; '
                 "fi"
             ),
         )
@@ -96,12 +110,14 @@ class LogosAgent(BaseInstalledAgent):
         await self.exec_as_agent(
             environment,
             command=(
-                f"source $HOME/.bun/env && "
+                f"export PATH=$HOME/.bun/bin:$PATH && "
                 f"if [ ! -d {KAIROS_DIR} ]; then "
                 f"  git clone --depth 1 {shlex.quote(kairos_repo)} {KAIROS_DIR}; "
                 f"fi && "
                 f"cd {KAIROS_DIR} && "
-                f"bun install --frozen-lockfile 2>/dev/null || bun install"
+                f"PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 "
+                f"bun install --frozen-lockfile 2>/dev/null || "
+                f"PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 bun install"
             ),
         )
 
@@ -116,7 +132,7 @@ class LogosAgent(BaseInstalledAgent):
         escaped = shlex.quote(instruction)
 
         cmd_parts = [
-            "source $HOME/.bun/env",
+            "export PATH=$HOME/.bun/bin:$PATH",
         ]
         if env_exports:
             cmd_parts.append(env_exports)

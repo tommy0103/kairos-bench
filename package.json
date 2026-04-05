@@ -23,9 +23,5 @@
     "grpc-tools": "^1.13.1",
     "ts-proto": "^2.11.4"
   },
-  "module": "src/index.js",
-  "dependencies": {
-    "@mariozechner/pi-agent-core": "^0.61.1",
-    "@mariozechner/pi-ai": "^0.61.1"
-  }
+  "module": "src/index.js"
 }
