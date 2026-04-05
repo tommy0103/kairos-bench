@@ -33,6 +33,37 @@ export function createLogosCompleteTool(): AgentTool {
             "Detailed execution log for long-term memory / debugging.",
         })
       ),
+      sleep: Type.Optional(
+        Type.Object(
+          {
+            reason: Type.Union([
+              Type.Literal("recoverable_error"),
+              Type.Literal("awaiting_user"),
+            ], { description: "Why the task is sleeping." }),
+            retry: Type.Boolean({
+              description: "Whether the adapter should auto-retry this task.",
+            }),
+          },
+          {
+            description:
+              "Put the task to sleep instead of finishing. " +
+              "Use recoverable_error for transient failures, awaiting_user when input is needed.",
+          }
+        )
+      ),
+      resume: Type.Optional(
+        Type.String({
+          description:
+            "Task ID to resume. Discards the current task and rebinds to the target.",
+        })
+      ),
+      plan: Type.Optional(
+        Type.Array(Type.String(), {
+          description:
+            "List of subtask descriptions. Triggers Phase 3 planning — " +
+            "the adapter will create subtasks for each entry.",
+        })
+      ),
     }),
     execute: async () => ({
       content: [{ type: "text", text: "Turn completed." }],

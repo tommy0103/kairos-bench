@@ -71,36 +71,19 @@ async function initSession(taskId: string): Promise<void> {
   console.log(`${DIM}[session] bound to task ${taskId}${RESET}`);
 }
 
-async function createTask(description: string): Promise<string> {
-  const taskId = `task-${randomUUID().slice(0, 8)}`;
-  // Write task to the kernel's task table
-  const taskRecord = JSON.stringify({
-    task_id: taskId,
-    description,
-    status: "active",
-    workspace: `logos://sandbox/${taskId}`,
-    created_at: new Date().toISOString(),
-  });
-  try {
-    // Read existing tasks, append, write back
-    let existing: { tasks: any[] } = { tasks: [] };
-    try {
-      const raw = await logosClient.read("logos://system/tasks");
-      existing = JSON.parse(raw);
-    } catch {
-      // Task table may not exist yet
-    }
-    existing.tasks.push(JSON.parse(taskRecord));
-    await logosClient.write(
-      "logos://system/tasks",
-      JSON.stringify(existing, null, 2)
-    );
-  } catch (err) {
-    console.warn(
-      `${YELLOW}[task] could not write to kernel task table: ${err instanceof Error ? err.message : err}${RESET}`
-    );
-  }
-  return taskId;
+function generateTaskId(): string {
+  return `task-${randomUUID().slice(0, 8)}`;
+}
+
+async function createTaskInKernel(taskId: string, description: string): Promise<void> {
+  await logosClient.write(
+    "logos://system/tasks",
+    JSON.stringify({
+      task_id: taskId,
+      description,
+      workspace: `logos://sandbox/${taskId}`,
+    })
+  );
 }
 
 // ── Tools ────────────────────────────────────────────────────
@@ -210,12 +193,13 @@ async function executeTurn(
 const conversationHistory: OpenAI.Chat.ChatCompletionMessageParam[] = [];
 
 async function handleUserInput(userText: string): Promise<void> {
-  const taskId = await createTask(userText);
+  const taskId = generateTaskId();
   console.log(
     `${DIM}[task] created ${taskId}: "${truncate(userText, 60)}"${RESET}`
   );
 
-  // Establish a kernel session for this task
+  logosClient.clearSession();
+  await createTaskInKernel(taskId, userText);
   await initSession(taskId);
 
   let outcome = await executeTurn(

@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 const CURRENT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PROTO_PATH = resolve(
   CURRENT_DIR,
-  "../../../../vfs/proto/logos.proto"
+  "../../../vfs/proto/logos.proto"
 );
 const SESSION_METADATA_KEY = "x-logos-session";
 
@@ -48,6 +48,7 @@ export interface LogosClient {
   handshake(token: string): Promise<void>;
   revokeToken(token: string): Promise<void>;
   hasSession(): boolean;
+  clearSession(): void;
   close(): void;
 }
 
@@ -231,6 +232,8 @@ export function createLogosClient(options: LogosClientOptions): LogosClient {
 
     async handshake(token) {
       const handshakeCall = new Promise<string>((resolve, reject) => {
+        let initialMeta: grpc.Metadata | undefined;
+
         const call = (grpcClient as any).Handshake(
           { token },
           emptyMeta(),
@@ -243,11 +246,7 @@ export function createLogosClient(options: LogosClientOptions): LogosClient {
               reject(new Error(`Handshake failed: ${res.error}`));
               return;
             }
-            const trailer = call.getResponseTrailers?.() as grpc.Metadata | undefined;
-            const meta = call.getMetadata?.() as grpc.Metadata | undefined;
-            const key =
-              trailer?.get(SESSION_METADATA_KEY)?.[0] ??
-              meta?.get(SESSION_METADATA_KEY)?.[0];
+            const key = initialMeta?.get(SESSION_METADATA_KEY)?.[0];
             if (typeof key === "string" && key) {
               resolve(key);
             } else {
@@ -259,6 +258,10 @@ export function createLogosClient(options: LogosClientOptions): LogosClient {
             }
           }
         );
+
+        call.on("metadata", (meta: grpc.Metadata) => {
+          initialMeta = meta;
+        });
       });
       sessionKey = await handshakeCall;
     },
@@ -274,6 +277,10 @@ export function createLogosClient(options: LogosClientOptions): LogosClient {
 
     hasSession() {
       return !!sessionKey;
+    },
+
+    clearSession() {
+      sessionKey = undefined;
     },
 
     close() {

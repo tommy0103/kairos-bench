@@ -143,6 +143,16 @@ async function main(): Promise<void> {
     tools = [...logosTools, createLogosCompleteTool()];
 
     const taskId = `bench-${randomUUID().slice(0, 8)}`;
+
+    await logosClient.write(
+      "logos://system/tasks",
+      JSON.stringify({
+        task_id: taskId,
+        description: taskDescription,
+        workspace: `logos://sandbox/${taskId}`,
+      })
+    );
+
     const token = `tok-${randomUUID()}`;
     await logosClient.registerToken(token, taskId, "agent", agentConfigId);
     await logosClient.handshake(token);

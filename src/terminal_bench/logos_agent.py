@@ -43,6 +43,17 @@ class LogosAgent(BaseInstalledAgent):
     def name() -> str:
         return "logos"
 
+    def populate_context_post_run(self, context: AgentContext) -> None:
+        metadata = dict(context.metadata or {})
+        metadata.update(
+            {
+                "agent": self.name(),
+                "model_name": self.model_name,
+                "runtime": "kairos-bench-runner",
+            }
+        )
+        context.metadata = metadata
+
     def _build_env_exports(self) -> str:
         """Build shell export statements for env vars to forward into the container."""
         pairs: dict[str, str] = {}
