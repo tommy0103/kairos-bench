@@ -20,7 +20,6 @@
     "bun-types": "latest",
     "concurrently": "^9.2.1",
     "grpc-tools": "^1.13.1",
-    "ts-proto": "^2.11.4"
   },
   "module": "src/index.js"
 }

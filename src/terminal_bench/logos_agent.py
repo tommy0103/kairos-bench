@@ -4,9 +4,8 @@ Logos agent for Terminal-Bench 2.0 (Harbor harness).
 Implements Harbor BaseInstalledAgent — installs Bun + kairos runtime into the
 task container, then runs bench-runner.ts with the task description.
 
-Two operating modes controlled by LOGOS_SOCKET env var:
-  - Standalone (default): bench-runner uses local bash exec, no kernel needed.
-  - Kernel mode: set LOGOS_SOCKET to a running logos-kernel Unix socket.
+Kernel mode: downloads pre-built logos-kernel from GitHub Release, starts it
+as a background daemon, and passes LOGOS_SOCKET to bench-runner.
 
 Usage (Harbor CLI):
     harbor run \
@@ -19,11 +18,6 @@ Usage (Harbor CLI):
         -d terminal-bench/terminal-bench-2 \
         --agent-import-path src.terminal_bench.logos_agent:LogosAgent \
         -n 4
-
-    # Legacy (tb CLI):
-    tb run --dataset terminal-bench-core==head \
-        --agent-import-path src.terminal_bench.logos_agent:LogosAgent \
-        --task-id hello-world
 """
 
 import os
@@ -35,6 +29,10 @@ from harbor.models.agent.context import AgentContext
 
 
 KAIROS_DIR = "/opt/kairos"
+LOGOS_BIN_DIR = "/opt/logos"
+LOGOS_RELEASE_URL = (
+    "https://github.com/tommy0103/kairos-bench/releases/download/logos-v0.1.0/logos-linux-x64.tar.gz"
+)
 
 
 class LogosAgent(BaseInstalledAgent):
@@ -74,6 +72,7 @@ class LogosAgent(BaseInstalledAgent):
         )
 
     async def install(self, environment: BaseEnvironment) -> None:
+        # 1. System deps (apt with aliyun mirror)
         await self.exec_as_root(
             environment,
             command=(
@@ -87,6 +86,7 @@ class LogosAgent(BaseInstalledAgent):
             ),
         )
 
+        # 2. Bun (from npmmirror)
         await self.exec_as_agent(
             environment,
             command=(
@@ -103,51 +103,34 @@ class LogosAgent(BaseInstalledAgent):
             ),
         )
 
+        # 3. Clone repo + install deps + download pre-built kernel
         kairos_repo = os.environ.get(
             "KAIROS_REPO_URL",
-            "https://github.com/user/kairos-runtime-test.git",
+            "https://github.com/tommy0103/kairos-bench.git",
         )
         await self.exec_as_agent(
             environment,
             command=(
                 f"export PATH=$HOME/.bun/bin:$PATH && "
+                # Clone repo
                 f"if [ ! -d {KAIROS_DIR} ]; then "
                 f"  git clone --depth 1 {shlex.quote(kairos_repo)} {KAIROS_DIR}; "
                 f"fi && "
                 f"cd {KAIROS_DIR} && "
-                # Init VFS submodule (try SSH then HTTPS)
-                f"(git submodule update --init --depth 1 src/vfs 2>/dev/null || "
-                f" (git submodule set-url src/vfs https://github.com/kairos-plan9/logos-fs.git 2>/dev/null && "
-                f"  git submodule update --init --depth 1 src/vfs 2>/dev/null) || true) && "
+                # npm deps (production only, skip playwright browsers)
                 f"PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 "
-                f"bun install --frozen-lockfile 2>/dev/null || "
-                f"PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 bun install"
-            ),
-        )
-
-        # Build Logos kernel if VFS submodule + Rust available
-        await self.exec_as_agent(
-            environment,
-            command=(
-                f"cd {KAIROS_DIR} && "
-                f"if [ -f src/vfs/Cargo.toml ]; then "
-                # Install Rust if needed (rsproxy mirror for China)
-                f"  if ! command -v cargo &>/dev/null; then "
-                f"    export RUSTUP_DIST_SERVER=https://rsproxy.cn && "
-                f"    export RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup && "
-                f"    curl --proto '=https' --tlsv1.2 -sSf https://rsproxy.cn/rustup-init.sh | sh -s -- -y --default-toolchain stable 2>&1 | tail -3 && "
-                f"    source $HOME/.cargo/env && "
-                f'    mkdir -p $HOME/.cargo && '
-                f'    printf \'[source.crates-io]\\nreplace-with = "rsproxy-sparse"\\n[source.rsproxy-sparse]\\nregistry = "sparse+https://rsproxy.cn/index/"\\n\' > $HOME/.cargo/config.toml; '
-                f"  fi && "
-                f"  source $HOME/.cargo/env 2>/dev/null; "
-                f"  echo '[logos-agent] building logos-kernel...' && "
-                f"  cargo build --manifest-path src/vfs/Cargo.toml --bin logos-kernel --release 2>&1 | tail -5 && "
-                f"  echo '[logos-agent] building logos-mcp...' && "
-                f"  cargo build --manifest-path src/vfs/Cargo.toml --bin logos-mcp --release 2>&1 | tail -5; "
-                f"else "
-                f"  echo '[logos-agent] vfs not available, skipping kernel build'; "
-                f"fi"
+                f"bun install --production --frozen-lockfile 2>/dev/null || "
+                f"PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 bun install --production && "
+                # Download pre-built logos-kernel + logos-mcp + logos.proto
+                f"mkdir -p {LOGOS_BIN_DIR} && "
+                f"if [ ! -x {LOGOS_BIN_DIR}/logos-kernel ]; then "
+                f"  echo '[logos-agent] downloading pre-built kernel...' && "
+                f"  curl -fsSL {shlex.quote(LOGOS_RELEASE_URL)} | tar xz -C {LOGOS_BIN_DIR} && "
+                f"  chmod +x {LOGOS_BIN_DIR}/logos-kernel {LOGOS_BIN_DIR}/logos-mcp; "
+                f"fi && "
+                # Place proto where logosClient.ts expects it
+                f"mkdir -p {KAIROS_DIR}/src/vfs/proto && "
+                f"cp {LOGOS_BIN_DIR}/logos.proto {KAIROS_DIR}/src/vfs/proto/logos.proto"
             ),
         )
 
@@ -161,30 +144,27 @@ class LogosAgent(BaseInstalledAgent):
         env_exports = self._build_env_exports()
         escaped = shlex.quote(instruction)
 
-        logos_sock = f"{KAIROS_DIR}/src/vfs/data/state/sandbox/logos.sock"
-        kernel_bin = f"{KAIROS_DIR}/src/vfs/target/release/logos-kernel"
+        logos_sock = f"{LOGOS_BIN_DIR}/logos.sock"
+        kernel_bin = f"{LOGOS_BIN_DIR}/logos-kernel"
 
         kernel_boot = (
-            f"KERNEL_BIN={shlex.quote(kernel_bin)} && "
-            f"LOGOS_SOCK={shlex.quote(logos_sock)} && "
-            f"if [ -x \"$KERNEL_BIN\" ] && [ ! -S \"$LOGOS_SOCK\" ]; then "
-            f"  rm -f \"$LOGOS_SOCK\" && "
-            f"  nohup \"$KERNEL_BIN\" > /tmp/logos-kernel.log 2>&1 & "
-            f"  for i in $(seq 1 30); do [ -S \"$LOGOS_SOCK\" ] && break; sleep 1; done; "
-            f"fi && "
-            f"if [ -S \"$LOGOS_SOCK\" ]; then "
-            f"  export LOGOS_SOCKET=\"$LOGOS_SOCK\"; "
+            f"if [ -x {shlex.quote(kernel_bin)} ] && [ ! -S {shlex.quote(logos_sock)} ]; then "
+            f"  rm -f {shlex.quote(logos_sock)} && "
+            f"  VFS_LISTEN=unix://{logos_sock} "
+            f"  VFS_STATE_DIR={LOGOS_BIN_DIR}/state "
+            f"  nohup {shlex.quote(kernel_bin)} > /tmp/logos-kernel.log 2>&1 & "
+            f"  for i in $(seq 1 30); do [ -S {shlex.quote(logos_sock)} ] && break; sleep 1; done; "
             f"fi"
         )
 
         cmd_parts = [
             "export PATH=$HOME/.bun/bin:$PATH",
-            "source $HOME/.cargo/env 2>/dev/null || true",
+            kernel_boot,
         ]
         if env_exports:
             cmd_parts.append(env_exports)
-        cmd_parts.append(kernel_boot)
         cmd_parts.append(
+            f"export LOGOS_SOCKET={shlex.quote(logos_sock)} && "
             f"cd {KAIROS_DIR} && "
             f"bun run src/enclave-runtime/bench-runner.ts {escaped}"
         )
