@@ -139,7 +139,7 @@ class LogosAgent(BaseInstalledAgent):
                 f"export PATH=$HOME/.bun/bin:$PATH && "
                 f"echo '[logos-agent] installing kairos dependencies...' && "
                 f"cd {KAIROS_DIR} && "
-                f"(PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 bun install)"
+                f"(PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 bun install) && "
                 f"echo '[logos-agent] dependency install complete'"
             ),
         )
