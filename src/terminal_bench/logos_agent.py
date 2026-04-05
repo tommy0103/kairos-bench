@@ -121,7 +121,7 @@ class LogosAgent(BaseInstalledAgent):
                 f"if [ ! -f {KAIROS_DIR}/package.json ]; then "
                 f"  rm -rf {KAIROS_DIR} && "
                 f"  for i in 1 2 3; do "
-                f"    git -c http.version=HTTP/1.1 clone --depth 1 {shlex.quote(kairos_repo)} {KAIROS_DIR} && break; "
+                f"    git clone --depth 1 {shlex.quote(kairos_repo)} {KAIROS_DIR} && break; "
                 f"    printf '[logos-agent] git clone retry %s/3...\\n' \"$i\" && "
                 f"    rm -rf {KAIROS_DIR} && "
                 f"    sleep 5; "

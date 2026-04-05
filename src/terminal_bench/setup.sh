@@ -6,9 +6,6 @@ set -euo pipefail
 
 KAIROS_DIR="${KAIROS_DIR:-/opt/kairos}"
 
-export HTTP_PROXY=http://127.0.0.1:7900
-export HTTPS_PROXY=http://127.0.0.1:7900
-
 echo "[logos-agent] configuring apt mirror..."
 sed -i 's|http://archive.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true
 sed -i 's|http://security.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true
@@ -56,7 +53,7 @@ if [ ! -f "$KAIROS_DIR/package.json" ]; then
     if [ -n "${KAIROS_REPO_URL:-}" ]; then
         rm -rf "$KAIROS_DIR"
         for i in 1 2 3; do
-            git -c http.version=HTTP/1.1 clone --depth 1 "$KAIROS_REPO_URL" "$KAIROS_DIR" && break
+            git clone --depth 1 "$KAIROS_REPO_URL" "$KAIROS_DIR" && break
             echo "[logos-agent] git clone retry $i/3..."
             rm -rf "$KAIROS_DIR"
             sleep 5
@@ -87,7 +84,6 @@ fi
 # ── Install npm dependencies ─────────────────────────────────
 echo "[logos-agent] installing npm dependencies..."
 (
-    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 bun install --frozen-lockfile 2>/dev/null || \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 bun install
 )
 echo "[logos-agent] dependency install complete"
