@@ -4,10 +4,36 @@
  * Each tool delegates to the LogosClient gRPC interface.
  * logos_complete is NOT here — it is intercepted by the reactLoop
  * and handled by the CompleteHandler.
+ *
+ * logos_exec writes full output to logos://sandbox/terminal/{call_id}.stdout
+ * and returns a truncated tail to the agent (RFC §5.1).
  */
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "../core/types";
 import type { LogosClient } from "./logosClient";
+
+const STDOUT_TAIL_LINES = 200;
+const STDERR_TAIL_LINES = 50;
+
+/**
+ * Keep the last `maxLines` lines of `text`.
+ * When truncation occurs, prepend an omission notice containing `hint`
+ * so the agent knows where to find the full output.
+ */
+export function tailLines(
+  text: string,
+  maxLines: number,
+  hint?: string,
+): string {
+  if (!text) return "";
+  const lines = text.split("\n");
+  if (lines.length <= maxLines) return text;
+  const n = lines.length - maxLines;
+  const prefix = hint
+    ? `[... ${n} lines omitted — ${hint} ...]\n`
+    : `[... ${n} lines omitted ...]\n`;
+  return prefix + lines.slice(-maxLines).join("\n");
+}
 
 export function createLogosReadTool(client: LogosClient): AgentTool {
   return {
@@ -78,9 +104,10 @@ export function createLogosExecTool(client: LogosClient): AgentTool {
     name: "logos_exec",
     label: "Execute",
     description:
-      "Execute a shell command in the sandbox. Logos URIs in the command " +
-      "are automatically translated to sandbox filesystem paths. " +
-      "Use this for all terminal operations.",
+      "Execute a shell command in the sandbox. Logos URIs are translated " +
+      "to real paths automatically. Output is truncated to the last ~200 " +
+      "lines; full output is saved to logos://sandbox/terminal/{call_id}.stdout " +
+      "(retrieve with logos_read).",
     parameters: Type.Object({
       command: Type.String({
         description:
@@ -88,16 +115,33 @@ export function createLogosExecTool(client: LogosClient): AgentTool {
           "are translated to container paths automatically.",
       }),
     }),
-    execute: async (_id, params) => {
+    execute: async (callId, params) => {
       const result = await client.exec(params.command);
+
+      const logBase = `logos://sandbox/terminal/${callId}`;
+      if (result.stdout) {
+        client.write(`${logBase}.stdout`, result.stdout).catch(() => {});
+      }
+      if (result.stderr) {
+        client.write(`${logBase}.stderr`, result.stderr).catch(() => {});
+      }
+
       const text = [
         `exit_code: ${result.exit_code}`,
         "",
         "stdout:",
-        result.stdout || "(empty)",
+        tailLines(
+          result.stdout,
+          STDOUT_TAIL_LINES,
+          `read ${logBase}.stdout for full output`,
+        ) || "(empty)",
         "",
         "stderr:",
-        result.stderr || "(empty)",
+        tailLines(
+          result.stderr,
+          STDERR_TAIL_LINES,
+          `read ${logBase}.stderr for full output`,
+        ) || "(empty)",
       ].join("\n");
       return {
         content: [{ type: "text", text }],

@@ -31,7 +31,7 @@ from harbor.models.agent.context import AgentContext
 KAIROS_DIR = "/opt/kairos"
 LOGOS_BIN_DIR = "/opt/logos"
 LOGOS_RELEASE_URL = (
-    "https://github.com/tommy0103/kairos-bench/releases/download/logos-v0.1.0/logos-linux-x64.tar.gz"
+    "https://github.com/tommy0103/kairos-bench/releases/download/v0.1.2/logos-linux-x64.tar.gz"
 )
 
 
@@ -66,6 +66,9 @@ class LogosAgent(BaseInstalledAgent):
             val = os.environ.get(key)
             if val:
                 pairs[key] = val
+
+        pairs["http_proxy"] = os.environ.get("http_proxy")
+        pairs["https_proxy"] = os.environ.get("https_proxy")
 
         return " && ".join(
             f"export {k}={shlex.quote(v)}" for k, v in pairs.items()
@@ -210,10 +213,16 @@ class LogosAgent(BaseInstalledAgent):
         ]
         if env_exports:
             cmd_parts.append(env_exports)
+
         cmd_parts.append(
+            "unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY"
+        )
+        cmd_parts.append(
+            "mkdir -p /logs/agent && "
+            "set -o pipefail && "
             f"export LOGOS_SOCKET={shlex.quote(logos_sock)} && "
             f"cd {KAIROS_DIR} && "
-            f"bun run src/enclave-runtime/bench-runner.ts {escaped}"
+            f"bun run src/enclave-runtime/bench-runner.ts {escaped} 2>&1 | tee /logs/agent/bench-runner.txt"
         )
 
         await self.exec_as_agent(

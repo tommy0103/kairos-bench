@@ -23,15 +23,12 @@
  *   MAX_TURNS      — Maximum ReAct loop turns (default: 100)
  */
 import OpenAI from "openai";
-import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { Type } from "@sinclair/typebox";
 import { reactLoop } from "./agent/core/reactLoop";
-import type { AgentTool, LogosCompleteParams } from "./agent/core/types";
-import { createLogosCompleteTool } from "./agent/tools/logosComplete";
-import { createLogosClient } from "./agent/runtime/logosClient";
-import { createAllLogosTools } from "./agent/runtime/logosTools";
-import { createCompleteHandler } from "./agent/runtime/completeHandler";
+import type { LogosCompleteParams } from "./agent/core/types";
+import {
+  createKernelSession,
+  createStandaloneSession,
+} from "./agent/runtime/benchRuntime";
 
 // ── Config ───────────────────────────────────────────────────
 const apiKey = process.env.API_KEY ?? process.env.OPENAI_API_KEY ?? "";
@@ -53,147 +50,83 @@ if (!apiKey) {
 
 const useKernel = !!logosSocket;
 
-// ── Standalone exec tool (no kernel) ─────────────────────────
-
-function createLocalExecTool(): AgentTool {
-  return {
-    name: "logos_exec",
-    label: "Execute",
-    description:
-      "Execute a shell command. Use this for all terminal operations.",
-    parameters: Type.Object({
-      command: Type.String({ description: "Shell command to execute." }),
-    }),
-    execute: async (_id, params, signal) => {
-      const text = await runLocal(params.command, 120_000, signal);
-      return { content: [{ type: "text", text }] };
-    },
-  };
-}
-
-function runLocal(
-  command: string,
-  timeoutMs: number,
-  signal?: AbortSignal
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = spawn("bash", ["-lc", command], {
-      cwd: process.env.HOME ?? "/",
-      env: process.env,
-    });
-    let stdout = "";
-    let stderr = "";
-    let done = false;
-    let timedOut = false;
-
-    const onAbort = () => { child.kill("SIGTERM"); reject(new Error("aborted")); };
-    signal?.addEventListener("abort", onAbort, { once: true });
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, timeoutMs);
-
-    child.stdout.on("data", (c) => (stdout += String(c)));
-    child.stderr.on("data", (c) => (stderr += String(c)));
-    child.on("error", (err) => {
-      if (done) return;
-      done = true; clearTimeout(timer); signal?.removeEventListener("abort", onAbort);
-      reject(err);
-    });
-    child.on("close", (code, sig) => {
-      if (done) return;
-      done = true; clearTimeout(timer); signal?.removeEventListener("abort", onAbort);
-      if (timedOut) { resolve(`[timed out]\nstdout:\n${stdout}\nstderr:\n${stderr}`); return; }
-      const lines = [`exit_code: ${code ?? "null"}`, `signal: ${sig ?? "null"}`];
-      if (stdout) lines.push(`\nstdout:\n${stdout}`);
-      if (stderr) lines.push(`\nstderr:\n${stderr}`);
-      resolve(lines.join("\n"));
-    });
-  });
-}
-
 // ── System prompt ────────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are an autonomous terminal agent. Your task:
+function buildSystemPrompt(kernelMode: boolean): string {
+  const toolDocs = kernelMode
+    ? `## Tools
+
+You have four Logos kernel primitives:
+
+1. **logos_exec(command)** — Execute a shell command in the sandbox.
+   Output is truncated to the last ~200 lines. Full output is saved to a
+   terminal log; the truncation notice includes the exact URI you can pass
+   to logos_read to retrieve it.
+
+2. **logos_read(uri)** — Read from any Logos URI.
+   Examples: \`logos://sandbox/...\`, \`logos://system/tasks\`, \`logos://proc/\`
+
+3. **logos_write(uri, content)** — Write to a Logos URI. Pure data, no side effects.
+
+4. **logos_complete(...)** — MANDATORY final call. You MUST call this to finish.`
+    : `## Tools
+
+- **logos_exec(command)** — Execute a shell command. Output is truncated to the last ~200 lines.
+- **logos_complete(...)** — MANDATORY: call this when the task is done or you need to stop.`;
+
+  return `You are an autonomous terminal agent solving a benchmark task inside a sandbox.
+
+## Task
 
 ${taskDescription}
 
-Available tools:
-- logos_exec(command) — Execute a shell command
-- logos_complete(...) — MANDATORY: call this when the task is done or you need to stop
+${toolDocs}
 
-Rules:
-- Your working directory is /app. All files should be created there unless specified otherwise.
-- Always \`cd /app\` before executing commands.
+## Rules
+
+- Your default working directory is /app. Always \`cd /app\` before executing commands unless the task explicitly requires another directory.
+- Always use the exact paths, filenames, formats, versions, ordering, and numeric thresholds required by the task.
 - You MUST call logos_complete to end the task.
 - Execute commands one at a time, observe output, then decide next steps.
-- If the task is complete, call logos_complete with a summary.
-- If you encounter an unrecoverable error, call logos_complete with sleep.
+- Treat the task description as a strict specification. A program merely running is not enough if any explicit requirement is unmet.
+- Before calling logos_complete(success), verify that all required outputs exist at the exact required paths and satisfy the task's explicit constraints.
+- If the task description, local files, or tests provide a sanity check, verifier, or example command, run it before finishing whenever feasible.
+- If a provided test or sanity check fails, the task is not complete.
+- Do not leave outputs in a nearby or convenient directory if the task specifies an exact path.
+- If the task asks for extracted sources, preserved assets, or generated files, make sure they remain at the required location after your work is done.
+- If your current result is partial, approximate, provisional, or unverified, do not claim success.
+- If you encounter an unrecoverable error or cannot complete the task in this run, call logos_complete with sleep and clearly explain the blocker.
 - Do NOT ask the user for input. Solve the task autonomously.
-- Be efficient — minimize unnecessary commands.`;
+- Be efficient — minimize unnecessary commands, but never skip validation of hard requirements.${kernelMode ? "\n- When logos_exec output is truncated, use logos_read to retrieve the full terminal log if you need to inspect earlier output." : ""}`;
+}
 
 // ── Main ─────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   console.log(`[bench-runner] task: ${taskDescription}`);
-  console.log(`[bench-runner] model: ${model} | kernel: ${useKernel ? logosSocket : "standalone"}`);
+  console.log(
+    `[bench-runner] model: ${model} | kernel: ${useKernel ? logosSocket : "standalone"}`,
+  );
 
-  let tools: AgentTool[];
-  let handleComplete: (taskId: string, params: LogosCompleteParams) => Promise<any>;
-  let cleanup: () => void = () => {};
-
-  if (useKernel) {
-    const logosClient = createLogosClient({ socketPath: logosSocket });
-    const logosTools = createAllLogosTools(logosClient);
-    tools = [...logosTools, createLogosCompleteTool()];
-
-    const taskId = `bench-${randomUUID().slice(0, 8)}`;
-
-    await logosClient.write(
-      "logos://system/tasks",
-      JSON.stringify({
-        task_id: taskId,
-        description: taskDescription,
-        workspace: `logos://sandbox/${taskId}`,
+  const session = useKernel
+    ? await createKernelSession({
+        socketPath: logosSocket,
+        taskDescription,
+        agentConfigId,
       })
-    );
-
-    const token = `tok-${randomUUID()}`;
-    await logosClient.registerToken(token, taskId, "agent", agentConfigId);
-    await logosClient.handshake(token);
-    console.log(`[bench-runner] kernel session: ${taskId}`);
-
-    const handler = createCompleteHandler({ logosClient });
-    handleComplete = (_, params) => handler.handle(taskId, params);
-    cleanup = () => logosClient.close();
-  } else {
-    tools = [createLocalExecTool(), createLogosCompleteTool()];
-    handleComplete = async (_, params) => {
-      if (params.sleep) {
-        return {
-          type: "sleep" as const,
-          taskId: "local",
-          reply: params.reply,
-          reason: params.sleep.reason,
-          retry: params.sleep.retry,
-        };
-      }
-      return {
-        type: "finished" as const,
-        taskId: "local",
-        reply: params.reply,
-      };
-    };
-  }
+    : createStandaloneSession();
 
   const openai = new OpenAI({ apiKey, baseURL });
+  const systemPrompt = buildSystemPrompt(session.useKernel);
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: systemPrompt },
     { role: "user", content: taskDescription },
   ];
 
   let totalTurns = 0;
   let success = false;
 
-  // Outer retry loop for sleep+retry
   for (let attempt = 0; attempt < 3; attempt++) {
     console.log(`[bench-runner] attempt ${attempt + 1}`);
 
@@ -201,7 +134,7 @@ async function main(): Promise<void> {
       client: openai,
       model,
       messages: [...messages],
-      tools,
+      tools: session.tools,
       maxTurns,
       temperature: 0.2,
     });
@@ -216,17 +149,20 @@ async function main(): Promise<void> {
           break;
         case "tool_execution_end":
           if (event.toolName !== "logos_complete") {
-            const text = typeof event.result === "object" && event.result !== null
-              ? (event.result as any)?.content?.[0]?.text ?? ""
-              : String(event.result ?? "");
-            const preview = text.length > 300 ? text.slice(0, 300) + "..." : text;
+            const text =
+              typeof event.result === "object" && event.result !== null
+                ? ((event.result as any)?.content?.[0]?.text ?? "")
+                : String(event.result ?? "");
+            const preview =
+              text.length > 300 ? text.slice(0, 300) + "..." : text;
             console.log(`[result] ${preview}`);
           }
           break;
         case "logos_complete":
           completeParams = event.params;
           console.log(`[logos_complete] summary: ${event.params.summary}`);
-          if (event.params.reply) console.log(`[reply] ${event.params.reply}`);
+          if (event.params.reply)
+            console.log(`[reply] ${event.params.reply}`);
           break;
         case "max_turns_reached":
           console.log(`[bench-runner] max turns (${maxTurns}) reached`);
@@ -235,7 +171,10 @@ async function main(): Promise<void> {
     }
 
     if (completeParams) {
-      const outcome = await handleComplete("bench", completeParams);
+      const outcome = await session.handleComplete(
+        session.taskId,
+        completeParams,
+      );
 
       if (outcome.type === "sleep") {
         if (outcome.retry) {
@@ -253,13 +192,12 @@ async function main(): Promise<void> {
 
       break;
     } else {
-      // logos_complete never called — treat as failure, retry
       console.log(`[bench-runner] logos_complete not called, retrying...`);
       continue;
     }
   }
 
-  cleanup();
+  session.cleanup();
   console.log(`[bench-runner] done. success=${success} turns=${totalTurns}`);
   process.exit(success ? 0 : 1);
 }
