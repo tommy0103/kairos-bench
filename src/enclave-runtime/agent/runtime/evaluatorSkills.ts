@@ -39,13 +39,15 @@ export const EVALUATOR_SKILLS: EvaluatorSkill[] = [
     ],
     recipe: `### Skill: Concurrency + Signal Cleanup
 
-**Purpose**: Verify that when \`n_tasks > max_concurrent\` and SIGINT is sent, only the tasks that actually started execute their cleanup/finally code.
+**Purpose**: Verify that when \`n_tasks > max_concurrent\` and SIGINT is sent externally, the started tasks' cleanup/finally output is actually visible in stdout (not lost to buffering).
+
+**Why this matters**: When a subprocess is connected via PIPE, Python uses **block-buffered** stdout. If the process exits abnormally after SIGINT (e.g. uncaught KeyboardInterrupt, exit code 130), unflushed stdout is lost. A correct implementation must ensure stdout is flushed during cleanup — either by handling the signal gracefully (clean exit) or by flushing explicitly.
 
 **Recipe** — copy this script, adapt the 4 constants at the top, and run it:
 
 \`\`\`python
 #!/usr/bin/env python3
-"""Skill test: SIGINT with queued tasks behind concurrency limit."""
+"""Skill test: SIGINT with queued tasks — verifies cleanup OUTPUT is visible."""
 import subprocess, signal, time, sys, os
 
 # ===== ADAPT THESE to match the solution =====
@@ -58,6 +60,9 @@ SOLUTION_FUNC = "run_tasks"     # async function that accepts (tasks, max_concur
 N_TASKS        = 5
 MAX_CONCURRENT = 2
 
+# IMPORTANT: Do NOT use flush=True in the inner script's print() calls.
+# Real callers won't use flush=True, and the whole point of this test is to
+# verify that cleanup output survives a SIGINT even with default buffering.
 INNER = f"""
 import asyncio, sys
 sys.path.insert(0, "{SOLUTION_DIR}")
@@ -66,10 +71,10 @@ from {SOLUTION_MOD} import {SOLUTION_FUNC}
 async def main():
     async def task(i):
         try:
-            print(f"start:{{i}}", flush=True)
+            print(f"start:{{i}}")
             await asyncio.sleep(30)
         finally:
-            print(f"cleanup:{{i}}", flush=True)
+            print(f"cleanup:{{i}}")
 
     tasks = [lambda i=i: task(i) for i in range({N_TASKS})]
     await {SOLUTION_FUNC}(tasks, {MAX_CONCURRENT})
@@ -103,11 +108,14 @@ cleanups = [l for l in lines if l.startswith("cleanup:")]
 print(f"Lines  : {lines}")
 print(f"Started: {len(starts)}  {starts}")
 print(f"Cleaned: {len(cleanups)}  {cleanups}")
+print(f"Exit code: {proc.returncode}")
 
 assert len(starts) == MAX_CONCURRENT, \\
     f"FAIL: expected {MAX_CONCURRENT} started, got {len(starts)}"
 assert len(cleanups) == len(starts), \\
-    f"FAIL: expected {len(starts)} cleanups (matching started), got {len(cleanups)}"
+    f"FAIL: expected {len(starts)} cleanups (matching started), got {len(cleanups)}. " \\
+    f"If 0 cleanups: cleanup code probably ran but stdout was not flushed before process exit. " \\
+    f"The implementation must ensure stdout is flushed during SIGINT cleanup (e.g. handle KeyboardInterrupt gracefully so the process exits cleanly, or call sys.stdout.flush() in finally blocks)."
 
 start_ids   = {s.split(':')[1] for s in starts}
 cleanup_ids = {c.split(':')[1] for c in cleanups}
@@ -122,7 +130,7 @@ os.remove(inner_path)
 1. Read the solution source to identify SOLUTION_DIR, SOLUTION_MOD, SOLUTION_FUNC.
 2. If the function signature differs (e.g. keyword argument \`max_concurrent\`), adjust the \`await\` call accordingly.
 3. Write the script to a temp file, run it with \`python3 /tmp/_skill_concurrency_sigint.py\`.
-4. If the assertion fails, report **FAIL** — this is a critical bug.`,
+4. If the assertion fails, report **FAIL** — this is a critical bug. Include the assertion message in your report — it contains diagnostic hints for the fixer.`,
   },
 ];
 
