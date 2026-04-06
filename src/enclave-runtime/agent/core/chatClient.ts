@@ -93,26 +93,40 @@ export function createOpenAIChatClient(openai: OpenAI): ChatClient {
         if (c.finish_reason) finishReason = c.finish_reason;
       }
 
-      if (!finishReason) {
+      const streamIncomplete = !finishReason;
+      if (streamIncomplete) {
         console.warn(
           `[chatClient] OpenAI stream ended without finish_reason — response may be truncated`,
         );
       }
 
-      const toolCalls = [...tcMap.entries()]
-        .sort(([a], [b]) => a - b)
-        .map(([, tc]) => {
-          if (!tc.args) {
-            console.warn(
-              `[chatClient] tool call "${tc.name}" has empty arguments — likely stream truncation`,
-            );
-          }
-          return {
-            id: tc.id,
-            type: "function" as const,
-            function: { name: tc.name, arguments: tc.args || "{}" },
-          };
+      const toolCalls: ToolCallEntry[] = [];
+      for (const [, tc] of [...tcMap.entries()].sort(([a], [b]) => a - b)) {
+        const isTruncated = !tc.args && streamIncomplete;
+        if (isTruncated) {
+          console.warn(
+            `[chatClient] dropping truncated tool call "${tc.name}" — stream ended before args were received`,
+          );
+          continue;
+        }
+        if (!tc.args) {
+          console.warn(
+            `[chatClient] tool call "${tc.name}" has empty arguments — likely stream truncation`,
+          );
+        }
+        toolCalls.push({
+          id: tc.id,
+          type: "function" as const,
+          function: { name: tc.name, arguments: tc.args || "{}" },
         });
+      }
+
+      const hadTruncatedTools =
+        tcMap.size > 0 && toolCalls.length === 0 && streamIncomplete;
+
+      const effectiveFinishReason = hadTruncatedTools
+        ? "length"
+        : finishReason ?? (streamIncomplete ? "length" : "stop");
 
       yield {
         type: "completion" as const,
@@ -121,7 +135,7 @@ export function createOpenAIChatClient(openai: OpenAI): ChatClient {
           model: respModel || params.model,
           content: content || null,
           toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-          finishReason: finishReason ?? "stop",
+          finishReason: effectiveFinishReason,
         }),
       };
     },
@@ -240,35 +254,53 @@ export async function createAnthropicChatClient(
 
       if (!messageComplete) {
         console.warn(
-          `[chatClient] Anthropic stream ended without message_stop — response may be truncated`,
+          `[chatClient] Anthropic stream ended without message_stop — response may be truncated` +
+            ` (outputTokens=${outputTokens}, maxTokens=${maxTokens}, stopReason=${stopReason})`,
         );
       }
 
-      const toolCalls = blocks
-        .filter((b) => b.type === "tool_use")
-        .map((b) => {
-          const rawArgs = b.inputJson ?? "";
-          if (b.type === "tool_use" && !rawArgs) {
-            console.warn(
-              `[chatClient] tool_use block "${b.name}" has empty inputJson — likely stream truncation`,
-            );
-          }
-          return {
-            id: b.id!,
-            type: "function" as const,
-            function: {
-              name: b.name!,
-              arguments: rawArgs || "{}",
-            },
-          };
-        });
+      const allToolBlocks = blocks.filter((b) => b.type === "tool_use");
+      const toolCalls: ToolCallEntry[] = [];
 
-      const finishReason =
-        stopReason === "tool_use"
+      for (const b of allToolBlocks) {
+        const rawArgs = b.inputJson ?? "";
+        // Detect truncated tool calls: empty args AND stream didn't complete normally
+        const isTruncated = !rawArgs && !messageComplete;
+        if (isTruncated) {
+          console.warn(
+            `[chatClient] dropping truncated tool_use "${b.name}" — stream ended before input was received`,
+          );
+          continue;
+        }
+        if (!rawArgs) {
+          console.warn(
+            `[chatClient] tool_use block "${b.name}" has empty inputJson — likely stream truncation`,
+          );
+        }
+        toolCalls.push({
+          id: b.id!,
+          type: "function" as const,
+          function: {
+            name: b.name!,
+            arguments: rawArgs || "{}",
+          },
+        });
+      }
+
+      // If tool calls were present but all got dropped due to truncation,
+      // treat as "length" so the reactLoop can prompt for a shorter retry.
+      const hadTruncatedTools =
+        allToolBlocks.length > 0 && toolCalls.length === 0 && !messageComplete;
+
+      const finishReason = hadTruncatedTools
+        ? "length"
+        : stopReason === "tool_use"
           ? "tool_calls"
           : stopReason === "max_tokens"
             ? "length"
-            : "stop";
+            : !messageComplete
+              ? "length"
+              : "stop";
 
       yield {
         type: "completion" as const,

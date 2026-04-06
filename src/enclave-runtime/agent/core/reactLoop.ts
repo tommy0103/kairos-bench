@@ -280,7 +280,18 @@ export async function* reactLoop(
       continue;
     }
 
-    if (choice.finish_reason === "stop") {
+    if (choice.finish_reason === "length") {
+      messages.push({
+        role: "user" as const,
+        content:
+          "WARNING: Your response was truncated because it exceeded the output token limit. " +
+          "Your tool call arguments were lost. " +
+          "Please retry with a SHORTER response — break large code into smaller pieces, " +
+          "write files in sections using multiple logos_exec calls with heredocs, " +
+          "or use logos_exec to echo code line-by-line. Do NOT try to write an entire " +
+          "large program in a single tool call.",
+      });
+    } else if (choice.finish_reason === "stop") {
       messages.push({
         role: "user" as const,
         content:

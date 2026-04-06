@@ -22,7 +22,7 @@
  *   LOGOS_SOCKET         — Path to logos-kernel Unix socket (optional; enables kernel mode)
  *   AGENT_CONFIG         — Agent config ID (default: bench-runner)
  *   MAX_TURNS            — Maximum ReAct loop turns (default: 500)
- *   ANTHROPIC_MAX_TOKENS — Max output tokens for Anthropic (default: 16384)
+ *   ANTHROPIC_MAX_TOKENS — Max output tokens for Anthropic (default: 65536)
  *   CONTEXT_LIMIT        — Override auto-detected context window size
  *   EVAL_RETRIES         — Evaluator fix attempts after main agent (default: 2, 0 to disable)
  */
@@ -181,7 +181,7 @@ async function main(): Promise<void> {
     chatClient = await createAnthropicChatClient({
       apiKey,
       baseURL: explicitBaseURL,
-      maxTokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS ?? "16384", 10),
+      maxTokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS ?? "65536", 10),
     });
   } else {
     const openai = new OpenAI({
