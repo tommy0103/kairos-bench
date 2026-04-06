@@ -132,32 +132,33 @@ export async function* reactLoop(
       }
     }
 
-    const response = await client.createChatCompletion({
+    let response: OpenAI.Chat.ChatCompletion | undefined;
+    for await (const se of client.streamChatCompletion({
       model,
       messages,
       tools: openaiTools.length > 0 ? openaiTools : undefined,
       temperature,
-    });
+    })) {
+      if (se.type === "text") {
+        yield { type: "message_update", role: "assistant", delta: se.text };
+      } else {
+        response = se.response;
+      }
+    }
 
+    if (!response) return;
     const choice = response.choices[0];
     if (!choice) return;
 
     const assistantMsg = choice.message;
     messages.push(assistantMsg);
 
-    if (assistantMsg.content) {
-      yield {
-        type: "message_update",
-        role: "assistant",
-        delta: assistantMsg.content,
-      };
-    }
-
     if (assistantMsg.tool_calls?.length) {
       let completed = false;
       let completeParams: LogosCompleteParams | undefined;
 
       for (const toolCall of assistantMsg.tool_calls) {
+        if (!("function" in toolCall)) continue;
         const toolName = toolCall.function.name;
         const toolCallId = toolCall.id;
 

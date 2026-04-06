@@ -5,20 +5,35 @@
  * adapter converts on the fly so the rest of the stack (reactLoop,
  * planExecutor, …) never needs to care which provider is in use.
  *
+ * Both streaming and non-streaming modes are supported. reactLoop uses
+ * streaming by default for better timeout resilience and incremental output.
+ *
  * Anthropic SDK is dynamically imported — it only needs to be installed
  * when `createAnthropicChatClient` is actually called.
  */
 import type OpenAI from "openai";
 
-// ── Public interface ──────────────────────────────────────────
+// ── Public types ──────────────────────────────────────────────
+
+export interface ChatCompletionParams {
+  model: string;
+  messages: OpenAI.Chat.ChatCompletionMessageParam[];
+  tools?: OpenAI.Chat.ChatCompletionTool[];
+  temperature?: number;
+}
+
+export type StreamEvent =
+  | { type: "text"; text: string }
+  | { type: "completion"; response: OpenAI.Chat.ChatCompletion };
 
 export interface ChatClient {
-  createChatCompletion(params: {
-    model: string;
-    messages: OpenAI.Chat.ChatCompletionMessageParam[];
-    tools?: OpenAI.Chat.ChatCompletionTool[];
-    temperature?: number;
-  }): Promise<OpenAI.Chat.ChatCompletion>;
+  createChatCompletion(
+    params: ChatCompletionParams,
+  ): Promise<OpenAI.Chat.ChatCompletion>;
+
+  streamChatCompletion(
+    params: ChatCompletionParams,
+  ): AsyncIterable<StreamEvent>;
 }
 
 // ── OpenAI implementation ─────────────────────────────────────
@@ -32,6 +47,71 @@ export function createOpenAIChatClient(openai: OpenAI): ChatClient {
         tools: params.tools?.length ? params.tools : undefined,
         temperature: params.temperature,
       }) as Promise<OpenAI.Chat.ChatCompletion>,
+
+    async *streamChatCompletion(params) {
+      const stream = await openai.chat.completions.create({
+        model: params.model,
+        messages: params.messages,
+        tools: params.tools?.length ? params.tools : undefined,
+        temperature: params.temperature,
+        stream: true,
+      });
+
+      let content = "";
+      const tcMap = new Map<
+        number,
+        { id: string; name: string; args: string }
+      >();
+      let finishReason = "stop";
+      let respId = "";
+      let respModel = "";
+
+      for await (const chunk of stream as any) {
+        const c = chunk.choices?.[0];
+        if (!c) continue;
+        if (chunk.id) respId = chunk.id;
+        if (chunk.model) respModel = chunk.model;
+
+        if (c.delta?.content) {
+          content += c.delta.content;
+          yield { type: "text" as const, text: c.delta.content };
+        }
+
+        if (c.delta?.tool_calls) {
+          for (const tc of c.delta.tool_calls) {
+            let entry = tcMap.get(tc.index);
+            if (!entry) {
+              entry = { id: "", name: "", args: "" };
+              tcMap.set(tc.index, entry);
+            }
+            if (tc.id) entry.id = tc.id;
+            if (tc.function?.name) entry.name += tc.function.name;
+            if (tc.function?.arguments) entry.args += tc.function.arguments;
+          }
+        }
+
+        if (c.finish_reason) finishReason = c.finish_reason;
+      }
+
+      const toolCalls = [...tcMap.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([, tc]) => ({
+          id: tc.id,
+          type: "function" as const,
+          function: { name: tc.name, arguments: tc.args },
+        }));
+
+      yield {
+        type: "completion" as const,
+        response: buildOpenAICompletion({
+          id: respId || `stream-${Date.now()}`,
+          model: respModel || params.model,
+          content: content || null,
+          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          finishReason,
+        }),
+      };
+    },
   };
 }
 
@@ -53,26 +133,168 @@ export async function createAnthropicChatClient(
   });
   const maxTokens = opts.maxTokens ?? 16384;
 
+  function buildRequest(params: ChatCompletionParams): Record<string, unknown> {
+    const { systemText, messages } = convertMessagesToAnthropic(
+      params.messages,
+    );
+    const tools = convertToolsToAnthropic(params.tools);
+    const req: Record<string, unknown> = {
+      model: params.model,
+      max_tokens: maxTokens,
+      messages,
+    };
+    if (systemText) req.system = systemText;
+    if (tools.length > 0) req.tools = tools;
+    if (params.temperature != null) req.temperature = params.temperature;
+    return req;
+  }
+
   return {
     async createChatCompletion(params) {
-      const { systemText, messages } = convertMessagesToAnthropic(
-        params.messages,
-      );
-      const tools = convertToolsToAnthropic(params.tools);
-
-      const request: Record<string, unknown> = {
-        model: params.model,
-        max_tokens: maxTokens,
-        messages,
-      };
-      if (systemText) request.system = systemText;
-      if (tools.length > 0) request.tools = tools;
-      if (params.temperature != null) request.temperature = params.temperature;
-
-      const response = await (client.messages.create as Function)(request);
+      const req = buildRequest(params);
+      const response = await (client.messages.create as Function)(req);
       return anthropicResponseToOpenAI(response);
     },
+
+    async *streamChatCompletion(params) {
+      const req = buildRequest(params);
+      req.stream = true;
+      const stream = await (client.messages.create as Function)(req);
+
+      let content = "";
+      const blocks: Array<{
+        type: string;
+        text?: string;
+        id?: string;
+        name?: string;
+        inputJson?: string;
+      }> = [];
+      let stopReason = "end_turn";
+      let msgId = "";
+      let msgModel = "";
+      let inputTokens = 0;
+      let outputTokens = 0;
+
+      for await (const event of stream) {
+        switch (event.type) {
+          case "message_start":
+            msgId = event.message?.id ?? "";
+            msgModel = event.message?.model ?? "";
+            inputTokens = event.message?.usage?.input_tokens ?? 0;
+            break;
+
+          case "content_block_start": {
+            const cb = event.content_block;
+            if (cb?.type === "text") {
+              blocks[event.index] = { type: "text", text: "" };
+            } else if (cb?.type === "tool_use") {
+              blocks[event.index] = {
+                type: "tool_use",
+                id: cb.id,
+                name: cb.name,
+                inputJson: "",
+              };
+            }
+            break;
+          }
+
+          case "content_block_delta": {
+            const blk = blocks[event.index];
+            if (!blk) break;
+            if (event.delta?.type === "text_delta") {
+              const text = event.delta.text ?? "";
+              blk.text = (blk.text ?? "") + text;
+              content += text;
+              if (text) yield { type: "text" as const, text };
+            } else if (event.delta?.type === "input_json_delta") {
+              blk.inputJson =
+                (blk.inputJson ?? "") + (event.delta.partial_json ?? "");
+            }
+            break;
+          }
+
+          case "message_delta":
+            stopReason = event.delta?.stop_reason ?? stopReason;
+            outputTokens = event.usage?.output_tokens ?? outputTokens;
+            break;
+        }
+      }
+
+      const toolCalls = blocks
+        .filter((b) => b.type === "tool_use")
+        .map((b) => ({
+          id: b.id!,
+          type: "function" as const,
+          function: {
+            name: b.name!,
+            arguments: b.inputJson || "{}",
+          },
+        }));
+
+      const finishReason =
+        stopReason === "tool_use"
+          ? "tool_calls"
+          : stopReason === "max_tokens"
+            ? "length"
+            : "stop";
+
+      yield {
+        type: "completion" as const,
+        response: buildOpenAICompletion({
+          id: msgId || `ant-${Date.now()}`,
+          model: msgModel || params.model,
+          content: content || null,
+          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          finishReason,
+          promptTokens: inputTokens,
+          completionTokens: outputTokens,
+        }),
+      };
+    },
   };
+}
+
+// ── Shared helpers ────────────────────────────────────────────
+
+type ToolCallEntry = {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+};
+
+function buildOpenAICompletion(opts: {
+  id: string;
+  model: string;
+  content: string | null;
+  toolCalls?: ToolCallEntry[];
+  finishReason: string;
+  promptTokens?: number;
+  completionTokens?: number;
+}): OpenAI.Chat.ChatCompletion {
+  return {
+    id: opts.id,
+    object: "chat.completion",
+    created: Math.floor(Date.now() / 1000),
+    model: opts.model,
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant" as const,
+          content: opts.content,
+          ...(opts.toolCalls ? { tool_calls: opts.toolCalls } : {}),
+          refusal: null,
+        },
+        finish_reason: opts.finishReason,
+        logprobs: null,
+      },
+    ],
+    usage: {
+      prompt_tokens: opts.promptTokens ?? 0,
+      completion_tokens: opts.completionTokens ?? 0,
+      total_tokens: (opts.promptTokens ?? 0) + (opts.completionTokens ?? 0),
+    },
+  } as unknown as OpenAI.Chat.ChatCompletion;
 }
 
 // ── Message conversion (OpenAI → Anthropic) ───────────────────
@@ -179,15 +401,11 @@ function convertToolsToAnthropic(
   }));
 }
 
-// ── Response conversion (Anthropic → OpenAI) ──────────────────
+// ── Response conversion (Anthropic → OpenAI, non-streaming) ───
 
 function anthropicResponseToOpenAI(response: any): OpenAI.Chat.ChatCompletion {
   let textContent: string | null = null;
-  const toolCalls: Array<{
-    id: string;
-    type: "function";
-    function: { name: string; arguments: string };
-  }> = [];
+  const toolCalls: ToolCallEntry[] = [];
 
   for (const block of response.content ?? []) {
     if (block.type === "text") {
@@ -202,7 +420,6 @@ function anthropicResponseToOpenAI(response: any): OpenAI.Chat.ChatCompletion {
         },
       });
     }
-    // skip thinking / other block types
   }
 
   const stopReason: string = response.stop_reason ?? "end_turn";
@@ -213,30 +430,13 @@ function anthropicResponseToOpenAI(response: any): OpenAI.Chat.ChatCompletion {
         ? "length"
         : "stop";
 
-  return {
+  return buildOpenAICompletion({
     id: response.id ?? `ant-${Date.now()}`,
-    object: "chat.completion",
-    created: Math.floor(Date.now() / 1000),
     model: response.model ?? "",
-    choices: [
-      {
-        index: 0,
-        message: {
-          role: "assistant" as const,
-          content: textContent,
-          ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
-          refusal: null,
-        },
-        finish_reason: finishReason,
-        logprobs: null,
-      },
-    ],
-    usage: {
-      prompt_tokens: response.usage?.input_tokens ?? 0,
-      completion_tokens: response.usage?.output_tokens ?? 0,
-      total_tokens:
-        (response.usage?.input_tokens ?? 0) +
-        (response.usage?.output_tokens ?? 0),
-    },
-  } as unknown as OpenAI.Chat.ChatCompletion;
+    content: textContent,
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    finishReason,
+    promptTokens: response.usage?.input_tokens,
+    completionTokens: response.usage?.output_tokens,
+  });
 }
