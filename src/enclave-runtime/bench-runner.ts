@@ -29,6 +29,7 @@ import {
   createKernelSession,
   createStandaloneSession,
 } from "./agent/runtime/benchRuntime";
+import { executePlan } from "./agent/runtime/planExecutor";
 
 // ── Config ───────────────────────────────────────────────────
 const apiKey = process.env.API_KEY ?? process.env.OPENAI_API_KEY ?? "";
@@ -56,7 +57,7 @@ function buildSystemPrompt(kernelMode: boolean): string {
   const toolDocs = kernelMode
     ? `## Tools
 
-You have four Logos kernel primitives:
+You have Logos kernel primitives:
 
 1. **logos_exec(command)** — Execute a shell command in the sandbox.
    Output is truncated to the last ~200 lines. Full output is saved to a
@@ -68,11 +69,16 @@ You have four Logos kernel primitives:
 
 3. **logos_write(uri, content)** — Write to a Logos URI. Pure data, no side effects.
 
-4. **logos_complete(...)** — MANDATORY final call. You MUST call this to finish.`
+4. **logos_complete(...)** — MANDATORY final call. You MUST call this to finish.
+   - Normal: call with \`summary\` describing what you did.
+   - Plan mode: for complex multi-step tasks, call with \`plan: ["step 1", "step 2", ...]\`.
+     Each step will be executed by a fresh agent, and the plan is reviewed after every step.
+   - Blocked: call with \`sleep: { reason, retry }\` to pause.`
     : `## Tools
 
 - **logos_exec(command)** — Execute a shell command. Output is truncated to the last ~200 lines.
-- **logos_complete(...)** — MANDATORY: call this when the task is done or you need to stop.`;
+- **logos_complete(...)** — MANDATORY: call this when the task is done or you need to stop.
+  You may also call it with \`plan: ["step 1", "step 2", ...]\` to decompose a complex task.`;
 
   return `You are an autonomous terminal agent solving a benchmark task inside a sandbox.
 
@@ -187,6 +193,24 @@ async function main(): Promise<void> {
 
       if (outcome.type === "finished") {
         success = true;
+        break;
+      }
+
+      if (outcome.type === "plan") {
+        console.log(
+          `[bench-runner] entering plan mode ` +
+            `(${outcome.subtasks.length} subtasks)`,
+        );
+        success = await executePlan({
+          tools: session.tools,
+          openai,
+          model,
+          originalTask: taskDescription,
+          subtasks: outcome.subtasks,
+          maxTurnsPerAgent: maxTurns,
+          temperature: 0.2,
+          kernelMode: session.useKernel,
+        });
         break;
       }
 
