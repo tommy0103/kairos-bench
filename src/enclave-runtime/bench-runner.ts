@@ -24,6 +24,7 @@
  *   MAX_TURNS            — Maximum ReAct loop turns (default: 100)
  *   ANTHROPIC_MAX_TOKENS — Max output tokens for Anthropic (default: 16384)
  *   CONTEXT_LIMIT        — Override auto-detected context window size
+ *   EVAL_RETRIES         — Evaluator fix attempts after main agent (default: 2, 0 to disable)
  */
 import OpenAI from "openai";
 import { reactLoop } from "./agent/core/reactLoop";
@@ -38,6 +39,7 @@ import {
   createStandaloneSession,
 } from "./agent/runtime/benchRuntime";
 import { executePlan } from "./agent/runtime/planExecutor";
+import { evaluateAndRetry } from "./agent/runtime/evaluator";
 
 // ── Config ───────────────────────────────────────────────────
 const apiKey = process.env.API_KEY ?? process.env.OPENAI_API_KEY ?? "";
@@ -45,6 +47,7 @@ const model = process.env.MODEL ?? "deepseek-chat";
 const logosSocket = process.env.LOGOS_SOCKET ?? "";
 const agentConfigId = process.env.AGENT_CONFIG ?? "bench-runner";
 const maxTurns = parseInt(process.env.MAX_TURNS ?? "100", 10);
+const evalRetries = parseInt(process.env.EVAL_RETRIES ?? "3", 10);
 
 type Provider = "openai" | "anthropic";
 function detectProvider(m: string): Provider {
@@ -303,6 +306,23 @@ async function main(): Promise<void> {
       console.log(`[bench-runner] logos_complete not called, retrying...`);
       continue;
     }
+  }
+
+  if (success && evalRetries > 0) {
+    console.log(
+      `[bench-runner] running evaluator (up to ${evalRetries} fix attempts)`,
+    );
+    success = await evaluateAndRetry({
+      client: chatClient,
+      model,
+      tools: session.tools,
+      originalTask: taskDescription,
+      maxRetries: evalRetries,
+      maxTurnsPerAgent: maxTurns,
+      temperature: 0.2,
+      contextLimit,
+      kernelMode: session.useKernel,
+    });
   }
 
   session.cleanup();
