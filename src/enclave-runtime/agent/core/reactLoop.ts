@@ -1,4 +1,5 @@
-import OpenAI from "openai";
+import type OpenAI from "openai";
+import type { ChatClient } from "./chatClient";
 import type { AgentTool, LogosCompleteParams } from "./types";
 
 const LOGOS_COMPLETE = "logos_complete";
@@ -19,7 +20,7 @@ export type ReactLoopEvent =
   | { type: "max_turns_reached" };
 
 export interface ReactLoopOptions {
-  client: OpenAI;
+  client: ChatClient;
   model: string;
   messages: OpenAI.Chat.ChatCompletionMessageParam[];
   tools: AgentTool[];
@@ -131,7 +132,7 @@ export async function* reactLoop(
       }
     }
 
-    const response = await client.chat.completions.create({
+    const response = await client.createChatCompletion({
       model,
       messages,
       tools: openaiTools.length > 0 ? openaiTools : undefined,

@@ -12,7 +12,8 @@
  *   - Replanning is natural — the planner simply emits an updated plan.
  *   - Nested planning is supported (executor can emit plan too).
  */
-import OpenAI from "openai";
+import type OpenAI from "openai";
+import type { ChatClient } from "../core/chatClient";
 import { reactLoop } from "../core/reactLoop";
 import type { AgentTool, LogosCompleteParams } from "../core/types";
 
@@ -30,7 +31,7 @@ interface CompletedSubtask {
 
 export interface PlanExecutorOptions {
   tools: AgentTool[];
-  openai: OpenAI;
+  client: ChatClient;
   model: string;
   originalTask: string;
   subtasks: string[];
@@ -48,7 +49,7 @@ export async function executePlan(
 ): Promise<boolean> {
   const {
     tools,
-    openai,
+    client,
     model,
     originalTask,
     maxTurnsPerAgent,
@@ -79,7 +80,7 @@ export async function executePlan(
 
     // ── Run executor ────────────────────────────────────────
     const execResult = await runSubAgent({
-      openai,
+      client,
       model,
       tools,
       systemPrompt: buildExecutorPrompt(originalTask, subtask, kernelMode),
@@ -150,7 +151,7 @@ export async function executePlan(
         `(${completed.length} done, ${remaining.length} remaining)`,
     );
     const planResult = await runSubAgent({
-      openai,
+      client,
       model,
       tools,
       systemPrompt: buildPlannerPrompt(
@@ -223,7 +224,7 @@ interface SubAgentResult {
 }
 
 async function runSubAgent(opts: {
-  openai: OpenAI;
+  client: ChatClient;
   model: string;
   tools: AgentTool[];
   systemPrompt: string;
@@ -233,7 +234,7 @@ async function runSubAgent(opts: {
   contextLimit?: number;
 }): Promise<SubAgentResult> {
   const {
-    openai,
+    client,
     model,
     tools,
     systemPrompt,
@@ -249,7 +250,7 @@ async function runSubAgent(opts: {
   ];
 
   const loop = reactLoop({
-    client: openai,
+    client,
     model,
     messages,
     tools,

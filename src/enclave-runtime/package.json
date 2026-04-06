@@ -6,9 +6,10 @@
     "dev": "bun run ./main.ts"
   },
   "dependencies": {
-    "@kairos-runtime/app-config": "workspace:*",
+    "@anthropic-ai/sdk": "^0.82.0",
     "@grpc/grpc-js": "^1.14.3",
     "@grpc/proto-loader": "^0.8.0",
+    "@kairos-runtime/app-config": "workspace:*",
     "@sinclair/typebox": "^0.34.48",
     "asciichart": "^1.5.25",
     "elysia": "latest",

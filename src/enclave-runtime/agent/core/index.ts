@@ -1,4 +1,5 @@
 export * from "./types";
+export * from "./chatClient";
 export * from "./reactLoop";
 export * from "./openai";
 export * from "./loopRunner";

@@ -15,15 +15,23 @@
  *   API_KEY=sk-xxx LOGOS_SOCKET=/tmp/logos.sock bun run bench-runner.ts "..."
  *
  * Env vars:
- *   API_KEY        — LLM API key (required)
- *   BASE_URL       — API endpoint (default: https://api.deepseek.com/v1)
- *   MODEL          — Model name (default: deepseek-chat)
- *   LOGOS_SOCKET   — Path to logos-kernel Unix socket (optional; enables kernel mode)
- *   AGENT_CONFIG   — Agent config ID (default: bench-runner)
- *   MAX_TURNS      — Maximum ReAct loop turns (default: 100)
+ *   API_KEY              — LLM API key (required)
+ *   API_PROVIDER         — "openai" | "anthropic" (auto-detected from MODEL)
+ *   BASE_URL             — API endpoint (OpenAI default: https://api.deepseek.com/v1)
+ *   MODEL                — Model name (default: deepseek-chat)
+ *   LOGOS_SOCKET         — Path to logos-kernel Unix socket (optional; enables kernel mode)
+ *   AGENT_CONFIG         — Agent config ID (default: bench-runner)
+ *   MAX_TURNS            — Maximum ReAct loop turns (default: 100)
+ *   ANTHROPIC_MAX_TOKENS — Max output tokens for Anthropic (default: 16384)
+ *   CONTEXT_LIMIT        — Override auto-detected context window size
  */
 import OpenAI from "openai";
 import { reactLoop } from "./agent/core/reactLoop";
+import type { ChatClient } from "./agent/core/chatClient";
+import {
+  createOpenAIChatClient,
+  createAnthropicChatClient,
+} from "./agent/core/chatClient";
 import type { LogosCompleteParams } from "./agent/core/types";
 import {
   createKernelSession,
@@ -33,11 +41,22 @@ import { executePlan } from "./agent/runtime/planExecutor";
 
 // ── Config ───────────────────────────────────────────────────
 const apiKey = process.env.API_KEY ?? process.env.OPENAI_API_KEY ?? "";
-const baseURL = process.env.BASE_URL ?? "https://api.deepseek.com/v1";
 const model = process.env.MODEL ?? "deepseek-chat";
 const logosSocket = process.env.LOGOS_SOCKET ?? "";
 const agentConfigId = process.env.AGENT_CONFIG ?? "bench-runner";
 const maxTurns = parseInt(process.env.MAX_TURNS ?? "100", 10);
+
+type Provider = "openai" | "anthropic";
+function detectProvider(m: string): Provider {
+  return m.toLowerCase().startsWith("claude") ? "anthropic" : "openai";
+}
+const provider: Provider =
+  (process.env.API_PROVIDER as Provider) || detectProvider(model);
+const explicitBaseURL = process.env.BASE_URL;
+const defaultBaseURL =
+  provider === "anthropic"
+    ? undefined // Anthropic SDK uses its own default
+    : "https://api.deepseek.com/v1";
 
 const taskDescription = process.argv[2];
 if (!taskDescription) {
@@ -56,7 +75,10 @@ function guessContextLimit(m: string): number {
   if (s.includes("deepseek")) return 64_000;
   if (s.includes("gpt-4o") || s.includes("gpt-4-turbo")) return 128_000;
   if (s.includes("gpt-4")) return 128_000;
-  if (s.includes("claude")) return 200_000;
+  if (s.includes("claude")) {
+    if (s.includes("1m")) return 1_000_000;
+    return 200_000;
+  }
   return 64_000;
 }
 const contextLimit =
@@ -128,7 +150,7 @@ ${toolDocs}
 async function main(): Promise<void> {
   console.log(`[bench-runner] task: ${taskDescription}`);
   console.log(
-    `[bench-runner] model: ${model} | kernel: ${useKernel ? logosSocket : "standalone"}`,
+    `[bench-runner] model: ${model} | provider: ${provider} | kernel: ${useKernel ? logosSocket : "standalone"}`,
   );
 
   const session = useKernel
@@ -139,7 +161,21 @@ async function main(): Promise<void> {
       })
     : createStandaloneSession();
 
-  const openai = new OpenAI({ apiKey, baseURL });
+  let chatClient: ChatClient;
+  if (provider === "anthropic") {
+    chatClient = await createAnthropicChatClient({
+      apiKey,
+      baseURL: explicitBaseURL,
+      maxTokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS ?? "16384", 10),
+    });
+  } else {
+    const openai = new OpenAI({
+      apiKey,
+      baseURL: explicitBaseURL ?? defaultBaseURL,
+    });
+    chatClient = createOpenAIChatClient(openai);
+  }
+
   const systemPrompt = buildSystemPrompt(session.useKernel);
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -154,7 +190,7 @@ async function main(): Promise<void> {
     console.log(`[bench-runner] attempt ${attempt + 1}`);
 
     const loop = reactLoop({
-      client: openai,
+      client: chatClient,
       model,
       messages: [...messages],
       tools: session.tools,
@@ -246,7 +282,7 @@ async function main(): Promise<void> {
 
         success = await executePlan({
           tools: session.tools,
-          openai,
+          client: chatClient,
           model,
           originalTask: taskDescription,
           subtasks: outcome.subtasks,
