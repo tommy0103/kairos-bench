@@ -51,6 +51,17 @@ if (!apiKey) {
 
 const useKernel = !!logosSocket;
 
+function guessContextLimit(m: string): number {
+  const s = m.toLowerCase();
+  if (s.includes("deepseek")) return 64_000;
+  if (s.includes("gpt-4o") || s.includes("gpt-4-turbo")) return 128_000;
+  if (s.includes("gpt-4")) return 128_000;
+  if (s.includes("claude")) return 200_000;
+  return 64_000;
+}
+const contextLimit =
+  parseInt(process.env.CONTEXT_LIMIT ?? "0", 10) || guessContextLimit(model);
+
 // ── System prompt ────────────────────────────────────────────
 
 function buildSystemPrompt(kernelMode: boolean): string {
@@ -73,12 +84,16 @@ You have Logos kernel primitives:
    - Normal: call with \`summary\` describing what you did.
    - Plan mode: for complex multi-step tasks, call with \`plan: ["step 1", "step 2", ...]\`.
      Each step will be executed by a fresh agent, and the plan is reviewed after every step.
-   - Blocked: call with \`sleep: { reason, retry }\` to pause.`
+     When using plan, you MUST include \`task_log\` with your reasoning for the decomposition.
+   - Blocked: call with \`sleep: { reason, retry }\` to pause.
+   - \`task_log\`: detailed execution record (what you did, key outputs, errors). Required when using \`plan\`.
+     Previous steps' logs are at \`logos://sandbox/plan/step-N.log\` (read with logos_read).`
     : `## Tools
 
 - **logos_exec(command)** — Execute a shell command. Output is truncated to the last ~200 lines.
 - **logos_complete(...)** — MANDATORY: call this when the task is done or you need to stop.
-  You may also call it with \`plan: ["step 1", "step 2", ...]\` to decompose a complex task.`;
+  You may also call it with \`plan: ["step 1", "step 2", ...]\` to decompose a complex task.
+  When using plan, include \`task_log\` describing your reasoning for the decomposition.`;
 
   return `You are an autonomous terminal agent solving a benchmark task inside a sandbox.
 
@@ -103,7 +118,9 @@ ${toolDocs}
 - If your current result is partial, approximate, provisional, or unverified, do not claim success.
 - If you encounter an unrecoverable error or cannot complete the task in this run, call logos_complete with sleep and clearly explain the blocker.
 - Do NOT ask the user for input. Solve the task autonomously.
-- Be efficient — minimize unnecessary commands, but never skip validation of hard requirements.${kernelMode ? "\n- When logos_exec output is truncated, use logos_read to retrieve the full terminal log if you need to inspect earlier output." : ""}`;
+- Be efficient — minimize unnecessary commands, but never skip validation of hard requirements.${kernelMode ? "\n- When logos_exec output is truncated, use logos_read to retrieve the full terminal log if you need to inspect earlier output." : ""}
+- **Context continuity**: before starting work, check \`logos_read("logos://sandbox/plan/initial.log")\`. If it exists, a previous agent already made partial progress — review its log so you do not duplicate work.
+- **Context pressure**: if the system warns that your context window is nearly full, immediately enter plan mode by calling logos_complete with \`task_log\` (detailed record of everything done so far) and \`plan\` (remaining steps). Do not ignore context pressure warnings.`;
 }
 
 // ── Main ─────────────────────────────────────────────────────
@@ -143,6 +160,7 @@ async function main(): Promise<void> {
       tools: session.tools,
       maxTurns,
       temperature: 0.2,
+      contextLimit,
     });
 
     let completeParams: LogosCompleteParams | undefined;
@@ -169,6 +187,11 @@ async function main(): Promise<void> {
           console.log(`[logos_complete] summary: ${event.params.summary}`);
           if (event.params.reply)
             console.log(`[reply] ${event.params.reply}`);
+          break;
+        case "context_pressure":
+          console.log(
+            `[bench-runner] context pressure: ~${event.estimatedTokens}/${event.limit} tokens (${Math.round((event.estimatedTokens / event.limit) * 100)}%)`,
+          );
           break;
         case "max_turns_reached":
           console.log(`[bench-runner] max turns (${maxTurns}) reached`);
@@ -201,6 +224,26 @@ async function main(): Promise<void> {
           `[bench-runner] entering plan mode ` +
             `(${outcome.subtasks.length} subtasks)`,
         );
+
+        if (completeParams.task_log) {
+          const writeTool = session.tools.find(
+            (t) => t.name === "logos_write",
+          );
+          if (writeTool) {
+            try {
+              await writeTool.execute("persist-initial-log", {
+                uri: "logos://sandbox/plan/initial.log",
+                content: completeParams.task_log,
+              });
+              console.log(
+                "[bench-runner] persisted initial task_log → logos://sandbox/plan/initial.log",
+              );
+            } catch (e) {
+              console.warn("[bench-runner] failed to persist initial task_log:", e);
+            }
+          }
+        }
+
         success = await executePlan({
           tools: session.tools,
           openai,
@@ -210,6 +253,7 @@ async function main(): Promise<void> {
           maxTurnsPerAgent: maxTurns,
           temperature: 0.2,
           kernelMode: session.useKernel,
+          contextLimit,
         });
         break;
       }

@@ -24,6 +24,8 @@ const MAX_REPLAN_CYCLES = 10;
 interface CompletedSubtask {
   description: string;
   summary: string;
+  taskLog?: string;
+  logPath: string;
 }
 
 export interface PlanExecutorOptions {
@@ -36,6 +38,7 @@ export interface PlanExecutorOptions {
   temperature?: number;
   kernelMode: boolean;
   depth?: number;
+  contextLimit?: number;
 }
 
 // ── Main entry point ─────────────────────────────────────────
@@ -52,6 +55,7 @@ export async function executePlan(
     temperature = 0.2,
     kernelMode,
     depth = 0,
+    contextLimit,
   } = opts;
 
   if (depth >= MAX_PLAN_DEPTH) {
@@ -82,6 +86,7 @@ export async function executePlan(
       userMessage: subtask,
       maxTurns: maxTurnsPerAgent,
       temperature,
+      contextLimit,
     });
 
     if (!execResult.params) {
@@ -95,6 +100,8 @@ export async function executePlan(
 
     const params = execResult.params;
 
+    const logPath = `logos://sandbox/plan/step-${step}.log`;
+
     if (params.plan && params.plan.length > 0 && depth < MAX_PLAN_DEPTH) {
       console.log(
         `[plan d=${depth}] executor decomposed into ` +
@@ -106,7 +113,13 @@ export async function executePlan(
         depth: depth + 1,
       });
       if (!nestedOk) return false;
-      completed.push({ description: subtask, summary: params.summary });
+      await persistTaskLog(tools, logPath, params.task_log ?? params.summary);
+      completed.push({
+        description: subtask,
+        summary: params.summary,
+        taskLog: params.task_log,
+        logPath,
+      });
       remaining = remaining.slice(1);
     } else if (params.sleep) {
       console.log(
@@ -118,7 +131,13 @@ export async function executePlan(
       }
       return false;
     } else {
-      completed.push({ description: subtask, summary: params.summary });
+      await persistTaskLog(tools, logPath, params.task_log ?? params.summary);
+      completed.push({
+        description: subtask,
+        summary: params.summary,
+        taskLog: params.task_log,
+        logPath,
+      });
       remaining = remaining.slice(1);
       console.log(`[plan d=${depth}] step ${step} done: ${params.summary}`);
     }
@@ -143,6 +162,7 @@ export async function executePlan(
       userMessage: "Review progress and decide how to proceed.",
       maxTurns: Math.min(maxTurnsPerAgent, 10),
       temperature,
+      contextLimit,
     });
 
     if (!planResult.params) {
@@ -175,6 +195,22 @@ export async function executePlan(
   return completed.length > 0;
 }
 
+// ── Task log persistence ─────────────────────────────────────
+
+async function persistTaskLog(
+  tools: AgentTool[],
+  logPath: string,
+  content: string,
+): Promise<void> {
+  const writeTool = tools.find((t) => t.name === "logos_write");
+  if (!writeTool) return;
+  try {
+    await writeTool.execute("plan-internal", { uri: logPath, content });
+  } catch {
+    console.log(`[plan] failed to persist task_log to ${logPath}`);
+  }
+}
+
 // ── Sub-agent runner ─────────────────────────────────────────
 //
 // Runs a fresh reactLoop with its own message history. The
@@ -194,6 +230,7 @@ async function runSubAgent(opts: {
   userMessage: string;
   maxTurns: number;
   temperature: number;
+  contextLimit?: number;
 }): Promise<SubAgentResult> {
   const {
     openai,
@@ -203,6 +240,7 @@ async function runSubAgent(opts: {
     userMessage,
     maxTurns,
     temperature,
+    contextLimit,
   } = opts;
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -217,6 +255,7 @@ async function runSubAgent(opts: {
     tools,
     maxTurns,
     temperature,
+    contextLimit,
   });
 
   let turns = 0;
@@ -242,6 +281,11 @@ async function runSubAgent(opts: {
       case "logos_complete":
         completeParams = event.params;
         console.log(`  [complete] ${event.params.summary}`);
+        break;
+      case "context_pressure":
+        console.log(
+          `  [context_pressure] ~${event.estimatedTokens}/${event.limit} tokens`,
+        );
         break;
       case "max_turns_reached":
         console.log(`  [max_turns] reached`);
@@ -302,10 +346,14 @@ ${toolDocsBlock(kernelMode)}
 
 ## Rules
 
+- **Check existing logs first**: before starting, call \`logos_read("logos://sandbox/plan/initial.log")\`. If it exists, a previous agent already made progress — review the log to understand what has been done and avoid duplicating work. If the file does not exist, proceed normally.
 - Focus exclusively on your assigned subtask. Do not attempt unrelated parts of the original task.
-- When done, call logos_complete with a clear summary of what you accomplished and any relevant findings for subsequent steps.
+- When done, call logos_complete with:
+  - \`summary\`: a concise description of what you accomplished.
+  - \`task_log\`: a detailed execution record — what you did, key outputs, errors encountered, and any findings relevant to subsequent steps. This is REQUIRED.
 - Before calling logos_complete, verify your work: check outputs exist, tests pass, etc.
 - If the subtask is too complex, you may call logos_complete with a \`plan\` field to decompose it further.
+- **Context pressure**: if the system warns your context window is nearly full, immediately call logos_complete with \`task_log\` (everything done so far) and \`plan\` (remaining steps).
 ${OPERATIONAL_RULES}`;
 }
 
@@ -320,8 +368,12 @@ function buildPlannerPrompt(
   const completedBlock =
     completed.length > 0
       ? completed
-          .map((c, i) => `${i + 1}. "${c.description}" — ${c.summary}`)
-          .join("\n")
+          .map(
+            (c, i) =>
+              `${i + 1}. "${c.description}" — ${c.summary}\n` +
+              `   task_log: ${c.logPath}`,
+          )
+          .join("\n\n")
       : "(none)";
 
   const remainingBlock = remaining
@@ -346,11 +398,17 @@ ${toolDocsBlock(kernelMode)}
 
 ## Your decision
 
-Review the completed work and remaining plan. You may use tools to inspect current state if needed (e.g., check files created by previous steps). Then choose one action:
+Review the completed work and remaining plan. You can inspect current state:
+- Read any step's detailed log: \`logos_read("logos://sandbox/plan/step-N.log")\`
+- Check files on disk: \`logos_exec("ls /app/...")\`
+
+Then choose one action:
 
 1. **Continue**: remaining plan is still correct → call logos_complete with \`plan\` set to the remaining subtask list.
 2. **Replan**: adjustments needed → call logos_complete with a revised \`plan\`.
 3. **Done**: original task is already fully achieved → call logos_complete with just a \`summary\` (no plan field).
+
+When calling logos_complete, always include \`task_log\` with your reasoning for the decision.
 
 ${OPERATIONAL_RULES}`;
 }

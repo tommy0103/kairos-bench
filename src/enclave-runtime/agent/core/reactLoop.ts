@@ -3,6 +3,7 @@ import type { AgentTool, LogosCompleteParams } from "./types";
 
 const LOGOS_COMPLETE = "logos_complete";
 const MAX_TURNS_DEFAULT = 200;
+const CONTEXT_PRESSURE_RATIO = 0.8;
 
 export type ReactLoopEvent =
   | { type: "message_update"; role: "assistant"; delta: string }
@@ -14,6 +15,7 @@ export type ReactLoopEvent =
       result?: unknown;
     }
   | { type: "logos_complete"; params: LogosCompleteParams }
+  | { type: "context_pressure"; estimatedTokens: number; limit: number }
   | { type: "max_turns_reached" };
 
 export interface ReactLoopOptions {
@@ -24,6 +26,8 @@ export interface ReactLoopOptions {
   signal?: AbortSignal;
   maxTurns?: number;
   temperature?: number;
+  /** Max context tokens. When ~80% is consumed a warning is injected. */
+  contextLimit?: number;
 }
 
 function stripTypebox(schema: Record<string, unknown>): Record<string, unknown> {
@@ -49,6 +53,48 @@ function toolResultToText(result: { content: Array<{ text: string }> }): string 
   return result.content.map((c) => c.text).join("\n");
 }
 
+/**
+ * Rough token estimate: ~3.5 chars per token for mixed English/code.
+ * Includes message content, tool calls, and tool schema overhead.
+ */
+function estimateTokens(
+  messages: OpenAI.Chat.ChatCompletionMessageParam[],
+  toolSchemas?: OpenAI.Chat.ChatCompletionTool[],
+): number {
+  let chars = 0;
+  for (const msg of messages) {
+    chars += 15; // per-message framing overhead
+    if (typeof msg.content === "string") {
+      chars += msg.content.length;
+    } else if (Array.isArray(msg.content)) {
+      for (const part of msg.content) {
+        if ("text" in part && typeof (part as any).text === "string") {
+          chars += (part as any).text.length;
+        }
+      }
+    }
+    if ("tool_calls" in msg && msg.tool_calls) {
+      for (const tc of msg.tool_calls as any[]) {
+        chars +=
+          (tc.function?.name?.length ?? 0) +
+          (tc.function?.arguments?.length ?? 0);
+      }
+    }
+  }
+  if (toolSchemas) {
+    chars += JSON.stringify(toolSchemas).length;
+  }
+  return Math.ceil(chars / 3.5);
+}
+
+const CONTEXT_PRESSURE_MSG =
+  "CONTEXT WINDOW WARNING: You have used approximately 80% of your available context. " +
+  "To preserve coherence you should immediately:\n" +
+  "1. Call logos_complete with a detailed `task_log` recording everything you have done so far.\n" +
+  "2. Set the `plan` field to list the remaining steps as subtasks.\n" +
+  "Each subtask will be executed by a fresh agent with a clean context window.\n" +
+  "Do this NOW — do not attempt further tool calls before entering plan mode.";
+
 export async function* reactLoop(
   options: ReactLoopOptions
 ): AsyncGenerator<ReactLoopEvent, void, unknown> {
@@ -59,13 +105,31 @@ export async function* reactLoop(
     signal,
     maxTurns = MAX_TURNS_DEFAULT,
     temperature,
+    contextLimit,
   } = options;
   const messages = [...options.messages];
   const openaiTools = tools.map(toolToOpenAIFunction);
   const toolMap = new Map(tools.map((t) => [t.name, t]));
+  let contextWarned = false;
 
   for (let turn = 0; turn < maxTurns; turn++) {
     if (signal?.aborted) return;
+
+    if (contextLimit && !contextWarned) {
+      const est = estimateTokens(messages, openaiTools);
+      if (est > contextLimit * CONTEXT_PRESSURE_RATIO) {
+        contextWarned = true;
+        yield {
+          type: "context_pressure",
+          estimatedTokens: est,
+          limit: contextLimit,
+        };
+        messages.push({
+          role: "user" as const,
+          content: CONTEXT_PRESSURE_MSG,
+        });
+      }
+    }
 
     const response = await client.chat.completions.create({
       model,
