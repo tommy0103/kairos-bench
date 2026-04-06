@@ -81,7 +81,7 @@ async function runEvaluator(opts: EvalLoopOptions): Promise<EvalResult> {
     {
       role: "user",
       content:
-        "Run the /tests/test_output.py and evaluate whether the task has been completed correctly.",
+        "Run the tests and evaluate whether the task has been completed correctly.",
     },
   ];
 
@@ -241,7 +241,7 @@ function buildEvaluatorPrompt(
   originalTask: string,
   kernelMode: boolean,
 ): string {
-  return `You are an evaluator agent. Your job is to verify that a task has been completed correctly by running any available tests.
+  return `You are an adversarial evaluator agent. Your job is to rigorously verify that a task has been completed correctly by designing and running your own tests.
 
 ## Original task
 
@@ -251,19 +251,24 @@ ${toolDocsBlock(kernelMode)}
 
 ## Instructions
 
-1. Check if \`/tests\` directory exists and list its contents.
-2. If tests exist, determine the test framework (pytest, jest, cargo test, go test, etc.) and install any required test dependencies.
-3. Run ALL available tests.
-4. Analyze the test output carefully — pay attention to individual test case results.
+1. Read the task description carefully. Extract every explicit requirement, constraint, edge case, and acceptance criterion.
+2. Inspect the agent's output: check that files exist at the required paths, code compiles/runs, outputs match expected formats, etc.
+3. **Design adversarial test cases** that cover:
+   - All explicit requirements from the task description.
+   - Edge cases and boundary conditions (empty inputs, large inputs, error paths, concurrency, signals, etc.).
+   - Common mistakes an agent might make (wrong path, wrong format, off-by-one, missing error handling).
+4. Run your tests. Be specific and deterministic — use concrete assertions, not vague checks.
 5. Call logos_complete with:
-   - \`summary\`: Start with **"PASS:"** if ALL tests pass, or **"FAIL:"** followed by a concise description of what failed and why.
-   - \`task_log\`: The full test command, complete test output, and your analysis.
+   - \`summary\`: Start with **"PASS:"** if ALL your tests pass, or **"FAIL:"** followed by a concise description of what failed and why.
+   - \`task_log\`: Your test code, full test output, and analysis.
 
 ## Rules
 
-- Do NOT modify any source code or solution files. You are only allowed to run tests and inspect files.
-- If no tests are found at all, call logos_complete with \`summary: "PASS: no test suite found"\`.
-- Be thorough: run ALL available tests, not just a subset.
+- Do NOT modify the agent's source code or solution files. You may only create temporary test scripts and run commands.
+- Think like a strict code reviewer: find bugs, not excuses.
+- If the task asks for a function/module, import it and test it directly — don't just check that the file exists.
+- If the task involves runtime behavior (signals, concurrency, network), test the actual behavior, not just static properties.
+- Clean up any temporary test files you create when done.
 - Your default working directory is /app.
 - You MUST call logos_complete exactly once.`;
 }
@@ -274,7 +279,7 @@ function buildFixerPrompt(
   detailedLog: string | undefined,
   kernelMode: boolean,
 ): string {
-  return `You are a fixer agent. A previous agent attempted a task, but the evaluator found test failures.
+  return `You are a fixer agent. A previous agent attempted a task, but an adversarial evaluator found issues.
 
 ## Original task
 
