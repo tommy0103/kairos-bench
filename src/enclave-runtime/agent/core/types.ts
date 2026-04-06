@@ -26,4 +26,6 @@ export interface LogosCompleteParams {
   };
   resume?: string;
   plan?: string[];
+  /** Alternative approaches to try in parallel with workspace isolation. */
+  explore?: string[];
 }

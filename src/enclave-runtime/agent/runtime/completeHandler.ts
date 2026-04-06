@@ -28,6 +28,7 @@ export type TurnOutcome =
     }
   | { type: "resume"; discardedTaskId: string; resumeTaskId: string }
   | { type: "plan"; taskId: string; subtasks: string[] }
+  | { type: "explore"; taskId: string; approaches: string[] }
   | { type: "timeout"; taskId: string };
 
 export interface CompleteHandlerOptions {
@@ -41,7 +42,17 @@ export function createCompleteHandler(options: CompleteHandlerOptions) {
     taskId: string,
     params: LogosCompleteParams
   ): Promise<TurnOutcome> {
-    const { summary, reply, anchor, task_log, sleep, resume, plan } = params;
+    const { summary, reply, anchor, task_log, sleep, resume, plan, explore } = params;
+
+    if (explore && explore.length > 0) {
+      const kernelParams: Record<string, unknown> = {
+        task_id: taskId,
+        summary,
+      };
+      if (reply) kernelParams.reply = reply;
+      await logosClient.call("system.complete", kernelParams);
+      return { type: "explore", taskId, approaches: explore };
+    }
 
     if (resume) {
       // Resume is a runtime-side operation: discard current task, rebind to target.

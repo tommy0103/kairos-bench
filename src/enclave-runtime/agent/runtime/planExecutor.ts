@@ -16,6 +16,7 @@ import type OpenAI from "openai";
 import type { ChatClient } from "../core/chatClient";
 import { reactLoop } from "../core/reactLoop";
 import type { AgentTool, LogosCompleteParams } from "../core/types";
+import { buildAgentSkillsSection } from "./agentSkills";
 
 const MAX_PLAN_DEPTH = 3;
 const MAX_REPLAN_CYCLES = 10;
@@ -161,7 +162,7 @@ export async function executePlan(
         kernelMode,
       ),
       userMessage: "Review progress and decide how to proceed.",
-      maxTurns: Math.min(maxTurnsPerAgent, 10),
+      maxTurns: Math.min(maxTurnsPerAgent, 50),
       temperature,
       contextLimit,
     });
@@ -204,11 +205,24 @@ async function persistTaskLog(
   content: string,
 ): Promise<void> {
   const writeTool = tools.find((t) => t.name === "logos_write");
-  if (!writeTool) return;
-  try {
-    await writeTool.execute("plan-internal", { uri: logPath, content });
-  } catch {
-    console.log(`[plan] failed to persist task_log to ${logPath}`);
+  if (writeTool) {
+    try {
+      await writeTool.execute("plan-internal", { uri: logPath, content });
+      return;
+    } catch {
+      // logos_write denied — fall through to exec
+    }
+  }
+  const execTool = tools.find((t) => t.name === "logos_exec");
+  if (execTool) {
+    try {
+      const escaped = content.replace(/'/g, "'\\''");
+      await execTool.execute("plan-internal", {
+        command: `mkdir -p "$(dirname '${logPath}')" && cat > '${logPath}' << 'LOGOS_EOF'\n${escaped}\nLOGOS_EOF`,
+      });
+    } catch {
+      console.log(`[plan] failed to persist task_log to ${logPath}`);
+    }
   }
 }
 
@@ -327,7 +341,8 @@ const OPERATIONAL_RULES = `\
 - Execute commands one at a time, observe output, then decide next steps.
 - If you encounter an unrecoverable error, call logos_complete with sleep.
 - Do NOT ask the user for input. Work autonomously.
-- Be efficient — minimize unnecessary commands.`;
+- Be efficient — minimize unnecessary commands.
+- **Container environment**: You are inside a Docker container with no init system. Never start services in foreground (logos_exec will block forever). Use background mode: \`nginx -g "daemon on;"\`, \`cmd &\`, etc.`;
 
 // ── Executor prompt ──────────────────────────────────────────
 
@@ -358,7 +373,7 @@ ${toolDocsBlock(kernelMode)}
 - Before calling logos_complete, verify your work: check outputs exist, tests pass, etc.
 - If the subtask is too complex, you may call logos_complete with a \`plan\` field to decompose it further.
 - **Context pressure**: if the system warns your context window is nearly full, immediately call logos_complete with \`task_log\` (everything done so far) and \`plan\` (remaining steps).
-${OPERATIONAL_RULES}`;
+${OPERATIONAL_RULES}${buildAgentSkillsSection(originalTask)}`;
 }
 
 // ── Planner prompt ───────────────────────────────────────────

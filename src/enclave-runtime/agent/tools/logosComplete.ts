@@ -64,6 +64,14 @@ export function createLogosCompleteTool(): AgentTool {
             "the adapter will create subtasks for each entry.",
         })
       ),
+      explore: Type.Optional(
+        Type.Array(Type.String(), {
+          description:
+            "List of alternative approach descriptions. Triggers explore mode — " +
+            "each approach runs in parallel in an isolated workspace copy of /app. " +
+            "First success wins. Max 3 approaches.",
+        })
+      ),
     }),
     execute: async () => ({
       content: [{ type: "text", text: "Turn completed." }],

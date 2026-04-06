@@ -3,7 +3,7 @@ import type { ChatClient } from "./chatClient";
 import type { AgentTool, LogosCompleteParams } from "./types";
 
 const LOGOS_COMPLETE = "logos_complete";
-const MAX_TURNS_DEFAULT = 200;
+const MAX_TURNS_DEFAULT = 1000;
 const CONTEXT_PRESSURE_RATIO = 0.8;
 
 export type ReactLoopEvent =
@@ -117,9 +117,22 @@ export async function* reactLoop(
   const openaiTools = tools.map(toolToOpenAIFunction);
   const toolMap = new Map(tools.map((t) => [t.name, t]));
   let contextWarned = false;
+  let turnsWarned = false;
 
   for (let turn = 0; turn < maxTurns; turn++) {
     if (signal?.aborted) return;
+
+    const turnsLeft = maxTurns - turn;
+    if (!turnsWarned && turnsLeft <= 3) {
+      turnsWarned = true;
+      messages.push({
+        role: "user" as const,
+        content:
+          `TURN LIMIT WARNING: You have ${turnsLeft} turn(s) remaining. ` +
+          "You MUST call logos_complete on your next response. " +
+          "Summarize your progress so far and call logos_complete immediately.",
+      });
+    }
 
     if (contextLimit && !contextWarned) {
       const est = estimateTokens(messages, openaiTools);
@@ -161,6 +174,7 @@ export async function* reactLoop(
     if (assistantMsg.tool_calls?.length) {
       let completed = false;
       let completeParams: LogosCompleteParams | undefined;
+      let emptyCallStreak = 0;
 
       for (const toolCall of assistantMsg.tool_calls) {
         if (!("function" in toolCall)) continue;
@@ -169,7 +183,21 @@ export async function* reactLoop(
         let parsedParams: Record<string, unknown> = {};
         try {
           parsedParams = JSON.parse(toolCall.function.arguments || "{}");
-        } catch {}
+        } catch (e) {
+          console.warn(
+            `[reactLoop] failed to parse tool arguments for ${toolName}: ${e}`,
+            `raw=${JSON.stringify(toolCall.function.arguments)?.slice(0, 500)}`,
+          );
+        }
+
+        const isEmpty =
+          Object.keys(parsedParams).length === 0 && toolName !== LOGOS_COMPLETE;
+
+        if (isEmpty) {
+          emptyCallStreak++;
+        } else {
+          emptyCallStreak = 0;
+        }
 
         yield {
           type: "tool_execution_start",
@@ -181,26 +209,58 @@ export async function* reactLoop(
         let resultText: string;
         let result: unknown;
 
-        try {
-          if (toolName === LOGOS_COMPLETE) {
-            completeParams = parsedParams as LogosCompleteParams;
-            resultText = "Turn completed.";
-            result = { ok: true };
-            completed = true;
-          } else {
-            const tool = toolMap.get(toolName);
-            if (!tool) {
-              throw new Error(`unknown tool "${toolName}"`);
+        if (isEmpty) {
+          resultText =
+            "Error: tool call had empty arguments (likely a streaming truncation). " +
+            "Do NOT retry with empty arguments. Re-generate the full arguments.";
+          result = { error: "empty arguments" };
+          console.warn(
+            `[reactLoop] skipping ${toolName} — empty params (streak: ${emptyCallStreak})`,
+          );
+        } else {
+          try {
+            if (toolName === LOGOS_COMPLETE) {
+              completeParams = parsedParams as unknown as LogosCompleteParams;
+              resultText = "Turn completed.";
+              result = { ok: true };
+              completed = true;
+            } else {
+              const tool = toolMap.get(toolName);
+              if (!tool) {
+                throw new Error(`unknown tool "${toolName}"`);
+              }
+              const toolResult = await tool.execute(toolCallId, parsedParams, signal);
+              resultText = toolResultToText(toolResult);
+              result = toolResult;
             }
-            const toolResult = await tool.execute(toolCallId, parsedParams, signal);
-            resultText = toolResultToText(toolResult);
-            result = toolResult;
+          } catch (err) {
+            const errMsg =
+              err instanceof Error ? err.message : String(err);
+            resultText = `Error: ${errMsg}`;
+            result = { error: errMsg };
           }
-        } catch (err) {
-          const errMsg =
-            err instanceof Error ? err.message : String(err);
-          resultText = `Error: ${errMsg}`;
-          result = { error: errMsg };
+        }
+
+        if (emptyCallStreak >= 3) {
+          console.warn(
+            `[reactLoop] ${emptyCallStreak} consecutive empty tool calls — ` +
+              `injecting warning to model`,
+          );
+          messages.push({
+            role: "tool" as const,
+            tool_call_id: toolCallId,
+            content: resultText,
+          });
+          messages.push({
+            role: "user" as const,
+            content:
+              "WARNING: Your last several tool calls had empty/missing arguments. " +
+              "This usually means your response was too long and got truncated. " +
+              "Break your work into smaller steps — write shorter code blocks, " +
+              "or use logos_exec to write files in pieces with heredocs.",
+          });
+          yield { type: "tool_execution_end", toolName, toolCallId, result };
+          break;
         }
 
         yield { type: "tool_execution_end", toolName, toolCallId, result };

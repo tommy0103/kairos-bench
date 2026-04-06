@@ -12,6 +12,7 @@ import { reactLoop } from "../core/reactLoop";
 import type { AgentTool, LogosCompleteParams } from "../core/types";
 import { detectSkills } from "./evaluatorSkills";
 import { executePlan } from "./planExecutor";
+import { executeExplore } from "./exploreExecutor";
 
 // ── Public types ──────────────────────────────────────────────
 
@@ -91,7 +92,7 @@ async function runEvaluator(opts: EvalLoopOptions): Promise<EvalResult> {
     model: opts.model,
     messages,
     tools: opts.tools,
-    maxTurns: Math.min(opts.maxTurnsPerAgent, 20),
+    maxTurns: Math.min(opts.maxTurnsPerAgent, 100),
     temperature: opts.temperature ?? 0.2,
     contextLimit: opts.contextLimit,
   });
@@ -200,7 +201,24 @@ async function runFixer(
     }
   }
 
-  if (completeParams?.plan?.length) {
+  if (completeParams?.explore?.length) {
+    console.log(
+      `[evaluator] fixer entering explore mode ` +
+        `(${completeParams.explore.length} approaches)`,
+    );
+    await executeExplore({
+      tools: opts.tools,
+      client: opts.client,
+      model: opts.model,
+      originalTask: opts.originalTask,
+      approaches: completeParams.explore,
+      taskLog: completeParams.task_log,
+      maxTurnsPerApproach: opts.maxTurnsPerAgent,
+      temperature: opts.temperature ?? 0.2,
+      kernelMode: opts.kernelMode,
+      contextLimit: opts.contextLimit,
+    });
+  } else if (completeParams?.plan?.length) {
     console.log(
       `[evaluator] fixer decomposed into ${completeParams.plan.length} subtasks`,
     );
@@ -284,6 +302,7 @@ ${skillsBlock}
 - If the task involves runtime behavior (signals, concurrency, network), test the actual behavior, not just static properties.
 - Clean up any temporary test files you create when done.
 - Your default working directory is /app.
+- **Container environment**: You are inside a Docker container with no init system. Never start services in foreground (logos_exec will block forever). Use background mode: \`nginx -g "daemon on;"\`, \`cmd &\`, etc.
 - You MUST call logos_complete exactly once.`;
 }
 
@@ -315,7 +334,9 @@ ${toolDocsBlock(kernelMode)}
   - \`summary\`: what you fixed and whether re-run tests pass now.
   - \`task_log\`: detailed record of changes and verification results.
 - If the fix requires multiple steps, use \`plan: [...]\` to decompose it.
+- If you see multiple possible fix strategies and are unsure which will work, use \`explore: ["fix A", "fix B"]\` to try them in parallel (each runs in an isolated workspace copy).
 - Your default working directory is /app.
+- **Container environment**: You are inside a Docker container with no init system. Never start services in foreground (logos_exec will block forever). Use background mode: \`nginx -g "daemon on;"\`, \`cmd &\`, etc.
 - You MUST call logos_complete exactly once.
 - **Context pressure**: if warned, enter plan mode immediately.`;
 }

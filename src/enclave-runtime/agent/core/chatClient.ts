@@ -62,7 +62,7 @@ export function createOpenAIChatClient(openai: OpenAI): ChatClient {
         number,
         { id: string; name: string; args: string }
       >();
-      let finishReason = "stop";
+      let finishReason: string | null = null;
       let respId = "";
       let respModel = "";
 
@@ -93,13 +93,26 @@ export function createOpenAIChatClient(openai: OpenAI): ChatClient {
         if (c.finish_reason) finishReason = c.finish_reason;
       }
 
+      if (!finishReason) {
+        console.warn(
+          `[chatClient] OpenAI stream ended without finish_reason — response may be truncated`,
+        );
+      }
+
       const toolCalls = [...tcMap.entries()]
         .sort(([a], [b]) => a - b)
-        .map(([, tc]) => ({
-          id: tc.id,
-          type: "function" as const,
-          function: { name: tc.name, arguments: tc.args },
-        }));
+        .map(([, tc]) => {
+          if (!tc.args) {
+            console.warn(
+              `[chatClient] tool call "${tc.name}" has empty arguments — likely stream truncation`,
+            );
+          }
+          return {
+            id: tc.id,
+            type: "function" as const,
+            function: { name: tc.name, arguments: tc.args || "{}" },
+          };
+        });
 
       yield {
         type: "completion" as const,
@@ -108,7 +121,7 @@ export function createOpenAIChatClient(openai: OpenAI): ChatClient {
           model: respModel || params.model,
           content: content || null,
           toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-          finishReason,
+          finishReason: finishReason ?? "stop",
         }),
       };
     },
@@ -169,7 +182,8 @@ export async function createAnthropicChatClient(
         name?: string;
         inputJson?: string;
       }> = [];
-      let stopReason = "end_turn";
+      let stopReason: string | null = null;
+      let messageComplete = false;
       let msgId = "";
       let msgModel = "";
       let inputTokens = 0;
@@ -217,19 +231,37 @@ export async function createAnthropicChatClient(
             stopReason = event.delta?.stop_reason ?? stopReason;
             outputTokens = event.usage?.output_tokens ?? outputTokens;
             break;
+
+          case "message_stop":
+            messageComplete = true;
+            break;
         }
+      }
+
+      if (!messageComplete) {
+        console.warn(
+          `[chatClient] Anthropic stream ended without message_stop — response may be truncated`,
+        );
       }
 
       const toolCalls = blocks
         .filter((b) => b.type === "tool_use")
-        .map((b) => ({
-          id: b.id!,
-          type: "function" as const,
-          function: {
-            name: b.name!,
-            arguments: b.inputJson || "{}",
-          },
-        }));
+        .map((b) => {
+          const rawArgs = b.inputJson ?? "";
+          if (b.type === "tool_use" && !rawArgs) {
+            console.warn(
+              `[chatClient] tool_use block "${b.name}" has empty inputJson — likely stream truncation`,
+            );
+          }
+          return {
+            id: b.id!,
+            type: "function" as const,
+            function: {
+              name: b.name!,
+              arguments: rawArgs || "{}",
+            },
+          };
+        });
 
       const finishReason =
         stopReason === "tool_use"

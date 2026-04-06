@@ -21,7 +21,7 @@
  *   MODEL                — Model name (default: deepseek-chat)
  *   LOGOS_SOCKET         — Path to logos-kernel Unix socket (optional; enables kernel mode)
  *   AGENT_CONFIG         — Agent config ID (default: bench-runner)
- *   MAX_TURNS            — Maximum ReAct loop turns (default: 100)
+ *   MAX_TURNS            — Maximum ReAct loop turns (default: 500)
  *   ANTHROPIC_MAX_TOKENS — Max output tokens for Anthropic (default: 16384)
  *   CONTEXT_LIMIT        — Override auto-detected context window size
  *   EVAL_RETRIES         — Evaluator fix attempts after main agent (default: 2, 0 to disable)
@@ -39,14 +39,16 @@ import {
   createStandaloneSession,
 } from "./agent/runtime/benchRuntime";
 import { executePlan } from "./agent/runtime/planExecutor";
+import { executeExplore } from "./agent/runtime/exploreExecutor";
 import { evaluateAndRetry } from "./agent/runtime/evaluator";
+import { buildAgentSkillsSection } from "./agent/runtime/agentSkills";
 
 // ── Config ───────────────────────────────────────────────────
 const apiKey = process.env.API_KEY ?? process.env.OPENAI_API_KEY ?? "";
 const model = process.env.MODEL ?? "deepseek-chat";
 const logosSocket = process.env.LOGOS_SOCKET ?? "";
 const agentConfigId = process.env.AGENT_CONFIG ?? "bench-runner";
-const maxTurns = parseInt(process.env.MAX_TURNS ?? "100", 10);
+const maxTurns = parseInt(process.env.MAX_TURNS ?? "500", 10);
 const evalRetries = parseInt(process.env.EVAL_RETRIES ?? "3", 10);
 
 type Provider = "openai" | "anthropic";
@@ -109,16 +111,24 @@ You have Logos kernel primitives:
    - Normal: call with \`summary\` describing what you did.
    - Plan mode: for complex multi-step tasks, call with \`plan: ["step 1", "step 2", ...]\`.
      Each step will be executed by a fresh agent, and the plan is reviewed after every step.
-     When using plan, you MUST include \`task_log\` with your reasoning for the decomposition.
+   - **Explore mode**: when a problem can be solved in multiple independent ways and you are unsure which will work,
+     call with \`explore: ["approach A description", "approach B description", ...]\` (max 3).
+     Each approach will be executed by a **separate agent in an isolated copy of /app**, running in parallel.
+     The first approach to succeed wins — its workspace replaces /app. Use explore when:
+       • You have tried one strategy that failed and want to try alternatives from a clean state.
+       • The problem has fundamentally different solution paths (e.g. reverse-engineer vs brute-force).
+       • You want to hedge between a complex correct approach and a simple heuristic.
+     Do NOT use explore for sequential steps — use plan for that.
    - Blocked: call with \`sleep: { reason, retry }\` to pause.
-   - \`task_log\`: detailed execution record (what you did, key outputs, errors). Required when using \`plan\`.
+   - \`task_log\`: detailed execution record (what you did, key outputs, errors). Required when using \`plan\` or \`explore\`.
      Previous steps' logs are at \`logos://sandbox/plan/step-N.log\` (read with logos_read).`
     : `## Tools
 
 - **logos_exec(command)** — Execute a shell command. Output is truncated to the last ~200 lines.
 - **logos_complete(...)** — MANDATORY: call this when the task is done or you need to stop.
-  You may also call it with \`plan: ["step 1", "step 2", ...]\` to decompose a complex task.
-  When using plan, include \`task_log\` describing your reasoning for the decomposition.`;
+  You may also call it with \`plan: ["step 1", "step 2", ...]\` to decompose a complex task,
+  or \`explore: ["approach A", "approach B", ...]\` to try alternative strategies in parallel (each in an isolated workspace copy).
+  When using plan or explore, include \`task_log\` describing your reasoning.`;
 
   return `You are an autonomous terminal agent solving a benchmark task inside a sandbox.
 
@@ -144,9 +154,10 @@ ${toolDocs}
 - If you encounter an unrecoverable error or cannot complete the task in this run, call logos_complete with sleep and clearly explain the blocker.
 - Do NOT ask the user for input. Solve the task autonomously.
 - Be efficient — minimize unnecessary commands, but never skip validation of hard requirements.${kernelMode ? "\n- When logos_exec output is truncated, use logos_read to retrieve the full terminal log if you need to inspect earlier output." : ""}
+- **Container environment**: You are running inside a Docker container with no init system. When starting services (nginx, postgres, redis, apache, etc.), NEVER run them in the foreground — logos_exec will block forever. Always start services in background mode, e.g. \`nginx -g "daemon on;"\`, \`postgres &\`, \`redis-server --daemonize yes\`, or append \`&\` to the command. Verify the service started with a follow-up check (e.g. \`curl -s localhost\` or \`pgrep nginx\`).
 - **Context continuity**: before starting work, check \`logos_read("logos://sandbox/plan/initial.log")\`. If it exists, a previous agent already made partial progress — review its log so you do not duplicate work.
 - **Context pressure**: if the system warns that your context window is nearly full, immediately enter plan mode by calling logos_complete with \`task_log\` (detailed record of everything done so far) and \`plan\` (remaining steps). Do not ignore context pressure warnings.
-- **Never give up directly**: if you feel stuck or believe the task is too complex to complete in one pass, do NOT call logos_complete with just a summary to end the task. Instead, use plan mode — decompose the remaining work into smaller subtasks via \`plan: [...]\` so that fresh agents can tackle each piece independently. Only use \`sleep\` if there is a genuine external blocker (e.g. missing credentials, unavailable service).`;
+- **Never give up directly**: if you feel stuck or believe the task is too complex to complete in one pass, do NOT call logos_complete with just a summary to end the task. Instead, use plan mode — decompose the remaining work into smaller subtasks via \`plan: [...]\` so that fresh agents can tackle each piece independently. Only use \`sleep\` if there is a genuine external blocker (e.g. missing credentials, unavailable service).${buildAgentSkillsSection(taskDescription)}`;
 }
 
 // ── Main ─────────────────────────────────────────────────────
@@ -269,22 +280,12 @@ async function main(): Promise<void> {
         );
 
         if (completeParams.task_log) {
-          const writeTool = session.tools.find(
-            (t) => t.name === "logos_write",
+          await persistLog(
+            session.tools,
+            "logos://sandbox/plan/initial.log",
+            completeParams.task_log,
+            "initial task_log",
           );
-          if (writeTool) {
-            try {
-              await writeTool.execute("persist-initial-log", {
-                uri: "logos://sandbox/plan/initial.log",
-                content: completeParams.task_log,
-              });
-              console.log(
-                "[bench-runner] persisted initial task_log → logos://sandbox/plan/initial.log",
-              );
-            } catch (e) {
-              console.warn("[bench-runner] failed to persist initial task_log:", e);
-            }
-          }
         }
 
         success = await executePlan({
@@ -294,6 +295,36 @@ async function main(): Promise<void> {
           originalTask: taskDescription,
           subtasks: outcome.subtasks,
           maxTurnsPerAgent: maxTurns,
+          temperature: 0.2,
+          kernelMode: session.useKernel,
+          contextLimit,
+        });
+        break;
+      }
+
+      if (outcome.type === "explore") {
+        console.log(
+          `[bench-runner] entering explore mode ` +
+            `(${outcome.approaches.length} approaches)`,
+        );
+
+        if (completeParams.task_log) {
+          await persistLog(
+            session.tools,
+            "logos://sandbox/plan/initial.log",
+            completeParams.task_log,
+            "initial task_log (explore)",
+          );
+        }
+
+        success = await executeExplore({
+          tools: session.tools,
+          client: chatClient,
+          model,
+          originalTask: taskDescription,
+          approaches: outcome.approaches,
+          taskLog: completeParams.task_log,
+          maxTurnsPerApproach: maxTurns,
           temperature: 0.2,
           kernelMode: session.useKernel,
           contextLimit,
@@ -328,6 +359,36 @@ async function main(): Promise<void> {
   session.cleanup();
   console.log(`[bench-runner] done. success=${success} turns=${totalTurns}`);
   process.exit(success ? 0 : 1);
+}
+
+async function persistLog(
+  tools: import("./agent/core/types").AgentTool[],
+  uri: string,
+  content: string,
+  label: string,
+): Promise<void> {
+  const writeTool = tools.find((t) => t.name === "logos_write");
+  if (writeTool) {
+    try {
+      await writeTool.execute("persist-log", { uri, content });
+      console.log(`[bench-runner] persisted ${label} → ${uri}`);
+      return;
+    } catch {
+      // logos_write denied — fall through to exec
+    }
+  }
+  const execTool = tools.find((t) => t.name === "logos_exec");
+  if (execTool) {
+    try {
+      const escaped = content.replace(/'/g, "'\\''");
+      await execTool.execute("persist-log", {
+        command: `mkdir -p "$(dirname '${uri}')" && cat > '${uri}' << 'LOGOS_EOF'\n${escaped}\nLOGOS_EOF`,
+      });
+      console.log(`[bench-runner] persisted ${label} → ${uri} (via exec fallback)`);
+    } catch (e) {
+      console.warn(`[bench-runner] failed to persist ${label}:`, e);
+    }
+  }
 }
 
 main().catch((err) => {

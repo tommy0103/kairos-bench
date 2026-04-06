@@ -14,6 +14,7 @@ import type { LogosClient } from "./logosClient";
 
 const STDOUT_TAIL_LINES = 200;
 const STDERR_TAIL_LINES = 50;
+const EXEC_TIMEOUT_MS = 590_000;
 
 /**
  * Keep the last `maxLines` lines of `text`.
@@ -107,7 +108,8 @@ export function createLogosExecTool(client: LogosClient): AgentTool {
       "Execute a shell command in the sandbox. Logos URIs are translated " +
       "to real paths automatically. Output is truncated to the last ~200 " +
       "lines; full output is saved to logos://sandbox/terminal/{call_id}.stdout " +
-      "(retrieve with logos_read).",
+      "(retrieve with logos_read). " +
+      "Commands time out after ~590s — never run foreground services (use & or daemon mode).",
     parameters: Type.Object({
       command: Type.String({
         description:
@@ -116,7 +118,35 @@ export function createLogosExecTool(client: LogosClient): AgentTool {
       }),
     }),
     execute: async (callId, params) => {
-      const result = await client.exec(params.command);
+      let result: { stdout: string; stderr: string; exit_code: number };
+      try {
+        result = await Promise.race([
+          client.exec(params.command),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error(`logos_exec timed out after ${EXEC_TIMEOUT_MS / 1000}s`)),
+              EXEC_TIMEOUT_MS,
+            ),
+          ),
+        ]);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("timed out")) {
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  `exit_code: -1 (TIMEOUT after ${EXEC_TIMEOUT_MS / 1000}s)\n\n` +
+                  "The command did not complete within the time limit. " +
+                  "This usually means the command is blocking (e.g. a service running in foreground). " +
+                  "Use background mode (append & or use daemon flags) for long-running services.",
+              },
+            ],
+          };
+        }
+        throw err;
+      }
 
       const logBase = `logos://sandbox/terminal/${callId}`;
       if (result.stdout) {
