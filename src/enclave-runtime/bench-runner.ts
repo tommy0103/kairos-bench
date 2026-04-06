@@ -285,6 +285,7 @@ async function main(): Promise<void> {
             "logos://sandbox/plan/initial.log",
             completeParams.task_log,
             "initial task_log",
+            true, // append
           );
         }
 
@@ -314,6 +315,7 @@ async function main(): Promise<void> {
             "logos://sandbox/plan/initial.log",
             completeParams.task_log,
             "initial task_log (explore)",
+            true, // append
           );
         }
 
@@ -366,11 +368,60 @@ async function persistLog(
   uri: string,
   content: string,
   label: string,
+  append = false,
 ): Promise<void> {
+  const timestamp = new Date().toISOString();
+  const block = `\n--- ${label} [${timestamp}] ---\n${content}\n`;
+  const payload = append ? block : content;
+
+  if (append) {
+    // For append mode, read existing content first, then write combined
+    const readTool = tools.find((t) => t.name === "logos_read");
+    const writeTool = tools.find((t) => t.name === "logos_write");
+    if (readTool && writeTool) {
+      try {
+        let existing = "";
+        try {
+          const res = await readTool.execute("persist-log-read", { uri });
+          existing =
+            typeof res === "object" && res !== null
+              ? ((res as any)?.content?.[0]?.text ?? "")
+              : String(res ?? "");
+        } catch {
+          // file doesn't exist yet — that's fine
+        }
+        await writeTool.execute("persist-log", {
+          uri,
+          content: existing + block,
+        });
+        console.log(`[bench-runner] appended ${label} → ${uri}`);
+        return;
+      } catch {
+        // fall through to exec append
+      }
+    }
+    const execTool = tools.find((t) => t.name === "logos_exec");
+    if (execTool) {
+      try {
+        const escaped = block.replace(/'/g, "'\\''");
+        await execTool.execute("persist-log", {
+          command: `mkdir -p "$(dirname '${uri}')" && cat >> '${uri}' << 'LOGOS_EOF'\n${escaped}\nLOGOS_EOF`,
+        });
+        console.log(
+          `[bench-runner] appended ${label} → ${uri} (via exec fallback)`,
+        );
+      } catch (e) {
+        console.warn(`[bench-runner] failed to append ${label}:`, e);
+      }
+    }
+    return;
+  }
+
+  // Overwrite mode (original behavior)
   const writeTool = tools.find((t) => t.name === "logos_write");
   if (writeTool) {
     try {
-      await writeTool.execute("persist-log", { uri, content });
+      await writeTool.execute("persist-log", { uri, content: payload });
       console.log(`[bench-runner] persisted ${label} → ${uri}`);
       return;
     } catch {
@@ -380,7 +431,7 @@ async function persistLog(
   const execTool = tools.find((t) => t.name === "logos_exec");
   if (execTool) {
     try {
-      const escaped = content.replace(/'/g, "'\\''");
+      const escaped = payload.replace(/'/g, "'\\''");
       await execTool.execute("persist-log", {
         command: `mkdir -p "$(dirname '${uri}')" && cat > '${uri}' << 'LOGOS_EOF'\n${escaped}\nLOGOS_EOF`,
       });

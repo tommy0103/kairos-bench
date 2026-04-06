@@ -104,6 +104,100 @@ export const AGENT_SKILLS: AgentSkill[] = [
 - Write the final result JSON promptly — do not spend excessive turns on analysis after the data is recovered.`,
   },
   {
+    id: "video-jump-landing-accuracy",
+    name: "Video jump detection — landing frame accuracy",
+    triggers: [
+      ["jump", "video", "frame"],
+      ["jump", "mp4", "frame"],
+      ["takeoff", "land", "frame"],
+      ["jump_analyzer"],
+      ["hurdle", "video"],
+    ],
+    hint: `**Jump detection — landing frame accuracy**:
+- The verifier has a TIGHT tolerance window (typically ±2 frames) for the landing frame. Being even 1 frame early will fail.
+- **Common mistake**: detecting "approaching the ground" instead of "feet on the ground". If you use a threshold like "foot position within X% of ground level", you will trigger TOO EARLY while the athlete is still descending.
+- **Correct approach for landing detection**: after the peak of the jump (minimum foot-y or maximum height), find the frame where the foot position **fully returns to AND STABILIZES at** the pre-jump ground level. Specifically:
+  1. Compute the ground-level baseline from the pre-jump frames (e.g., median of \`bot95\` or lowest-body-pixel over frames 0..takeoff-5).
+  2. After the jump peak, find the FIRST frame where the foot metric is within a very small margin (e.g., ≤2 pixels) of the baseline AND the next 2-3 frames also stay at that level.
+  3. This "sustained stability" criterion prevents triggering on transition frames where the feet are close but not yet planted.
+- **Err late, not early**: if uncertain, pick the later frame. The verifier's expected range is biased toward the moment of full ground contact, not the moment of initial approach. A frame that is 1 frame late is much more likely to be in the tolerance window than 1 frame early.
+- **Takeoff is usually easier**: takeoff detection (when feet first leave the ground) is more clear-cut. Focus your debugging effort on the landing frame.
+- **Self-test on the example video**: after getting your takeoff/landing values, visually inspect ±3 frames around your detected landing by dumping those frames as images (\`cv2.imwrite\`) and checking if the athlete's feet are truly on the ground in your landing frame. If they're still slightly airborne, shift 1-2 frames later.`,
+  },
+  {
+    id: "mips-interpreter-doom",
+    name: "MIPS interpreter for DoomGeneric",
+    triggers: [
+      ["mips", "interpreter"],
+      ["mips", "vm.js"],
+      ["mips", "elf", "interpreter"],
+      ["mips", "doom"],
+      ["doomgeneric", "mips"],
+      ["doomgeneric_mips"],
+    ],
+    hint: `**MIPS interpreter (DoomGeneric) — architecture & pitfalls**:
+- **DON'T read all source files upfront**. The codebase has 3000+ lines of C stdlib reimplementation. Focus only on: (1) ELF headers of the binary, (2) \`doomgeneric.h\` for screen constants, (3) the syscall numbers in \`my_stdlib.c\` (first 20 lines), and (4) \`fake_fs.c\` for filesystem semantics.
+- **Sparse memory is MANDATORY**: the BSS section is ~1GB (\`0x4003c6d0\` bytes). You CANNOT allocate a flat buffer. Use a \`Map<number, Buffer>\` keyed by page number (e.g. 4KB pages). Only allocate pages on first access.
+- **MIPS Linux syscall ABI** (NOT x86!): syscall number in \`$v0\`, args in \`$a0-$a3\`, stack for args 5-6. Return value in \`$v0\`. Key numbers: \`read=4003\`, \`write=4004\`, \`open=4005\`, \`close=4006\`, \`lseek=4019\`, \`brk=4045\`, \`mmap=4090\`. **BUT** this binary uses its OWN syscall convention defined in \`my_stdlib.c\`: \`read=0\`, \`write=1\`, \`open=2\`, \`close=3\`, \`lseek=8\`, etc. Check the \`#define SYS_*\` at the top of \`my_stdlib.c\` and \`fake_fs.c\`. The \`syscall\` instruction triggers the trap — match the numbers the binary ACTUALLY uses.
+- **Framebuffer output — the verifier contract**:
+  1. The verifier runs \`node /app/vm.js\` and waits up to 30 seconds for \`/tmp/frame.bmp\` to appear.
+  2. It compares \`/tmp/frame.bmp\` to a reference image using L2 pixel similarity (PIL).
+  3. DOOM's screen is **320×200 pixels**, 32-bit RGBA (\`DOOMGENERIC_RESX=320\`, \`DOOMGENERIC_RESY=200\`).
+  4. The binary writes the framebuffer through the custom filesystem (\`DG_DrawFrame\` → file write syscall). You need to intercept the write to the framebuffer file and save it as a proper BMP at \`/tmp/frame.bmp\`.
+  5. BMP format: 54-byte header (BITMAPINFOHEADER), 24-bit BGR, bottom-up row order. OR use a library (\`bmp-js\`, \`pngjs\`) — just make sure the format is correct.
+- **Delay slots**: MIPS branches/jumps have a delay slot — the instruction AFTER a branch always executes. Forgetting this is the most common interpreter bug and causes immediate crashes.
+- **Self-test before submission**: run \`node /app/vm.js\` yourself, wait 15-20 seconds, then check: (1) Does \`/tmp/frame.bmp\` exist? (2) Is it a valid image (\`file /tmp/frame.bmp\` or open with PIL)? (3) Does the stdout show DOOM init text like "Z_Init" or "W_Init"? If frame.bmp doesn't appear within 30s, the interpreter has a bug — check syscall handling, memory access, and instruction implementation.
+- **Performance**: the binary needs to execute millions of instructions to reach the first frame. Keep your instruction loop tight — avoid logging per-instruction. Use a simple \`while(true)\` loop with a switch on opcode.`,
+  },
+  {
+    id: "pdb-fasta-chromophore",
+    name: "PDB FASTA chromophore (X) residue handling",
+    triggers: [
+      ["pdb", "fasta"],
+      ["pdb", "protein", "gblock"],
+      ["pdb", "protein", "sequence", "match"],
+      ["fusion", "protein", "pdb"],
+      ["fpbase", "pdb"],
+      ["chromophore", "protein"],
+    ],
+    hint: `**PDB FASTA chromophore residues — the 'X' trap**:
+- **CRITICAL**: PDB FASTA sequences for fluorescent proteins (GFP, mCherry, Clover, etc.) contain an \`X\` character at the chromophore position. This \`X\` does NOT represent a single unknown amino acid — it represents a **post-translational modification** where **three consecutive amino acids** cyclize into a chromophore.
+- **WRONG**: replacing \`X\` with a single amino acid like \`Y\` (tyrosine). This changes the protein length and produces a sequence that won't match the verifier's expected sequence.
+- **CORRECT**: replace \`X\` with the **original pre-modification tripeptide**. Common examples:
+  - GFP/Clover/EGFP family (e.g. 5WJ2): \`X\` → \`GYG\` (Gly-Tyr-Gly, residues 65-67 in wild-type GFP numbering)
+  - mCherry/mRFP family (e.g. 2H5Q): \`X\` → \`MYG\` (Met-Tyr-Gly)
+  - The central residue is almost always Tyr (Y); the flanking residues vary by protein.
+- **How to find the correct tripeptide**: Do NOT guess. Use one of:
+  1. PDB REST API entity sequence: \`https://data.rcsb.org/rest/v1/core/polymer_entity/{PDB_ID}/1\` → \`entity_poly.pdbx_seq_one_letter_code_can\` field gives the full canonical sequence with all residues spelled out (no \`X\`).
+  2. UniProt canonical sequence: search by protein name, gives the unmodified sequence.
+  3. PDB SEQRES records in the mmCIF/PDB file: \`https://files.rcsb.org/download/{PDB_ID}.cif\` → \`_entity_poly.pdbx_seq_one_letter_code_can\`.
+- **General rule**: ANY \`X\` in a PDB FASTA should be investigated. It could also represent selenomethionine (→ \`M\`), pyroglutamate (→ \`Q\`/\`E\`), or other modifications. Always cross-reference with the entity sequence API.
+- After assembling the protein sequence, verify its length matches what you expect (sum of all subprotein lengths minus removed Met residues plus linkers).`,
+  },
+  {
+    id: "qemu-vm-setup",
+    name: "QEMU VM setup & verification",
+    triggers: [
+      ["qemu", "windows"],
+      ["qemu", "vnc"],
+      ["qemu", "virtual machine"],
+      ["qemu", "vm", "keyboard"],
+      ["win311"],
+      ["windows 3.1"],
+    ],
+    hint: `**QEMU VM setup — common verifier pitfalls**:
+- **Use ABSOLUTE paths for disk images**: the verifier reads the QEMU process cmdline via \`/proc/<pid>/cmdline\` and checks that the FULL absolute path (e.g. \`/app/isos/win311.img\`) appears. If you run \`cd /app && qemu ... -hda isos/win311.img\`, the cmdline will only contain the relative path and the test will FAIL. Always use \`-hda /app/isos/win311.img\`.
+- **Use the exact QEMU version specified**: if the task says "compatible with QEMU 5.2.0", install THAT version. Do NOT use \`apt install qemu-system-x86\` which installs a newer version (e.g. 8.x). Newer QEMU may have subtly different keyboard/VGA emulation that breaks old guest OSes. Install from source: \`wget https://download.qemu.org/qemu-5.2.0.tar.xz && tar xf qemu-5.2.0.tar.xz && cd qemu-5.2.0 && ./configure --target-list=i386-softmmu && make -j$(nproc) && make install\`. If building from source takes too long, at minimum verify that the apt version actually works.
+- **QEMU monitor socket at /tmp/qemu-monitor.sock**: the verifier sends keystrokes via \`socat - UNIX-CONNECT:/tmp/qemu-monitor.sock\` using the \`sendkey\` command. Ensure you start QEMU with \`-monitor unix:/tmp/qemu-monitor.sock,server,nowait\`.
+- **Visual feedback verification**: the verifier takes VNC screenshots before/after sending keys (F1, Alt+Tab, F10, Alt+F4, Ctrl+Esc) and checks for ≥10% pixel difference. This means:
+  1. Windows must have ACTUALLY BOOTED to the desktop (not stuck at DOS prompt, error dialog, or boot screen).
+  2. The VNC display must be responsive and updating.
+  3. Keyboard input must actually reach the guest OS.
+  After starting the VM, WAIT for it to fully boot (30-60 seconds for Win 3.11), then take a VNC screenshot yourself (\`apt install vncsnapshot && vncsnapshot localhost:1 /tmp/screen.png\`) and verify you see the Windows desktop. If you see a blank/black screen or DOS prompt, the OS hasn't finished booting.
+- **Start services in background/daemon mode**: \`nginx\` blocks in foreground by default. Use \`nginx\` (which auto-daemonizes) or \`nginx &\`. Similarly, \`websockify --daemon ...\`. Never let a foreground service eat your entire time budget.
+- **Install socat early**: the verifier needs it, and you'll need it to test keyboard input yourself.`,
+  },
+  {
     id: "stan-mcmc-optimization",
     name: "Stan/MCMC sampling optimization",
     triggers: [

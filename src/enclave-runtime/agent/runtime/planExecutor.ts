@@ -102,7 +102,10 @@ export async function executePlan(
 
     const params = execResult.params;
 
-    const logPath = `logos://sandbox/plan/step-${step}.log`;
+    const logPath =
+      depth === 0
+        ? `logos://sandbox/plan/step-${step}.log`
+        : `logos://sandbox/plan/d${depth}-step-${step}.log`;
 
     if (params.plan && params.plan.length > 0 && depth < MAX_PLAN_DEPTH) {
       console.log(
@@ -115,7 +118,7 @@ export async function executePlan(
         depth: depth + 1,
       });
       if (!nestedOk) return false;
-      await persistTaskLog(tools, logPath, params.task_log ?? params.summary);
+      await persistTaskLog(tools, logPath, params.task_log ?? params.summary, `d${depth}-step-${step} (nested plan)`);
       completed.push({
         description: subtask,
         summary: params.summary,
@@ -133,7 +136,7 @@ export async function executePlan(
       }
       return false;
     } else {
-      await persistTaskLog(tools, logPath, params.task_log ?? params.summary);
+      await persistTaskLog(tools, logPath, params.task_log ?? params.summary, `d${depth}-step-${step}`);
       completed.push({
         description: subtask,
         summary: params.summary,
@@ -203,22 +206,43 @@ async function persistTaskLog(
   tools: AgentTool[],
   logPath: string,
   content: string,
+  label?: string,
 ): Promise<void> {
+  const timestamp = new Date().toISOString();
+  const block = `\n--- ${label ?? "task_log"} [${timestamp}] ---\n${content}\n`;
+
+  // Append via logos_read + logos_write
+  const readTool = tools.find((t) => t.name === "logos_read");
   const writeTool = tools.find((t) => t.name === "logos_write");
-  if (writeTool) {
+  if (readTool && writeTool) {
     try {
-      await writeTool.execute("plan-internal", { uri: logPath, content });
+      let existing = "";
+      try {
+        const res = await readTool.execute("plan-internal-read", { uri: logPath });
+        existing =
+          typeof res === "object" && res !== null
+            ? ((res as any)?.content?.[0]?.text ?? "")
+            : String(res ?? "");
+      } catch {
+        // file doesn't exist yet
+      }
+      await writeTool.execute("plan-internal", {
+        uri: logPath,
+        content: existing + block,
+      });
       return;
     } catch {
-      // logos_write denied — fall through to exec
+      // fall through to exec
     }
   }
+
+  // Append via shell
   const execTool = tools.find((t) => t.name === "logos_exec");
   if (execTool) {
     try {
-      const escaped = content.replace(/'/g, "'\\''");
+      const escaped = block.replace(/'/g, "'\\''");
       await execTool.execute("plan-internal", {
-        command: `mkdir -p "$(dirname '${logPath}')" && cat > '${logPath}' << 'LOGOS_EOF'\n${escaped}\nLOGOS_EOF`,
+        command: `mkdir -p "$(dirname '${logPath}')" && cat >> '${logPath}' << 'LOGOS_EOF'\n${escaped}\nLOGOS_EOF`,
       });
     } catch {
       console.log(`[plan] failed to persist task_log to ${logPath}`);
@@ -418,7 +442,7 @@ ${toolDocsBlock(kernelMode)}
 ## Your decision
 
 Review the completed work and remaining plan. You can inspect current state:
-- Read any step's detailed log: \`logos_read("logos://sandbox/plan/step-N.log")\`
+- Read any step's detailed log using the \`task_log\` paths listed above (e.g. \`logos_read("logos://sandbox/plan/step-1.log")\`)
 - Check files on disk: \`logos_exec("ls /app/...")\`
 
 Then choose one action:

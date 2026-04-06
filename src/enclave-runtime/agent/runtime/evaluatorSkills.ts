@@ -410,6 +410,521 @@ os.remove(SHIFTED)
 3. If the detection doesn't shift accordingly, the algorithm is overfitting to the example.
 4. Report **FAIL** with the assertion message — it tells the fixer to use relative motion detection.`,
   },
+  {
+    id: "video-jump-landing-stability",
+    name: "Video Jump Landing Frame Stability Check",
+    triggers: [
+      ["jump", "video", "frame"],
+      ["jump", "mp4", "frame"],
+      ["takeoff", "land", "frame"],
+      ["jump_analyzer"],
+      ["hurdle", "video"],
+    ],
+    recipe: `### Skill: Video Jump Detection — Landing Frame Stability Check
+
+**Purpose**: Verify that the detected landing frame represents the moment of **full ground contact** (feet stable on the ground), not a premature detection while the athlete is still descending. The verifier has a tight tolerance window (±2 frames) and systematic early detection is the #1 cause of failure.
+
+**Why this matters**: A common algorithm detects landing as "foot position within X% of ground level" — this triggers 1-4 frames too early during the descent. The verifier expects the frame where the feet are actually planted and the position metric has stabilized.
+
+**Recipe** — run this after the agent produces the script and the generalization test passes:
+
+\\\`\\\`\\\`python
+#!/usr/bin/env python3
+"""Skill test: Landing frame stability — checks the detected landing is a stable ground frame."""
+import cv2
+import numpy as np
+import subprocess, sys, os, toml
+
+SCRIPT = "/app/jump_analyzer.py"
+EXAMPLE = "/app/example_video.mp4"
+OUTPUT = "/app/output.toml"
+
+subprocess.run([sys.executable, SCRIPT, EXAMPLE], cwd="/app", capture_output=True)
+result = toml.load(OUTPUT)
+takeoff = result["jump_takeoff_frame_number"]
+landing = result["jump_land_frame_number"]
+print(f"Detected: takeoff={takeoff}, landing={landing}")
+
+cap = cv2.VideoCapture(EXAMPLE)
+total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+def get_foot_metric(frame_idx):
+    """Get the lowest body-pixel y-coordinate (foot position proxy)."""
+    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+    ret, frame = cap.read()
+    if not ret:
+        return None
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    # Use background subtraction: compare to frame 0
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    _, bg = cap.read()
+    bg_gray = cv2.cvtColor(bg, cv2.COLOR_BGR2GRAY)
+    diff = cv2.absdiff(gray, bg_gray)
+    _, mask = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+    ys = np.where(mask > 0)[0]
+    if len(ys) == 0:
+        return None
+    return np.percentile(ys, 95)  # bot95: 95th percentile y
+
+# Compute ground-level baseline from pre-jump frames
+pre_jump_metrics = []
+for f in range(max(0, takeoff - 10), takeoff - 2):
+    m = get_foot_metric(f)
+    if m is not None:
+        pre_jump_metrics.append(m)
+
+if not pre_jump_metrics:
+    print("SKIP: cannot compute pre-jump baseline (no motion detected)")
+    sys.exit(0)
+
+ground_level = np.median(pre_jump_metrics)
+ground_std = np.std(pre_jump_metrics) if len(pre_jump_metrics) > 1 else 2.0
+print(f"Ground baseline: {ground_level:.1f} (std={ground_std:.1f})")
+
+# Check landing frame and surrounding frames
+stability_threshold = max(ground_std * 2, 3.0)  # pixels
+print(f"Stability threshold: {stability_threshold:.1f} pixels from baseline")
+
+landing_metric = get_foot_metric(landing)
+print(f"Landing frame {landing}: bot95={landing_metric:.1f}, diff from ground={abs(landing_metric - ground_level):.1f}")
+
+# Check: is the landing frame actually at ground level?
+if landing_metric is not None and abs(landing_metric - ground_level) > stability_threshold:
+    # Check frames after the detected landing to find where it actually stabilizes
+    for f in range(landing, min(landing + 8, total_frames)):
+        m = get_foot_metric(f)
+        if m is not None:
+            diff_from_ground = abs(m - ground_level)
+            status = "STABLE" if diff_from_ground <= stability_threshold else "not stable"
+            print(f"  frame {f}: bot95={m:.1f}, diff={diff_from_ground:.1f} -> {status}")
+
+    print(f"\\nFAIL: Landing frame {landing} is NOT at ground level (bot95={landing_metric:.1f}, "
+          f"ground={ground_level:.1f}, diff={abs(landing_metric - ground_level):.1f} > threshold {stability_threshold:.1f}). "
+          f"The landing detection is triggering TOO EARLY — the athlete is still descending. "
+          f"Fix: wait until bot95 returns to within {stability_threshold:.0f}px of {ground_level:.0f} "
+          f"AND stays there for 2-3 consecutive frames.")
+    sys.exit(1)
+
+# Check: are the next 2 frames also stable?
+unstable_after = []
+for f in range(landing + 1, min(landing + 3, total_frames)):
+    m = get_foot_metric(f)
+    if m is not None and abs(m - ground_level) > stability_threshold:
+        unstable_after.append((f, m))
+
+if unstable_after:
+    print(f"WARNING: frames after landing are unstable: {unstable_after}")
+    print("The landing frame might be a momentary touch, not a stable plant.")
+
+# Check: is the frame BEFORE landing clearly not at ground level?
+pre_landing = get_foot_metric(landing - 1)
+if pre_landing is not None:
+    pre_diff = abs(pre_landing - ground_level)
+    print(f"Frame {landing-1} (pre-landing): bot95={pre_landing:.1f}, diff={pre_diff:.1f}")
+    if pre_diff <= stability_threshold:
+        print(f"WARNING: frame {landing-1} is ALSO at ground level — landing may be 1 frame late "
+              f"(less risky than being early, but worth checking)")
+
+print(f"\\nPASS: Landing frame {landing} appears to be at stable ground level")
+cap.release()
+\\\`\\\`\\\`
+
+**How to use**:
+1. Run this AFTER the generalization test passes.
+2. If the script reports FAIL (landing not at ground level), report **FAIL** — the detection is too early. The error message tells the fixer exactly how many pixels off it is and what threshold to use.
+3. If it reports WARNING about pre-landing also being stable, that's acceptable (slightly late > slightly early).
+4. **CRITICAL**: The verifier's tolerance is ±2 frames. Being 1 frame early can fail; being 1 frame late usually still passes. Always prefer the later frame when ambiguous.`,
+  },
+  {
+    id: "mips-doom-frame-check",
+    name: "MIPS Interpreter Frame Output Check",
+    triggers: [
+      ["mips", "interpreter"],
+      ["mips", "vm.js"],
+      ["mips", "elf", "interpreter"],
+      ["mips", "doom"],
+      ["doomgeneric", "mips"],
+      ["doomgeneric_mips"],
+    ],
+    recipe: `### Skill: MIPS Interpreter — Frame BMP Output Verification
+
+**Purpose**: Verify that \`node /app/vm.js\` actually produces a valid framebuffer image at \`/tmp/frame.bmp\` within 30 seconds, matching the verifier's exact contract. The verifier checks: (1) frame.bmp exists, (2) it's a valid image, (3) it's visually similar to a reference DOOM screen.
+
+**Why this matters**: The agent may think the interpreter works because DOOM init text appears on stdout, but the framebuffer file might not be written (wrong syscall interception), might be in the wrong format (wrong BMP headers, wrong dimensions, wrong pixel order), or might be blank.
+
+**Recipe** — run this after the agent produces vm.js:
+
+\\\`\\\`\\\`bash
+#!/bin/bash
+set -e
+FAILED=0
+
+echo "=== Check 1: vm.js exists ==="
+if [ ! -f /app/vm.js ]; then
+    echo "FAIL: /app/vm.js does not exist"
+    exit 1
+fi
+echo "PASS: vm.js exists"
+
+echo ""
+echo "=== Check 2: Run vm.js, wait for /tmp/frame.bmp ==="
+rm -f /tmp/frame.bmp
+timeout 35 node /app/vm.js > /tmp/_vm_stdout.txt 2>&1 &
+VM_PID=$!
+
+ELAPSED=0
+while [ ! -f /tmp/frame.bmp ] && [ $ELAPSED -lt 30 ]; do
+    sleep 1
+    ELAPSED=$((ELAPSED + 1))
+done
+
+if [ -f /tmp/frame.bmp ]; then
+    echo "PASS: /tmp/frame.bmp created after ~\${ELAPSED}s"
+else
+    echo "FAIL: /tmp/frame.bmp NOT created within 30 seconds"
+    echo "  stdout (last 20 lines):"
+    tail -20 /tmp/_vm_stdout.txt 2>/dev/null || echo "  (no output)"
+    kill $VM_PID 2>/dev/null || true
+    FAILED=1
+fi
+
+echo ""
+echo "=== Check 3: frame.bmp is a valid image ==="
+if [ -f /tmp/frame.bmp ]; then
+    SIZE=$(stat -c%s /tmp/frame.bmp 2>/dev/null || echo 0)
+    echo "  File size: $SIZE bytes"
+    if [ "$SIZE" -lt 100 ]; then
+        echo "FAIL: frame.bmp is too small ($SIZE bytes) — likely empty or corrupt"
+        FAILED=1
+    else
+        python3 -c "
+from PIL import Image
+img = Image.open('/tmp/frame.bmp').convert('RGB')
+w, h = img.size
+print(f'  Image dimensions: {w}x{h}')
+if w != 320 or h != 200:
+    print(f'WARNING: Expected 320x200, got {w}x{h}. Verifier may still accept if similar enough.')
+import numpy as np
+arr = np.array(img)
+mean_val = arr.mean()
+if mean_val < 5:
+    print(f'FAIL: Image is nearly black (mean pixel value={mean_val:.1f}). Framebuffer not being populated.')
+    exit(1)
+print(f'  Mean pixel value: {mean_val:.1f} (looks reasonable)')
+print('PASS: frame.bmp is a valid, non-blank image')
+" 2>&1
+        if [ $? -ne 0 ]; then
+            FAILED=1
+        fi
+    fi
+fi
+
+echo ""
+echo "=== Check 4: DOOM init text in stdout ==="
+if grep -qi "Z_Init\\|W_Init\\|D_Init\\|DOOM" /tmp/_vm_stdout.txt 2>/dev/null; then
+    echo "PASS: DOOM initialization text found in stdout"
+else
+    echo "WARNING: No DOOM init text found in stdout. The interpreter may not be executing correctly."
+fi
+
+kill $VM_PID 2>/dev/null || true
+rm -f /tmp/_vm_stdout.txt
+
+echo ""
+if [ $FAILED -eq 0 ]; then
+    echo "ALL FRAME CHECKS PASSED"
+else
+    echo "SOME CHECKS FAILED — see above"
+    exit 1
+fi
+\\\`\\\`\\\`
+
+**How to use**:
+1. After the agent creates \`/app/vm.js\`, write this script to a temp file and run: \`bash /tmp/_skill_doom_frame_check.sh\`
+2. If frame.bmp doesn't appear: the interpreter isn't reaching \`DG_DrawFrame\` or the framebuffer write syscall isn't being intercepted. The agent needs to check its syscall handling.
+3. If frame.bmp is blank/black: the framebuffer address in memory is wrong or the pixel format conversion is incorrect.
+4. If frame.bmp has wrong dimensions: check \`DOOMGENERIC_RESX\` (320) and \`DOOMGENERIC_RESY\` (200) in the source.
+5. **CRITICAL**: The verifier uses L2 similarity, not exact match. The image just needs to look like a DOOM screen. But it must be a valid BMP/image file.`,
+  },
+  {
+    id: "pdb-chromophore-sequence-check",
+    name: "PDB Chromophore Sequence Verification",
+    triggers: [
+      ["pdb", "fasta"],
+      ["pdb", "protein", "gblock"],
+      ["pdb", "protein", "sequence", "match"],
+      ["fusion", "protein", "pdb"],
+      ["fpbase", "pdb"],
+    ],
+    recipe: `### Skill: PDB Chromophore Sequence — Verify X→Tripeptide Replacement
+
+**Purpose**: Verify that the agent correctly replaced PDB FASTA 'X' (chromophore) residues with the original tripeptide, NOT a single amino acid. This is the #1 failure mode for tasks involving fluorescent protein sequences from PDB.
+
+**Why this matters**: PDB FASTA returns 'X' for chromophore positions in fluorescent proteins. The verifier checks the exact protein sequence. Replacing X with a single amino acid (e.g. Y) changes the protein length and fails the exact-match check.
+
+**Recipe** — after the agent produces the output file, run this check:
+
+\\\`\\\`\\\`python
+#!/usr/bin/env python3
+"""Skill test: Verify fluorescent protein sequences have correct chromophore tripeptides."""
+import requests, sys, re, os
+
+# ===== ADAPT THIS to match the output file =====
+OUTPUT_FILE = "/app/gblock.txt"
+PDB_IDS_FILE = "/app/pdb_ids.txt"
+# ================================================
+
+def get_canonical_seq(pdb_id):
+    """Fetch canonical sequence from PDB REST API (has full tripeptide, no X)."""
+    url = f"https://data.rcsb.org/rest/v1/core/polymer_entity/{pdb_id}/1"
+    try:
+        r = requests.get(url, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+        seq = data.get("entity_poly", {}).get("pdbx_seq_one_letter_code_can", "")
+        return seq.replace("\\n", "").strip()
+    except Exception as e:
+        print(f"  WARNING: cannot fetch canonical seq for {pdb_id}: {e}")
+        return None
+
+def get_fasta_seq(pdb_id):
+    """Fetch FASTA sequence from PDB (may contain X for chromophore)."""
+    url = f"https://www.rcsb.org/fasta/entry/{pdb_id}"
+    try:
+        r = requests.get(url, timeout=15)
+        r.raise_for_status()
+        lines = r.text.strip().split("\\n")
+        seq_lines = [l for l in lines if not l.startswith(">")]
+        return "".join(seq_lines).strip()
+    except Exception as e:
+        print(f"  WARNING: cannot fetch FASTA for {pdb_id}: {e}")
+        return None
+
+# Read PDB IDs
+pdb_ids = [line.strip() for line in open(PDB_IDS_FILE) if line.strip()]
+print(f"PDB IDs: {pdb_ids}")
+
+# Check which PDB IDs have chromophore (X in FASTA but not in canonical)
+chromophore_proteins = []
+for pid in pdb_ids:
+    fasta = get_fasta_seq(pid)
+    if fasta and "X" in fasta.upper():
+        canonical = get_canonical_seq(pid)
+        if canonical and "X" not in canonical.upper():
+            # Find the tripeptide that replaces X
+            fasta_upper = fasta.upper()
+            x_pos = fasta_upper.index("X")
+            # The canonical sequence has 2 extra AAs where X was (3 AAs replace 1 X)
+            tripeptide = canonical[x_pos:x_pos+3] if x_pos + 3 <= len(canonical) else "???"
+            chromophore_proteins.append({
+                "pdb_id": pid,
+                "x_position": x_pos,
+                "tripeptide": tripeptide,
+                "fasta_len": len(fasta),
+                "canonical_len": len(canonical),
+            })
+            print(f"  {pid}: X at pos {x_pos} -> tripeptide '{tripeptide}' "
+                  f"(FASTA len={len(fasta)}, canonical len={len(canonical)})")
+
+if not chromophore_proteins:
+    print("No chromophore proteins found in PDB IDs — skipping check")
+    sys.exit(0)
+
+# Read the output file
+if not os.path.exists(OUTPUT_FILE):
+    print(f"FAIL: {OUTPUT_FILE} not found")
+    sys.exit(1)
+
+output = open(OUTPUT_FILE).read().strip()
+
+# For DNA gblocks, translate to protein first
+if re.fullmatch(r"[ATCGatcg]+", output):
+    from Bio.Seq import Seq
+    protein = str(Seq(output).translate()).rstrip("*")
+    print(f"Translated gblock: {len(output)} nt -> {len(protein)} aa")
+else:
+    protein = output
+    print(f"Output appears to be protein sequence: {len(protein)} aa")
+
+protein_upper = protein.upper()
+
+# Check each chromophore protein
+failed = False
+for cp in chromophore_proteins:
+    pid = cp["pdb_id"]
+    tripeptide = cp["tripeptide"]
+    canonical = get_canonical_seq(pid)
+    fasta = get_fasta_seq(pid)
+
+    if not canonical:
+        continue
+
+    # Remove initial M (task usually says to remove N-terminal Met)
+    canonical_no_met = canonical[1:] if canonical.startswith("M") else canonical
+    fasta_no_met = fasta[1:] if fasta and fasta.startswith("M") else (fasta or "")
+
+    # Check: does the output contain the canonical sequence (with tripeptide)?
+    if canonical_no_met.upper() in protein_upper:
+        print(f"  PASS {pid}: canonical sequence (with tripeptide '{tripeptide}') found in output")
+        continue
+
+    # Check: does it contain the FASTA sequence (with X replaced by single AA)?
+    # Try common single-AA replacements for X
+    for single_aa in ["Y", "G", "A", "S", "F"]:
+        fasta_replaced = fasta_no_met.upper().replace("X", single_aa)
+        if fasta_replaced in protein_upper:
+            print(f"  FAIL {pid}: found FASTA sequence with X->'{single_aa}' (SINGLE amino acid). "
+                  f"X should be replaced with tripeptide '{tripeptide}', not a single AA. "
+                  f"Use the PDB REST API canonical sequence: "
+                  f"https://data.rcsb.org/rest/v1/core/polymer_entity/{pid}/1 "
+                  f"-> entity_poly.pdbx_seq_one_letter_code_can")
+            failed = True
+            break
+    else:
+        print(f"  WARNING {pid}: neither canonical nor FASTA-based sequence found in output. "
+              f"The protein may not be included, or the sequence may be differently truncated.")
+
+if failed:
+    sys.exit(1)
+print("\\nPASS: All chromophore proteins use correct tripeptide sequences")
+\\\`\\\`\\\`
+
+**How to use**:
+1. Install biopython if needed: \`pip install biopython requests\`
+2. Adapt OUTPUT_FILE and PDB_IDS_FILE paths.
+3. Run: \`python3 /tmp/_skill_chromophore_check.py\`
+4. If FAIL: the agent used single-AA replacement for the chromophore X. The error message tells exactly which PDB ID, what tripeptide to use, and the API URL to fetch the correct sequence.`,
+  },
+  {
+    id: "qemu-vm-verification",
+    name: "QEMU VM Setup Verification",
+    triggers: [
+      ["qemu", "windows"],
+      ["qemu", "vnc"],
+      ["qemu", "virtual machine"],
+      ["qemu", "vm", "keyboard"],
+      ["win311"],
+      ["windows 3.1"],
+    ],
+    recipe: `### Skill: QEMU VM Setup — Verify Configuration Before Submission
+
+**Purpose**: Verify the QEMU VM is correctly configured: absolute disk path in cmdline, monitor socket responsive, and keystrokes produce visual feedback on the VNC display. These are the exact checks the verifier runs.
+
+**Why this matters**: The verifier reads \`/proc/<pid>/cmdline\` for the absolute image path, sends keystrokes via the QEMU monitor socket, and compares VNC screenshots. Common failures: relative disk path, unresponsive monitor, Windows not booted to desktop.
+
+**Recipe** — run this after QEMU and nginx are up:
+
+\\\`\\\`\\\`bash
+#!/bin/bash
+set -e
+FAILED=0
+
+# ===== ADAPT THESE =====
+EXPECTED_IMG_PATH="/app/isos/win311.img"
+MONITOR_SOCK="/tmp/qemu-monitor.sock"
+VNC_DISPLAY="localhost:1"
+# ========================
+
+echo "=== Check 1: QEMU process with absolute image path ==="
+QEMU_PID=$(pgrep -f "qemu-system" | head -1)
+if [ -z "$QEMU_PID" ]; then
+    echo "FAIL: No qemu-system process found"
+    FAILED=1
+else
+    CMDLINE=$(tr '\\0' ' ' < /proc/$QEMU_PID/cmdline)
+    echo "QEMU cmdline: $CMDLINE"
+    if echo "$CMDLINE" | grep -q "$EXPECTED_IMG_PATH"; then
+        echo "PASS: Absolute image path found in cmdline"
+    else
+        echo "FAIL: '$EXPECTED_IMG_PATH' not found in cmdline."
+        echo "  The verifier checks /proc/<pid>/cmdline for the FULL ABSOLUTE path."
+        echo "  If you used 'cd /app && qemu ... -hda isos/win311.img', the cmdline"
+        echo "  only contains the relative path. Use '-hda $EXPECTED_IMG_PATH' instead."
+        FAILED=1
+    fi
+fi
+
+echo ""
+echo "=== Check 2: Monitor socket responsive ==="
+if [ ! -S "$MONITOR_SOCK" ]; then
+    echo "FAIL: Monitor socket $MONITOR_SOCK does not exist"
+    FAILED=1
+else
+    RESP=$(echo "info status" | socat - UNIX-CONNECT:$MONITOR_SOCK 2>&1 | head -5)
+    if echo "$RESP" | grep -qi "running\\|status"; then
+        echo "PASS: Monitor socket responsive"
+    else
+        echo "FAIL: Monitor socket not responsive. Response: $RESP"
+        FAILED=1
+    fi
+fi
+
+echo ""
+echo "=== Check 3: VNC accessible ==="
+apt-get install -y -qq vncsnapshot 2>/dev/null || true
+vncsnapshot -allowblank $VNC_DISPLAY /tmp/_eval_baseline.png 2>/dev/null
+if [ $? -eq 0 ] && [ -f /tmp/_eval_baseline.png ]; then
+    echo "PASS: VNC screenshot captured"
+else
+    echo "FAIL: Cannot capture VNC screenshot from $VNC_DISPLAY"
+    FAILED=1
+fi
+
+echo ""
+echo "=== Check 4: Keystroke produces visual change ==="
+if [ -f /tmp/_eval_baseline.png ] && [ -S "$MONITOR_SOCK" ]; then
+    # Send Ctrl+Esc (Start Menu in Windows)
+    echo "sendkey ctrl-esc" | socat - UNIX-CONNECT:$MONITOR_SOCK 2>/dev/null
+    sleep 3
+    vncsnapshot -allowblank $VNC_DISPLAY /tmp/_eval_after_key.png 2>/dev/null
+
+    if [ -f /tmp/_eval_after_key.png ]; then
+        DIFF_PCT=$(python3 -c "
+import cv2, numpy as np
+b = cv2.imread('/tmp/_eval_baseline.png', cv2.IMREAD_GRAYSCALE)
+a = cv2.imread('/tmp/_eval_after_key.png', cv2.IMREAD_GRAYSCALE)
+if b is None or a is None or b.shape != a.shape:
+    print('0.0')
+else:
+    print(f'{(np.count_nonzero(b != a) / b.size) * 100.0:.2f}')
+" 2>/dev/null)
+        echo "Pixel difference after Ctrl+Esc: \${DIFF_PCT}%"
+        # Use a slightly lower threshold than verifier (10%) to catch marginal cases
+        OK=$(python3 -c "print('yes' if float('\${DIFF_PCT}') >= 8.0 else 'no')")
+        if [ "$OK" = "yes" ]; then
+            echo "PASS: Keystroke caused visual change (\${DIFF_PCT}% pixels differ)"
+        else
+            echo "FAIL: Keystroke caused <8% visual change (\${DIFF_PCT}%)."
+            echo "  Possible causes:"
+            echo "  1. Windows has not booted to the desktop yet (still at DOS/boot screen)"
+            echo "  2. QEMU version incompatible with the guest OS (task specifies QEMU 5.2.0)"
+            echo "  3. Keyboard input not reaching the guest (monitor socket misconfigured)"
+            echo "  Fix: Wait longer for boot, verify the VNC screenshot shows the Windows desktop,"
+            echo "  and try using the exact QEMU version specified in the task."
+            FAILED=1
+        fi
+    fi
+fi
+
+# Cleanup
+rm -f /tmp/_eval_baseline.png /tmp/_eval_after_key.png
+
+echo ""
+if [ $FAILED -eq 0 ]; then
+    echo "ALL QEMU CHECKS PASSED"
+else
+    echo "SOME CHECKS FAILED — see above"
+    exit 1
+fi
+\\\`\\\`\\\`
+
+**How to use**:
+1. Ensure \`socat\`, \`vncsnapshot\`, and \`python3\` with \`opencv-python\`/\`numpy\` are installed.
+2. Adapt EXPECTED_IMG_PATH, MONITOR_SOCK, VNC_DISPLAY if needed.
+3. Write to temp file, run: \`bash /tmp/_skill_qemu_check.sh\`
+4. If any check FAILs, report **FAIL** with the specific error. The diagnostic messages tell the fixer exactly what's wrong.
+5. **IMPORTANT**: The visual feedback check uses a slightly lower threshold (8%) than the verifier (10%) to catch borderline cases early. If this check barely passes (8-12%), warn that it's marginal.`,
+  },
 ];
 
 // ── Skill detection ──────────────────────────────────────────
