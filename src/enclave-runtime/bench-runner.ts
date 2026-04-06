@@ -204,9 +204,12 @@ async function main(): Promise<void> {
     for await (const event of loop) {
       totalTurns++;
       switch (event.type) {
-        case "tool_execution_start":
-          console.log(`[tool] ${event.toolName}`);
+        case "tool_execution_start": {
+          const raw = JSON.stringify(event.params);
+          const args = raw.length > 200 ? raw.slice(0, 200) + "…" : raw;
+          console.log(`[tool] ${event.toolName}(${args})`);
           break;
+        }
         case "tool_execution_end":
           if (event.toolName !== "logos_complete") {
             const text =

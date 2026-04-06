@@ -8,7 +8,12 @@ const CONTEXT_PRESSURE_RATIO = 0.8;
 
 export type ReactLoopEvent =
   | { type: "message_update"; role: "assistant"; delta: string }
-  | { type: "tool_execution_start"; toolName: string; toolCallId: string }
+  | {
+      type: "tool_execution_start";
+      toolName: string;
+      toolCallId: string;
+      params: Record<string, unknown>;
+    }
   | {
       type: "tool_execution_end";
       toolName: string;
@@ -161,17 +166,24 @@ export async function* reactLoop(
         if (!("function" in toolCall)) continue;
         const toolName = toolCall.function.name;
         const toolCallId = toolCall.id;
+        let parsedParams: Record<string, unknown> = {};
+        try {
+          parsedParams = JSON.parse(toolCall.function.arguments || "{}");
+        } catch {}
 
-        yield { type: "tool_execution_start", toolName, toolCallId };
+        yield {
+          type: "tool_execution_start",
+          toolName,
+          toolCallId,
+          params: parsedParams,
+        };
 
         let resultText: string;
         let result: unknown;
 
         try {
-          const params = JSON.parse(toolCall.function.arguments || "{}");
-
           if (toolName === LOGOS_COMPLETE) {
-            completeParams = params as LogosCompleteParams;
+            completeParams = parsedParams as LogosCompleteParams;
             resultText = "Turn completed.";
             result = { ok: true };
             completed = true;
@@ -180,7 +192,7 @@ export async function* reactLoop(
             if (!tool) {
               throw new Error(`unknown tool "${toolName}"`);
             }
-            const toolResult = await tool.execute(toolCallId, params, signal);
+            const toolResult = await tool.execute(toolCallId, parsedParams, signal);
             resultText = toolResultToText(toolResult);
             result = toolResult;
           }
