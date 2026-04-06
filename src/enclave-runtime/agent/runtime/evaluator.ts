@@ -10,6 +10,7 @@ import type OpenAI from "openai";
 import type { ChatClient } from "../core/chatClient";
 import { reactLoop } from "../core/reactLoop";
 import type { AgentTool, LogosCompleteParams } from "../core/types";
+import { detectSkills } from "./evaluatorSkills";
 import { executePlan } from "./planExecutor";
 
 // ── Public types ──────────────────────────────────────────────
@@ -241,6 +242,12 @@ function buildEvaluatorPrompt(
   originalTask: string,
   kernelMode: boolean,
 ): string {
+  const skills = detectSkills(originalTask);
+  const skillsBlock =
+    skills.length > 0
+      ? `\n## Testing skills (MANDATORY)\n\nThe following skills matched this task. You MUST execute every skill recipe below. Copy each test template, adapt the marked constants to match the actual solution, and run it. If ANY skill test fails, report FAIL.\n\n${skills.map((s) => s.recipe).join("\n\n---\n\n")}\n`
+      : "";
+
   return `You are an adversarial evaluator agent. Your job is to rigorously verify that a task has been completed correctly by designing and running your own tests.
 
 ## Original task
@@ -253,14 +260,21 @@ ${toolDocsBlock(kernelMode)}
 
 1. Read the task description carefully. Extract every explicit requirement, constraint, edge case, and acceptance criterion.
 2. Inspect the agent's output: check that files exist at the required paths, code compiles/runs, outputs match expected formats, etc.
-3. **Design adversarial test cases** that cover:
+3. **If any testing skills are provided below**, follow each skill's recipe EXACTLY — copy the test template, adapt file paths / function names to match the actual solution, and run it. Do NOT skip or simplify skill tests. Run skill tests FIRST, before your own tests.
+4. **Design additional adversarial test cases** that cover:
    - All explicit requirements from the task description.
    - Edge cases and boundary conditions (empty inputs, large inputs, error paths, concurrency, signals, etc.).
    - Common mistakes an agent might make (wrong path, wrong format, off-by-one, missing error handling).
-4. Run your tests. Be specific and deterministic — use concrete assertions, not vague checks.
-5. Call logos_complete with:
-   - \`summary\`: Start with **"PASS:"** if ALL your tests pass, or **"FAIL:"** followed by a concise description of what failed and why.
+5. Run your tests. Be specific and deterministic — use concrete assertions, not vague checks.
+6. Call logos_complete with:
+   - \`summary\`: Start with **"PASS:"** if ALL your tests pass (including skill tests), or **"FAIL:"** followed by a concise description of what failed and why.
    - \`task_log\`: Your test code, full test output, and analysis.
+${skillsBlock}
+## Adversarial testing guidelines
+
+**Combinatorial parameter coverage**: When the task involves parameters (e.g. \`max_concurrent\`, \`timeout\`, \`limit\`), always test multiple combinations — especially where parameters interact to create different code paths.
+
+**External process testing**: When behavior involves signals (SIGINT, SIGTERM), cancellation, or timeouts, always test from an **external process** using \`subprocess.Popen\` + \`proc.send_signal()\`.
 
 ## Rules
 
