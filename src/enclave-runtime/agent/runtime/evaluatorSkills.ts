@@ -341,17 +341,17 @@ echo "PASS: All values are non-negative (unsigned)"
       ["jump_analyzer"],
       ["hurdle", "video"],
     ],
-    recipe: `### Skill: Video Jump Detection — Generalization Test
+    recipe: `### Skill: Video Jump Detection — Long Run-up Generalization Test
 
-**Purpose**: Verify that a jump detection script generalizes to videos where the jump happens at DIFFERENT frame numbers, not just the example video. The most common failure is overfitting to the example video's timing.
+**Purpose**: Verify that the jump detection script finds the ACTUAL HURDLE JUMP, not running motion. The hidden test video is ~270 frames with the jump at frame ~220. If the algorithm mistakes running strides for the jump, it will report takeoff ~100+ frames too early.
 
-**Why this matters**: The verifier tests on a HIDDEN video where the jump happens at a completely different frame number (e.g. frame 220 instead of 53). A script that hardcodes thresholds or frame ranges based on the example will fail.
+**Why this matters**: The example video is only ~120 frames with minimal run-up. The test video has 200+ frames of running before the jump. Algorithms that detect "first significant motion" or "first vertical change" will trigger on a running stride instead of the hurdle jump.
 
-**Recipe** — after the agent produces the script, run this generalization test:
+**Recipe** — this creates a video with REPEATED running frames before the jump, simulating a longer run-up:
 
 \\\`\\\`\\\`python
 #!/usr/bin/env python3
-"""Skill test: Jump detection generalization via time-shifted video."""
+"""Skill test: Long run-up — duplicates pre-jump running to simulate a longer approach."""
 import cv2
 import numpy as np
 import subprocess, sys, os, toml
@@ -359,70 +359,85 @@ import subprocess, sys, os, toml
 SCRIPT = "/app/jump_analyzer.py"
 EXAMPLE = "/app/example_video.mp4"
 OUTPUT = "/app/output.toml"
-SHIFTED = "/tmp/_shifted_video.mp4"
+EXTENDED = "/tmp/_extended_runup.mp4"
 
-# Step 1: run on example video to get baseline
-subprocess.run([sys.executable, SCRIPT, EXAMPLE], cwd="/app", capture_output=True)
+# Step 1: get baseline
+r = subprocess.run([sys.executable, SCRIPT, EXAMPLE], cwd="/app", capture_output=True, text=True)
+assert r.returncode == 0, f"Baseline failed: {r.stderr[-300:]}"
 baseline = toml.load(OUTPUT)
 base_takeoff = baseline["jump_takeoff_frame_number"]
 base_landing = baseline["jump_land_frame_number"]
 print(f"Baseline: takeoff={base_takeoff}, landing={base_landing}")
 
-# Step 2: create a time-shifted video by prepending N static frames
+# Step 2: read all frames
 cap = cv2.VideoCapture(EXAMPLE)
 fps = cap.get(cv2.CAP_PROP_FPS)
-w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-ret, first_frame = cap.read()
-assert ret, "Cannot read example video"
-
-N_PREPEND = 150
-fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-out = cv2.VideoWriter(SHIFTED, fourcc, fps, (w, h))
-for _ in range(N_PREPEND):
-    out.write(first_frame)
-
-cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+frames = []
 while True:
     ret, frame = cap.read()
-    if not ret:
-        break
-    out.write(frame)
-out.release()
+    if not ret: break
+    frames.append(frame)
 cap.release()
 
-# Step 3: run on shifted video
-subprocess.run([sys.executable, SCRIPT, SHIFTED], cwd="/app", capture_output=True)
-shifted = toml.load(OUTPUT)
-shifted_takeoff = shifted["jump_takeoff_frame_number"]
-shifted_landing = shifted["jump_land_frame_number"]
-print(f"Shifted: takeoff={shifted_takeoff}, landing={shifted_landing}")
-print(f"Expected: takeoff~{base_takeoff + N_PREPEND}, landing~{base_landing + N_PREPEND}")
+# Step 3: create extended video — repeat the running portion (frames 1..takeoff-5) 3 extra times
+run_start = 1
+run_end = max(run_start + 1, base_takeoff - 5)
+running_frames = frames[run_start:run_end]
+n_extra = len(running_frames) * 3
+print(f"Running frames: {run_start}-{run_end} ({len(running_frames)} frames), repeating 3x = {n_extra} extra frames")
 
-# Step 4: verify the shift is reflected (tolerance of +/-5 frames)
+fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+out = cv2.VideoWriter(EXTENDED, fourcc, fps, (w, h))
+out.write(frames[0])  # background frame
+for _ in range(3):
+    for f in running_frames:
+        out.write(f)
+for f in frames[run_start:]:
+    out.write(f)
+out.release()
+
+expected_takeoff = base_takeoff + n_extra
+expected_landing = base_landing + n_extra
+print(f"Expected: takeoff~{expected_takeoff}, landing~{expected_landing}")
+
+# Step 4: run on extended video
+r = subprocess.run([sys.executable, SCRIPT, EXTENDED], cwd="/app", capture_output=True, text=True)
+if r.returncode != 0:
+    print(f"FAIL: script crashed on extended video: {r.stderr[-300:]}")
+    os.remove(EXTENDED)
+    sys.exit(1)
+
+result = toml.load(OUTPUT)
+ext_takeoff = result["jump_takeoff_frame_number"]
+ext_landing = result["jump_land_frame_number"]
+print(f"Detected: takeoff={ext_takeoff}, landing={ext_landing}")
+
 TOLERANCE = 5
-expected_takeoff = base_takeoff + N_PREPEND
-expected_landing = base_landing + N_PREPEND
+takeoff_err = abs(ext_takeoff - expected_takeoff)
+landing_err = abs(ext_landing - expected_landing)
 
-assert abs(shifted_takeoff - expected_takeoff) <= TOLERANCE, \\
-    f"FAIL: shifted takeoff={shifted_takeoff}, expected ~{expected_takeoff} (base {base_takeoff} + {N_PREPEND}). " \\
-    f"The detection algorithm does not generalize — it likely uses absolute frame thresholds " \\
-    f"or position heuristics that only work on the example video. " \\
-    f"Fix: use relative motion/change detection rather than absolute frame positions."
+if takeoff_err > TOLERANCE:
+    print(f"FAIL: takeoff={ext_takeoff}, expected ~{expected_takeoff} (off by {takeoff_err} frames). "
+          f"The algorithm detected RUNNING MOTION as the jump instead of the actual hurdle jump. "
+          f"Fix: find the LARGEST vertical displacement event (global minimum of foot-y), not the first motion. "
+          f"The hurdle is at a fixed horizontal position — only look for jumps near the hurdle.")
+    os.remove(EXTENDED)
+    sys.exit(1)
 
-assert abs(shifted_landing - expected_landing) <= TOLERANCE, \\
-    f"FAIL: shifted landing={shifted_landing}, expected ~{expected_landing}. " \\
-    f"Same issue as takeoff — algorithm does not generalize."
+if landing_err > TOLERANCE:
+    print(f"FAIL: landing={ext_landing}, expected ~{expected_landing} (off by {landing_err}).")
+    os.remove(EXTENDED)
+    sys.exit(1)
 
-print("PASS: Jump detection generalizes correctly to time-shifted video")
-os.remove(SHIFTED)
+print("PASS: Script correctly finds the hurdle jump even with a long run-up")
+os.remove(EXTENDED)
 \\\`\\\`\\\`
 
 **How to use**:
-1. After the agent creates \`/app/jump_analyzer.py\` and it passes on the example video, run this script.
-2. It prepends 150 static frames to the example, creating a shifted video where the jump happens ~150 frames later.
-3. If the detection doesn't shift accordingly, the algorithm is overfitting to the example.
-4. Report **FAIL** with the assertion message — it tells the fixer to use relative motion detection.`,
+1. This is the MOST IMPORTANT test — run it FIRST. If the algorithm can't distinguish running from jumping, everything else is irrelevant.
+2. It creates a video with ~150 extra running frames before the jump, simulating the test video's long run-up.
+3. If the algorithm reports takeoff near frame ~50 instead of ~200, it's detecting running motion. The FAIL message tells the fixer to use the LARGEST vertical peak, not the first motion event.`,
   },
   {
     id: "video-jump-landing-stability",

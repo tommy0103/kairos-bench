@@ -113,22 +113,23 @@ export const AGENT_SKILLS: AgentSkill[] = [
       ["jump_analyzer"],
       ["hurdle", "video"],
     ],
-    hint: `**Jump detection — robustness AND landing frame accuracy**:
+    hint: `**Jump detection — the test video is MUCH LONGER than the example**:
 
-**#1 PRIORITY — robustness to unseen videos**:
-- The verifier tests on a HIDDEN video with a DIFFERENT athlete (different clothing, body shape, skin tone). Camera position, background, and hurdle are the same.
-- Your detection algorithm MUST NOT crash on unseen videos. The most common failure is \`ValueError: Could not detect athlete in video\` because the thresholds/parameters are tuned too tightly to the example video.
-- **Use very permissive detection**: try MULTIPLE background-subtraction thresholds (e.g. loop from 20 to 80 in steps of 5) and pick the one that gives the best signal. Never hardcode a single threshold.
-- **Use grayscale or LAB difference** for background subtraction — these are more robust to clothing color variation than RGB thresholds.
-- **Never raise errors**: if primary detection fails, fall back to progressively simpler methods. The script must ALWAYS produce an output.toml, even if the result is imperfect.
-- **Test your robustness**: alter the example video (e.g. adjust brightness ±30%, flip horizontally) and verify your script still detects the jump. If it breaks on simple perturbations, it will break on the test video.
+**#1 CRITICAL — distinguish the hurdle jump from running motion**:
+- The example video is short (~120 frames, jump at ~53). The test video is MUCH longer (~270+ frames, jump at ~220). The athlete runs for 200+ frames before the actual hurdle jump.
+- **The #1 failure mode**: the algorithm detects a running stride or body-bob during the run-up as the "jump", reporting takeoff ~100 frames too early.
+- **The hurdle is at a FIXED horizontal position** in all videos (same camera, same track). Detect the hurdle location from frame 0 (no runner present), then ONLY look for the jump when the athlete is near the hurdle's x-position.
+- **The jump is the LARGEST vertical displacement event** in the video. During running, the athlete's vertical position oscillates by a few pixels. During the hurdle jump, it changes by 50-100+ pixels. Look for the single largest vertical peak, NOT the first motion event.
+- **Algorithm recommendation**: track the athlete's bottom-y (foot position) across ALL frames. The jump is the frame range with the most dramatic vertical dip in bottom-y (feet go way up = bottom-y decreases sharply). Find the global minimum of bottom-y — that's mid-jump. Takeoff and landing bracket this peak.
 
-**#2 — landing frame accuracy**:
-- The verifier tolerance window is typically ±2 frames. Being 1 frame early will fail.
-- **Common mistake**: detecting "approaching the ground" instead of "feet on the ground". Threshold-based detection triggers 1-2 frames TOO EARLY during descent.
-- **Correct approach**: after the jump peak, find the frame where foot position **fully returns to AND STABILIZES at** the pre-jump ground level (sustained ≥2-3 consecutive frames at baseline).
-- **Err late, not early**: after detecting candidate landing frame N, report N+1 or N+2. The systematic early bias is the #1 accuracy failure.
-- **Takeoff is usually easier** — focus debugging effort on landing.`,
+**#2 — robustness to unseen videos**:
+- Different athlete appearance (clothing, body shape). Use permissive, multi-threshold background subtraction.
+- Never raise errors — always produce output.toml.
+
+**#3 — landing frame accuracy**:
+- Verifier tolerance is ±2 frames. Systematic early detection is the #1 accuracy failure.
+- After the jump peak, find the frame where foot position **fully returns to AND STABILIZES at** the pre-jump ground level (sustained ≥2-3 frames at baseline).
+- **Err late, not early**: report candidate landing frame +1 or +2.`,
   },
   {
     id: "mips-interpreter-doom",
