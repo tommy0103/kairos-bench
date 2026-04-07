@@ -620,11 +620,21 @@ print('PASS: frame.bmp is a valid, non-blank image')
 fi
 
 echo ""
-echo "=== Check 4: DOOM init text in stdout ==="
-if grep -qi "Z_Init\\|W_Init\\|D_Init\\|DOOM" /tmp/_vm_stdout.txt 2>/dev/null; then
-    echo "PASS: DOOM initialization text found in stdout"
+echo "=== Check 4: DOOM init text in stdout (CRITICAL) ==="
+EXPECTED_TEXT="I_InitGraphics: DOOM screen size: w x h: 320 x 200"
+if grep -qF "$EXPECTED_TEXT" /tmp/_vm_stdout.txt 2>/dev/null; then
+    echo "PASS: Exact verifier text found in stdout"
 else
-    echo "WARNING: No DOOM init text found in stdout. The interpreter may not be executing correctly."
+    echo "FAIL: Expected text not found in stdout:"
+    echo "  Expected: '$EXPECTED_TEXT'"
+    echo "  The verifier checks for this EXACT byte string."
+    echo "  Common causes:"
+    echo "  1. The write syscall for fd=1 (stdout) is not forwarding to process.stdout"
+    echo "  2. The printf implementation in the binary is incomplete"
+    echo "  3. The DG_Init / I_InitGraphics function is not being reached"
+    echo "  Last 30 lines of stdout:"
+    tail -30 /tmp/_vm_stdout.txt 2>/dev/null || echo "  (no output)"
+    FAILED=1
 fi
 
 kill $VM_PID 2>/dev/null || true

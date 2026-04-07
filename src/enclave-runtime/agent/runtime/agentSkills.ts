@@ -120,7 +120,7 @@ export const AGENT_SKILLS: AgentSkill[] = [
   1. Compute the ground-level baseline from the pre-jump frames (e.g., median of \`bot95\` or lowest-body-pixel over frames 0..takeoff-5).
   2. After the jump peak, find the FIRST frame where the foot metric is within a very small margin (e.g., ≤2 pixels) of the baseline AND the next 2-3 frames also stay at that level.
   3. This "sustained stability" criterion prevents triggering on transition frames where the feet are close but not yet planted.
-- **Err late, not early**: if uncertain, pick the later frame. The verifier's expected range is biased toward the moment of full ground contact, not the moment of initial approach. A frame that is 1 frame late is much more likely to be in the tolerance window than 1 frame early.
+- **Err late, not early — this is the #1 cause of failure**: if uncertain, ALWAYS pick the later frame. The verifier's range starts at the first frame of full ground contact (e.g. [62, 64]), so frame 61 will FAIL but 62-64 will pass. Concretely: after your algorithm detects a candidate landing frame N, ADD 1-2 frames (use N+1 or N+2) as the reported landing. The standard threshold-based approach systematically detects landing ~1 frame early because it triggers on "approaching ground" rather than "feet planted". Compensating with +1 frame is not a hack — it corrects for this systematic bias.
 - **Takeoff is usually easier**: takeoff detection (when feet first leave the ground) is more clear-cut. Focus your debugging effort on the landing frame.
 - **Self-test on the example video**: after getting your takeoff/landing values, visually inspect ±3 frames around your detected landing by dumping those frames as images (\`cv2.imwrite\`) and checking if the athlete's feet are truly on the ground in your landing frame. If they're still slightly airborne, shift 1-2 frames later.`,
   },
@@ -146,7 +146,8 @@ export const AGENT_SKILLS: AgentSkill[] = [
   4. The binary writes the framebuffer through the custom filesystem (\`DG_DrawFrame\` → file write syscall). You need to intercept the write to the framebuffer file and save it as a proper BMP at \`/tmp/frame.bmp\`.
   5. BMP format: 54-byte header (BITMAPINFOHEADER), 24-bit BGR, bottom-up row order. OR use a library (\`bmp-js\`, \`pngjs\`) — just make sure the format is correct.
 - **Delay slots**: MIPS branches/jumps have a delay slot — the instruction AFTER a branch always executes. Forgetting this is the most common interpreter bug and causes immediate crashes.
-- **Self-test before submission**: run \`node /app/vm.js\` yourself, wait 15-20 seconds, then check: (1) Does \`/tmp/frame.bmp\` exist? (2) Is it a valid image (\`file /tmp/frame.bmp\` or open with PIL)? (3) Does the stdout show DOOM init text like "Z_Init" or "W_Init"? If frame.bmp doesn't appear within 30s, the interpreter has a bug — check syscall handling, memory access, and instruction implementation.
+- **Stdout contract — CRITICAL**: The verifier checks that stdout contains the EXACT byte string \`I_InitGraphics: DOOM screen size: w x h: 320 x 200\`. Your interpreter MUST forward ALL writes to fd 1 (stdout) and fd 2 (stderr) to Node.js \`process.stdout\`. If your syscall handler for \`write(fd=1, ...)\` doesn't call \`process.stdout.write(buffer)\`, the verifier will fail even if the frame is correct. Also make sure the \`printf\` in the binary is fully implemented (it writes through fd 1 via the syscall interface).
+- **Self-test before submission**: run \`node /app/vm.js\` yourself, wait 15-20 seconds, then check: (1) Does \`/tmp/frame.bmp\` exist? (2) Is it a valid image (\`file /tmp/frame.bmp\` or open with PIL)? (3) Does stdout contain the text \`I_InitGraphics: DOOM screen size: w x h: 320 x 200\`? ALL THREE must pass. If frame.bmp doesn't appear within 30s, the interpreter has a bug — check syscall handling, memory access, and instruction implementation.
 - **Performance**: the binary needs to execute millions of instructions to reach the first frame. Keep your instruction loop tight — avoid logging per-instruction. Use a simple \`while(true)\` loop with a switch on opcode.`,
   },
   {
@@ -187,7 +188,7 @@ export const AGENT_SKILLS: AgentSkill[] = [
     ],
     hint: `**QEMU VM setup — common verifier pitfalls**:
 - **Use ABSOLUTE paths for disk images**: the verifier reads the QEMU process cmdline via \`/proc/<pid>/cmdline\` and checks that the FULL absolute path (e.g. \`/app/isos/win311.img\`) appears. If you run \`cd /app && qemu ... -hda isos/win311.img\`, the cmdline will only contain the relative path and the test will FAIL. Always use \`-hda /app/isos/win311.img\`.
-- **Use the exact QEMU version specified**: if the task says "compatible with QEMU 5.2.0", install THAT version. Do NOT use \`apt install qemu-system-x86\` which installs a newer version (e.g. 8.x). Newer QEMU may have subtly different keyboard/VGA emulation that breaks old guest OSes. Install from source: \`wget https://download.qemu.org/qemu-5.2.0.tar.xz && tar xf qemu-5.2.0.tar.xz && cd qemu-5.2.0 && ./configure --target-list=i386-softmmu && make -j$(nproc) && make install\`. If building from source takes too long, at minimum verify that the apt version actually works.
+- **Use the exact QEMU version specified — THIS IS CRITICAL FOR VISUAL FEEDBACK**: if the task says "compatible with QEMU 5.2.0", you MUST install THAT version. \`apt install qemu-system-x86\` installs 8.x which has different keyboard/VGA emulation that causes Windows 3.11 to not respond to keystrokes even though the monitor socket works. The verifier sends keys via the monitor and checks for ≥10% pixel change — this WILL FAIL with QEMU 8.x. Install from source: \`apt-get install -y build-essential ninja-build pkg-config libglib2.0-dev libpixman-1-dev && wget https://download.qemu.org/qemu-5.2.0.tar.xz && tar xf qemu-5.2.0.tar.xz && cd qemu-5.2.0 && ./configure --target-list=i386-softmmu && make -j$(nproc) && make install\`. This takes ~5 minutes — START THIS FIRST before any other setup.
 - **QEMU monitor socket at /tmp/qemu-monitor.sock**: the verifier sends keystrokes via \`socat - UNIX-CONNECT:/tmp/qemu-monitor.sock\` using the \`sendkey\` command. Ensure you start QEMU with \`-monitor unix:/tmp/qemu-monitor.sock,server,nowait\`.
 - **Visual feedback verification**: the verifier takes VNC screenshots before/after sending keys (F1, Alt+Tab, F10, Alt+F4, Ctrl+Esc) and checks for ≥10% pixel difference. This means:
   1. Windows must have ACTUALLY BOOTED to the desktop (not stuck at DOS prompt, error dialog, or boot screen).
@@ -196,6 +197,52 @@ export const AGENT_SKILLS: AgentSkill[] = [
   After starting the VM, WAIT for it to fully boot (30-60 seconds for Win 3.11), then take a VNC screenshot yourself (\`apt install vncsnapshot && vncsnapshot localhost:1 /tmp/screen.png\`) and verify you see the Windows desktop. If you see a blank/black screen or DOS prompt, the OS hasn't finished booting.
 - **Start services in background/daemon mode**: \`nginx\` blocks in foreground by default. Use \`nginx\` (which auto-daemonizes) or \`nginx &\`. Similarly, \`websockify --daemon ...\`. Never let a foreground service eat your entire time budget.
 - **Install socat early**: the verifier needs it, and you'll need it to test keyboard input yourself.`,
+  },
+  {
+    id: "primer-tm-verification",
+    name: "Primer Tm verification with oligotm",
+    triggers: [
+      ["primer", "melting"],
+      ["primer", "oligotm"],
+      ["primer", "temperature"],
+      ["primer", "anneal", "tm"],
+      ["oligotm"],
+      ["primer", "mutagenesis"],
+    ],
+    hint: `**Primer Tm — ALWAYS verify with the exact oligotm CLI before submitting**:
+- The verifier computes Tm using the \`oligotm\` CLI from primer3 with SPECIFIC flags: \`oligotm -tp 1 -sc 1 -mv 50 -dv 2 -n 0.8 -d 500 <sequence>\`. ANY other method (Python Tm libraries, different flags, Biopython MeltingTemp) will give DIFFERENT values.
+- **Recipe**: after designing each primer, immediately compute its Tm:
+  \`\`\`
+  apt-get install -y primer3
+  oligotm -tp 1 -sc 1 -mv 50 -dv 2 -n 0.8 -d 500 <annealing_portion>
+  \`\`\`
+- Only the **annealing portion** (the part that base-pairs with the template) counts for Tm, NOT the full primer including overhangs/insert.
+- If Tm is outside [58, 72]°C, adjust the annealing length: add 1-2 nt to raise Tm by ~3-5°C, remove 1-2 nt to lower it.
+- A common off-by-2°C error comes from computing Tm on the wrong portion (e.g., including overhang bases in the calculation). Double-check which bases actually anneal.
+- **FINAL STEP**: before writing primers.fasta, verify ALL primers with the exact oligotm command and confirm every Tm is in range. This takes 5 seconds and prevents a 0.0 reward.`,
+  },
+  {
+    id: "golden-gate-assembly",
+    name: "Golden Gate / BsaI primer design",
+    triggers: [
+      ["golden gate", "bsai"],
+      ["golden gate", "primer"],
+      ["golden gate", "assembly"],
+      ["bsai", "primer"],
+      ["bsai-hf", "primer"],
+      ["nebbridge", "golden gate"],
+      ["golden gate", "overhang"],
+    ],
+    hint: `**Golden Gate assembly primer design — BsaI site structure**:
+- BsaI primers have a STRICT structure (5'→3'): \`[clamp][ggtctc][N][4-nt overhang][binding region]\`
+  - **clamp**: AT LEAST 1 nucleotide (ideally 2-6 nt, e.g. \`tt\` or \`aagc\`) BEFORE the BsaI site. The verifier checks \`i >= 1\` where \`i = primer.find("ggtctc")\`. A primer starting directly with \`ggtctc\` will FAIL.
+  - **ggtctc**: the BsaI recognition site (always this exact sequence in the forward primer).
+  - **N**: a single spacer nucleotide between the recognition site and the cut position.
+  - **4-nt overhang**: the 4-nucleotide sticky end that defines how fragments assemble. Adjacent fragments must have COMPLEMENTARY overhangs.
+  - **binding region**: 15-45 nt that anneals to the template. Tm must be 58-72°C (use \`oligotm -tp 1 -sc 1 -mv 50 -dv 2 -n 0.8 -d 500\`).
+- For the **reverse primer**, the BsaI site is the reverse complement: \`gagacc\`. Structure: \`[clamp][gagacc][N][4-nt overhang rc][binding region rc]\`.
+- **Overhang design**: all 4-nt overhangs must be unique and non-palindromic. The assembly is circular if input is circular — the last fragment's right overhang must match the first fragment's left overhang.
+- **Common mistake**: forgetting the clamp. Even a single \`t\` before the BsaI site is sufficient. Without it, BsaI cutting efficiency drops dramatically AND the verifier rejects the primer.`,
   },
   {
     id: "stan-mcmc-optimization",
