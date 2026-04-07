@@ -325,7 +325,17 @@ export async function createAnthropicChatClient(
 // ChatClient interface (OpenAI Chat Completion types) and the
 // Responses API wire format, including reasoning item round-trips.
 
-export function createOpenAIResponsesChatClient(openai: OpenAI): ChatClient {
+export interface OpenAIResponsesClientOptions {
+  /** If false, `temperature` is omitted from requests (e.g. codex models). */
+  supportsTemperature?: boolean;
+}
+
+export function createOpenAIResponsesChatClient(
+  openai: OpenAI,
+  opts?: OpenAIResponsesClientOptions,
+): ChatClient {
+  const sendTemp = opts?.supportsTemperature ?? false;
+
   return {
     async createChatCompletion(params) {
       const { instructions, input } = convertMsgsToResponsesInput(
@@ -338,7 +348,7 @@ export function createOpenAIResponsesChatClient(openai: OpenAI): ChatClient {
         ...(instructions ? { instructions } : {}),
         input,
         ...(tools?.length ? { tools } : {}),
-        ...(params.temperature != null
+        ...(sendTemp && params.temperature != null
           ? { temperature: params.temperature }
           : {}),
       });
@@ -357,7 +367,7 @@ export function createOpenAIResponsesChatClient(openai: OpenAI): ChatClient {
         ...(instructions ? { instructions } : {}),
         input,
         ...(tools?.length ? { tools } : {}),
-        ...(params.temperature != null
+        ...(sendTemp && params.temperature != null
           ? { temperature: params.temperature }
           : {}),
         stream: true,

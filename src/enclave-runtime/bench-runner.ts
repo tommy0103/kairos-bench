@@ -74,6 +74,9 @@ function detectApiMode(m: string): ApiMode {
   if (explicit === "chat" || explicit === "responses") return explicit;
   return m.toLowerCase().includes("codex") ? "responses" : "chat";
 }
+function modelSupportsTemperature(m: string): boolean {
+  return !m.toLowerCase().includes("codex");
+}
 
 const explicitBaseURL = process.env.BASE_URL;
 const defaultBaseURL =
@@ -223,7 +226,9 @@ async function main(): Promise<void> {
     const mode = detectApiMode(model);
     chatClient =
       mode === "responses"
-        ? createOpenAIResponsesChatClient(openai)
+        ? createOpenAIResponsesChatClient(openai, {
+            supportsTemperature: modelSupportsTemperature(model),
+          })
         : createOpenAIChatClient(openai);
     if (mode === "responses") {
       console.log(`[bench-runner] using Responses API for model=${model}`);
@@ -253,7 +258,9 @@ async function main(): Promise<void> {
       const eMode = detectApiMode(evalModel);
       evalChatClient =
         eMode === "responses"
-          ? createOpenAIResponsesChatClient(eOpenai)
+          ? createOpenAIResponsesChatClient(eOpenai, {
+              supportsTemperature: modelSupportsTemperature(evalModel),
+            })
           : createOpenAIChatClient(eOpenai);
     }
     console.log(

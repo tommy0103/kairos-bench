@@ -118,6 +118,8 @@ export async function* reactLoop(
   const toolMap = new Map(tools.map((t) => [t.name, t]));
   let contextWarned = false;
   let turnsWarned = false;
+  let streamRetries = 0;
+  const MAX_STREAM_RETRIES = 3;
 
   for (let turn = 0; turn < maxTurns; turn++) {
     if (signal?.aborted) return;
@@ -167,6 +169,34 @@ export async function* reactLoop(
     if (!response) return;
     const choice = response.choices[0];
     if (!choice) return;
+
+    // Detect stream disconnect: nearly zero output + "length" finish + no real
+    // content or tool calls → the connection dropped, not a token limit issue.
+    const completionTokens = response.usage?.completion_tokens ?? 0;
+    const hasContent = !!choice.message.content?.trim();
+    const hasToolCalls = !!choice.message.tool_calls?.length;
+    if (
+      completionTokens < 20 &&
+      choice.finish_reason === "length" &&
+      !hasContent &&
+      !hasToolCalls
+    ) {
+      streamRetries++;
+      if (streamRetries <= MAX_STREAM_RETRIES) {
+        console.warn(
+          `[reactLoop] stream disconnected with ~0 output tokens — ` +
+            `retrying (${streamRetries}/${MAX_STREAM_RETRIES})`,
+        );
+        const backoffMs = Math.min(1000 * 2 ** (streamRetries - 1), 15000);
+        await new Promise((r) => setTimeout(r, backoffMs));
+        continue;
+      }
+      console.warn(
+        `[reactLoop] stream disconnect retries exhausted (${MAX_STREAM_RETRIES})`,
+      );
+    } else {
+      streamRetries = 0;
+    }
 
     const assistantMsg = choice.message;
     messages.push(assistantMsg);
