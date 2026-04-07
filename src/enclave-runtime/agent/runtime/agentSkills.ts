@@ -130,9 +130,11 @@ export const AGENT_SKILLS: AgentSkill[] = [
 - Different athlete (clothing, body shape). Use adaptive multi-threshold background subtraction.
 - Never raise errors — always produce output.toml even with degraded accuracy.
 
-**#3 — landing frame accuracy**:
-- Verifier tolerance is ±2 frames. Err late, not early.
-- After the jump peak, find the frame where foot position returns to AND STABILIZES at ground level (≥2-3 consecutive frames). Report landing +1 frame to compensate systematic early bias.`,
+**#3 — frame accuracy (±1 frame matters!)**:
+- Verifier tolerance is only ±2 frames. Getting it exactly right is crucial.
+- **Landing**: the first frame where your lower-body metric recovers is "foot touching ground" — the verifier wants "feet fully planted." ALWAYS add +1 to the first recovery frame. Example: if your metric shows frame 61 = first ground contact, report landing = **62**. This is not optional.
+- **Takeoff**: the verifier wants the LAST frame where the athlete is still on the ground before the jump. If your metric shows frame 53 = firmly on ground, frame 54 = pushing off (metric partially drops), report takeoff = **53** (the firmly-on-ground frame), NOT 54. When ambiguous, pick the EARLIER frame for takeoff.
+- **Self-check**: after computing both values, verify takeoff < landing and the gap is reasonable (8-15 frames for a hurdle jump).`,
   },
   {
     id: "mips-interpreter-doom",
