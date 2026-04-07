@@ -14,6 +14,65 @@ import { detectSkills } from "./evaluatorSkills";
 import { executePlan } from "./planExecutor";
 import { executeExplore } from "./exploreExecutor";
 
+const DEFAULT_EVAL_EXEC_TIMEOUT_MS = 120_000; // 2 min per command
+
+/**
+ * Wrap logos_exec with a shorter per-command timeout so hung tests fail
+ * fast instead of consuming the entire trial budget.
+ */
+function wrapToolsWithExecTimeout(
+  tools: AgentTool[],
+  timeoutMs: number,
+): AgentTool[] {
+  return tools.map((tool) => {
+    if (tool.name !== "logos_exec") return tool;
+    return {
+      ...tool,
+      description:
+        tool.description.replace(/\d+s/g, `${Math.round(timeoutMs / 1000)}s`) +
+        ` (evaluator: ${Math.round(timeoutMs / 1000)}s limit)`,
+      execute: async (callId, params, signal) => {
+        const timer = setTimeout(() => signal?.dispatchEvent?.(new Event("abort")), timeoutMs);
+        try {
+          return await Promise.race([
+            tool.execute(callId, params, signal),
+            new Promise<never>((_, reject) =>
+              setTimeout(
+                () =>
+                  reject(
+                    new Error(
+                      `logos_exec timed out after ${Math.round(timeoutMs / 1000)}s (evaluator limit)`,
+                    ),
+                  ),
+                timeoutMs,
+              ),
+            ),
+          ]);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes("timed out")) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `exit_code: -1 (TIMEOUT after ${Math.round(timeoutMs / 1000)}s — evaluator limit)\n\n` +
+                    "The test command did not complete in time. " +
+                    "This likely means the program under test is hanging or not responding. " +
+                    "Mark this as FAIL with a clear explanation.",
+                },
+              ],
+            };
+          }
+          throw err;
+        } finally {
+          clearTimeout(timer);
+        }
+      },
+    };
+  });
+}
+
 // ── Public types ──────────────────────────────────────────────
 
 export interface EvalLoopOptions {
@@ -30,6 +89,8 @@ export interface EvalLoopOptions {
   evalClient?: ChatClient;
   evalModel?: string;
   evalContextLimit?: number;
+  /** Per-command timeout for evaluator's logos_exec (default: 120s). */
+  evalExecTimeoutMs?: number;
 }
 
 // ── Main entry point ──────────────────────────────────────────
@@ -82,6 +143,10 @@ interface EvalResult {
 async function runEvaluator(opts: EvalLoopOptions): Promise<EvalResult> {
   const evalClient = opts.evalClient ?? opts.client;
   const evalModel = opts.evalModel ?? opts.model;
+  const evalTools = wrapToolsWithExecTimeout(
+    opts.tools,
+    opts.evalExecTimeoutMs ?? DEFAULT_EVAL_EXEC_TIMEOUT_MS,
+  );
 
   const prompt = buildEvaluatorPrompt(opts.originalTask, opts.kernelMode);
 
@@ -98,7 +163,7 @@ async function runEvaluator(opts: EvalLoopOptions): Promise<EvalResult> {
     client: evalClient,
     model: evalModel,
     messages,
-    tools: opts.tools,
+    tools: evalTools,
     maxTurns: Math.min(opts.maxTurnsPerAgent, 100),
     temperature: opts.temperature ?? 0.2,
     contextLimit: opts.evalContextLimit ?? opts.contextLimit,
