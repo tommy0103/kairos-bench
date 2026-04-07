@@ -113,23 +113,26 @@ export const AGENT_SKILLS: AgentSkill[] = [
       ["jump_analyzer"],
       ["hurdle", "video"],
     ],
-    hint: `**Jump detection — the test video is MUCH LONGER than the example**:
+    hint: `**Jump detection — USE THE HURDLE POSITION as the anchor**:
 
-**#1 CRITICAL — distinguish the hurdle jump from running motion**:
-- The example video is short (~120 frames, jump at ~53). The test video is MUCH longer (~270+ frames, jump at ~220). The athlete runs for 200+ frames before the actual hurdle jump.
-- **The #1 failure mode**: the algorithm detects a running stride or body-bob during the run-up as the "jump", reporting takeoff ~100 frames too early.
-- **The hurdle is at a FIXED horizontal position** in all videos (same camera, same track). Detect the hurdle location from frame 0 (no runner present), then ONLY look for the jump when the athlete is near the hurdle's x-position.
-- **The jump is the LARGEST vertical displacement event** in the video. During running, the athlete's vertical position oscillates by a few pixels. During the hurdle jump, it changes by 50-100+ pixels. Look for the single largest vertical peak, NOT the first motion event.
-- **Algorithm recommendation**: track the athlete's bottom-y (foot position) across ALL frames. The jump is the frame range with the most dramatic vertical dip in bottom-y (feet go way up = bottom-y decreases sharply). Find the global minimum of bottom-y — that's mid-jump. Takeoff and landing bracket this peak.
+**#1 CRITICAL — the hurdle is your best signal, not vertical motion alone**:
+- The test video is MUCH longer than the example (~270+ frames vs ~120). The athlete runs for 200+ frames before the hurdle jump. Looking for "the largest vertical displacement" or "first significant motion" WILL fail — running strides, the athlete entering the frame, and other events can produce false positives.
+- **The hurdle is at a FIXED horizontal position in ALL videos** (same camera, same track, same hurdle). Detect the hurdle's x-position from frame 0 (no runner, hurdle is visible as vertical edges in the lower half of the frame).
+- **The jump = the athlete passing over the hurdle**. Track the athlete's center-x across frames. The jump happens in the ~10-frame window where center-x is near the hurdle's x-position. Only analyze vertical displacement within this window.
+- **Algorithm recommendation**:
+  1. Frame 0: detect the hurdle (vertical edge features in the track region, y ∈ [200,400]). Record its x-position.
+  2. Track athlete bounding box across all frames via background subtraction.
+  3. Find the frame(s) where athlete center-x is closest to the hurdle's x-position.
+  4. Within a ±15 frame window around that crossing, find takeoff (last ground-level frame before the vertical peak) and landing (first stable ground-level frame after the peak).
+- **Fallback if hurdle detection is hard**: use the example video to determine the hurdle's approximate x-position (it's the same in all videos). In the example, note where center-x is during the jump peak — that x-coordinate is the hurdle position.
 
-**#2 — robustness to unseen videos**:
-- Different athlete appearance (clothing, body shape). Use permissive, multi-threshold background subtraction.
-- Never raise errors — always produce output.toml.
+**#2 — robustness**:
+- Different athlete (clothing, body shape). Use adaptive multi-threshold background subtraction.
+- Never raise errors — always produce output.toml even with degraded accuracy.
 
 **#3 — landing frame accuracy**:
-- Verifier tolerance is ±2 frames. Systematic early detection is the #1 accuracy failure.
-- After the jump peak, find the frame where foot position **fully returns to AND STABILIZES at** the pre-jump ground level (sustained ≥2-3 frames at baseline).
-- **Err late, not early**: report candidate landing frame +1 or +2.`,
+- Verifier tolerance is ±2 frames. Err late, not early.
+- After the jump peak, find the frame where foot position returns to AND STABILIZES at ground level (≥2-3 consecutive frames). Report landing +1 frame to compensate systematic early bias.`,
   },
   {
     id: "mips-interpreter-doom",
