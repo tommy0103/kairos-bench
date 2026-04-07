@@ -63,7 +63,7 @@ class LogosAgent(BaseInstalledAgent):
                 break
 
         for key in (
-            "MODEL", "BASE_URL", "MAX_TURNS",
+            "MODEL", "BASE_URL", "MAX_TURNS", "OPENAI_API_MODE",
             "EVALUATOR_MODEL", "EVALUATOR_API_KEY",
             "EVALUATOR_API_PROVIDER", "EVALUATOR_BASE_URL",
         ):

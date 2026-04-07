@@ -25,6 +25,7 @@
  *   ANTHROPIC_MAX_TOKENS — Max output tokens for Anthropic (default: 65536)
  *   CONTEXT_LIMIT        — Override auto-detected context window size
  *   EVAL_RETRIES         — Evaluator fix attempts after main agent (default: 2, 0 to disable)
+ *   OPENAI_API_MODE      — "chat" | "responses" (auto-detected; codex models default to responses)
  *
  *   Cross-validation (optional — evaluator uses a different model):
  *   EVALUATOR_MODEL      — Model for the evaluator agent (default: same as MODEL)
@@ -37,6 +38,7 @@ import { reactLoop } from "./agent/core/reactLoop";
 import type { ChatClient } from "./agent/core/chatClient";
 import {
   createOpenAIChatClient,
+  createOpenAIResponsesChatClient,
   createAnthropicChatClient,
 } from "./agent/core/chatClient";
 import type { LogosCompleteParams } from "./agent/core/types";
@@ -63,6 +65,16 @@ function detectProvider(m: string): Provider {
 }
 const provider: Provider =
   (process.env.API_PROVIDER as Provider) || detectProvider(model);
+
+type ApiMode = "chat" | "responses";
+function detectApiMode(m: string): ApiMode {
+  const explicit = process.env.OPENAI_API_MODE?.toLowerCase() as
+    | ApiMode
+    | undefined;
+  if (explicit === "chat" || explicit === "responses") return explicit;
+  return m.toLowerCase().includes("codex") ? "responses" : "chat";
+}
+
 const explicitBaseURL = process.env.BASE_URL;
 const defaultBaseURL =
   provider === "anthropic"
@@ -208,7 +220,14 @@ async function main(): Promise<void> {
       apiKey,
       baseURL: explicitBaseURL ?? defaultBaseURL,
     });
-    chatClient = createOpenAIChatClient(openai);
+    const mode = detectApiMode(model);
+    chatClient =
+      mode === "responses"
+        ? createOpenAIResponsesChatClient(openai)
+        : createOpenAIChatClient(openai);
+    if (mode === "responses") {
+      console.log(`[bench-runner] using Responses API for model=${model}`);
+    }
   }
 
   // Build evaluator client if cross-validation is configured
@@ -231,7 +250,11 @@ async function main(): Promise<void> {
         apiKey: eKey,
         baseURL: eBase ?? eDefaultBase,
       });
-      evalChatClient = createOpenAIChatClient(eOpenai);
+      const eMode = detectApiMode(evalModel);
+      evalChatClient =
+        eMode === "responses"
+          ? createOpenAIResponsesChatClient(eOpenai)
+          : createOpenAIChatClient(eOpenai);
     }
     console.log(
       `[bench-runner] cross-validation: generator=${model} (${provider}), evaluator=${evalModel} (${eProv})`,

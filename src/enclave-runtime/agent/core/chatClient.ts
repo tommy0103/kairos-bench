@@ -318,6 +318,323 @@ export async function createAnthropicChatClient(
   };
 }
 
+// ── OpenAI Responses API implementation ───────────────────────
+//
+// Some models (e.g. gpt-5.3-codex) are only available via the
+// /v1/responses endpoint. This adapter converts between our
+// ChatClient interface (OpenAI Chat Completion types) and the
+// Responses API wire format, including reasoning item round-trips.
+
+export function createOpenAIResponsesChatClient(openai: OpenAI): ChatClient {
+  return {
+    async createChatCompletion(params) {
+      const { instructions, input } = convertMsgsToResponsesInput(
+        params.messages,
+      );
+      const tools = convertToolsToResponses(params.tools);
+
+      const response = await (openai.responses as any).create({
+        model: params.model,
+        ...(instructions ? { instructions } : {}),
+        input,
+        ...(tools?.length ? { tools } : {}),
+        ...(params.temperature != null
+          ? { temperature: params.temperature }
+          : {}),
+      });
+
+      return responsesToCompletion(response, params.model);
+    },
+
+    async *streamChatCompletion(params) {
+      const { instructions, input } = convertMsgsToResponsesInput(
+        params.messages,
+      );
+      const tools = convertToolsToResponses(params.tools);
+
+      const stream = await (openai.responses as any).create({
+        model: params.model,
+        ...(instructions ? { instructions } : {}),
+        input,
+        ...(tools?.length ? { tools } : {}),
+        ...(params.temperature != null
+          ? { temperature: params.temperature }
+          : {}),
+        stream: true,
+      });
+
+      let content = "";
+      const fcMap = new Map<
+        number,
+        { id: string; callId: string; name: string; args: string }
+      >();
+      let respId = "";
+      let respModel = "";
+      let completed = false;
+      let inputTokens = 0;
+      let outputTokens = 0;
+      let respStatus = "";
+      const rawOutputItems: any[] = [];
+
+      for await (const event of stream) {
+        switch ((event as any).type) {
+          case "response.created":
+            respId = (event as any).response?.id ?? "";
+            respModel = (event as any).response?.model ?? "";
+            break;
+
+          case "response.output_item.added": {
+            const item = (event as any).item;
+            if (item?.type === "function_call") {
+              fcMap.set((event as any).output_index, {
+                id: item.id ?? "",
+                callId: item.call_id ?? "",
+                name: item.name ?? "",
+                args: "",
+              });
+            }
+            break;
+          }
+
+          case "response.output_text.delta":
+            if ((event as any).delta) {
+              content += (event as any).delta;
+              yield { type: "text" as const, text: (event as any).delta };
+            }
+            break;
+
+          case "response.function_call_arguments.delta": {
+            const fc = fcMap.get((event as any).output_index);
+            if (fc) fc.args += (event as any).delta ?? "";
+            break;
+          }
+
+          case "response.function_call_arguments.done": {
+            const fc = fcMap.get((event as any).output_index);
+            if (fc && (event as any).arguments)
+              fc.args = (event as any).arguments;
+            break;
+          }
+
+          case "response.output_item.done":
+            if ((event as any).item) rawOutputItems.push((event as any).item);
+            break;
+
+          case "response.completed":
+            completed = true;
+            respStatus = (event as any).response?.status ?? "";
+            inputTokens =
+              (event as any).response?.usage?.input_tokens ?? 0;
+            outputTokens =
+              (event as any).response?.usage?.output_tokens ?? 0;
+            if ((event as any).response?.id)
+              respId = (event as any).response.id;
+            if ((event as any).response?.model)
+              respModel = (event as any).response.model;
+            break;
+
+          case "response.failed":
+            console.warn(
+              `[chatClient] Responses API stream failed: ${JSON.stringify((event as any).response?.error)}`,
+            );
+            break;
+        }
+      }
+
+      if (!completed) {
+        console.warn(
+          `[chatClient] OpenAI Responses stream ended without response.completed`,
+        );
+      }
+
+      const toolCalls: ToolCallEntry[] = [];
+      for (const [, fc] of [...fcMap.entries()].sort(([a], [b]) => a - b)) {
+        const isTruncated = !fc.args && !completed;
+        if (isTruncated) {
+          console.warn(
+            `[chatClient] dropping truncated function_call "${fc.name}" — stream ended before args were received`,
+          );
+          continue;
+        }
+        toolCalls.push({
+          id: fc.callId || fc.id,
+          type: "function" as const,
+          function: { name: fc.name, arguments: fc.args || "{}" },
+        });
+      }
+
+      const hadTruncatedTools =
+        fcMap.size > 0 && toolCalls.length === 0 && !completed;
+
+      const finishReason = hadTruncatedTools
+        ? "length"
+        : toolCalls.length > 0
+          ? "tool_calls"
+          : respStatus === "incomplete"
+            ? "length"
+            : !completed
+              ? "length"
+              : "stop";
+
+      const completion = buildOpenAICompletion({
+        id: respId || `resp-${Date.now()}`,
+        model: respModel || params.model,
+        content: content || null,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        finishReason,
+        promptTokens: inputTokens,
+        completionTokens: outputTokens,
+      });
+
+      // Preserve raw output items so reasoning items survive round-trips
+      if (rawOutputItems.length > 0) {
+        (completion.choices[0].message as any)._responsesOutput =
+          rawOutputItems;
+      }
+
+      yield { type: "completion" as const, response: completion };
+    },
+  };
+}
+
+// ── Responses API helpers ──────────────────────────────────────
+
+/**
+ * Convert Chat Completions message array → Responses API input + instructions.
+ * Reasoning items attached via `_responsesOutput` are round-tripped verbatim.
+ */
+function convertMsgsToResponsesInput(
+  msgs: OpenAI.Chat.ChatCompletionMessageParam[],
+): { instructions: string; input: any[] } {
+  const systemParts: string[] = [];
+  const input: any[] = [];
+
+  for (const msg of msgs) {
+    if (msg.role === "system") {
+      const text = typeof msg.content === "string" ? msg.content : "";
+      if (text) systemParts.push(text);
+      continue;
+    }
+
+    if (msg.role === "user") {
+      const text = typeof msg.content === "string" ? msg.content : "";
+      input.push({ role: "user", content: text });
+      continue;
+    }
+
+    if (msg.role === "assistant") {
+      const rawOutput = (msg as any)._responsesOutput;
+      if (rawOutput) {
+        input.push(...rawOutput);
+        continue;
+      }
+
+      const content = (msg as any).content;
+      const toolCalls = (msg as any).tool_calls;
+
+      if (content && typeof content === "string") {
+        input.push({ role: "assistant", content });
+      }
+
+      if (toolCalls) {
+        for (const tc of toolCalls) {
+          input.push({
+            type: "function_call",
+            call_id: tc.id,
+            name: tc.function.name,
+            arguments: tc.function.arguments || "{}",
+          });
+        }
+      }
+      continue;
+    }
+
+    if (msg.role === "tool") {
+      const toolMsg = msg as any;
+      input.push({
+        type: "function_call_output",
+        call_id: toolMsg.tool_call_id,
+        output: typeof toolMsg.content === "string" ? toolMsg.content : "",
+      });
+      continue;
+    }
+  }
+
+  return { instructions: systemParts.join("\n\n"), input };
+}
+
+/** Convert Chat Completions tool defs → Responses API tool format. */
+function convertToolsToResponses(
+  tools?: OpenAI.Chat.ChatCompletionTool[],
+): any[] | undefined {
+  if (!tools?.length) return undefined;
+  return tools
+    .filter((t): t is Extract<typeof t, { type: "function" }> => t.type === "function")
+    .map((t) => ({
+      type: "function",
+      name: t.function.name,
+      description: t.function.description ?? "",
+      parameters: t.function.parameters ?? { type: "object", properties: {} },
+      strict: false,
+    }));
+}
+
+/** Convert non-streaming Responses API output → Chat Completion. */
+function responsesToCompletion(
+  response: any,
+  requestModel: string,
+): OpenAI.Chat.ChatCompletion {
+  let textContent: string | null = null;
+  const toolCalls: ToolCallEntry[] = [];
+  const rawOutputItems: any[] = [];
+
+  for (const item of response.output ?? []) {
+    rawOutputItems.push(item);
+    if (item.type === "message") {
+      for (const part of item.content ?? []) {
+        if (part.type === "output_text") {
+          textContent = (textContent ?? "") + part.text;
+        }
+      }
+    } else if (item.type === "function_call") {
+      toolCalls.push({
+        id: item.call_id ?? item.id,
+        type: "function",
+        function: {
+          name: item.name,
+          arguments:
+            typeof item.arguments === "string"
+              ? item.arguments
+              : JSON.stringify(item.arguments),
+        },
+      });
+    }
+  }
+
+  const finishReason =
+    toolCalls.length > 0
+      ? "tool_calls"
+      : response.status === "incomplete"
+        ? "length"
+        : "stop";
+
+  const completion = buildOpenAICompletion({
+    id: response.id ?? `resp-${Date.now()}`,
+    model: response.model ?? requestModel,
+    content: textContent,
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    finishReason,
+    promptTokens: response.usage?.input_tokens,
+    completionTokens: response.usage?.output_tokens,
+  });
+
+  if (rawOutputItems.length > 0) {
+    (completion.choices[0].message as any)._responsesOutput = rawOutputItems;
+  }
+
+  return completion;
+}
+
 // ── Shared helpers ────────────────────────────────────────────
 
 type ToolCallEntry = {
@@ -458,11 +775,13 @@ function convertToolsToAnthropic(
   tools?: OpenAI.Chat.ChatCompletionTool[],
 ): Array<{ name: string; description: string; input_schema: unknown }> {
   if (!tools) return [];
-  return tools.map((t) => ({
-    name: t.function.name,
-    description: t.function.description ?? "",
-    input_schema: t.function.parameters ?? { type: "object", properties: {} },
-  }));
+  return tools
+    .filter((t): t is Extract<typeof t, { type: "function" }> => t.type === "function")
+    .map((t) => ({
+      name: t.function.name,
+      description: t.function.description ?? "",
+      input_schema: t.function.parameters ?? { type: "object", properties: {} },
+    }));
 }
 
 // ── Response conversion (Anthropic → OpenAI, non-streaming) ───
