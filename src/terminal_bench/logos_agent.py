@@ -62,7 +62,11 @@ class LogosAgent(BaseInstalledAgent):
                 pairs["API_KEY"] = val
                 break
 
-        for key in ("MODEL", "BASE_URL", "MAX_TURNS"):
+        for key in (
+            "MODEL", "BASE_URL", "MAX_TURNS",
+            "EVALUATOR_MODEL", "EVALUATOR_API_KEY",
+            "EVALUATOR_API_PROVIDER", "EVALUATOR_BASE_URL",
+        ):
             val = os.environ.get(key)
             if val:
                 pairs[key] = val

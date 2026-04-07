@@ -25,6 +25,12 @@
  *   ANTHROPIC_MAX_TOKENS — Max output tokens for Anthropic (default: 65536)
  *   CONTEXT_LIMIT        — Override auto-detected context window size
  *   EVAL_RETRIES         — Evaluator fix attempts after main agent (default: 2, 0 to disable)
+ *
+ *   Cross-validation (optional — evaluator uses a different model):
+ *   EVALUATOR_MODEL      — Model for the evaluator agent (default: same as MODEL)
+ *   EVALUATOR_API_KEY    — API key for the evaluator model (default: same as API_KEY)
+ *   EVALUATOR_API_PROVIDER — "openai"|"anthropic" for evaluator (auto-detected)
+ *   EVALUATOR_BASE_URL   — API endpoint for evaluator model (default: same as BASE_URL)
  */
 import OpenAI from "openai";
 import { reactLoop } from "./agent/core/reactLoop";
@@ -79,7 +85,7 @@ function guessContextLimit(m: string): number {
   const s = m.toLowerCase();
   if (s.includes("deepseek")) return 64_000;
   if (s.includes("gpt-4o") || s.includes("gpt-4-turbo")) return 128_000;
-  if (s.includes("gpt-4")) return 128_000;
+  if (s.includes("gpt-5")) return 400_000;
   if (s.includes("claude")) {
     if (s.includes("1m")) return 1_000_000;
     return 200_000;
@@ -88,6 +94,20 @@ function guessContextLimit(m: string): number {
 }
 const contextLimit =
   parseInt(process.env.CONTEXT_LIMIT ?? "0", 10) || guessContextLimit(model);
+
+// ── Evaluator model (cross-validation) ──────────────────────
+const evalModel = process.env.EVALUATOR_MODEL || undefined;
+const evalApiKey = process.env.EVALUATOR_API_KEY || undefined;
+const evalProviderRaw = process.env.EVALUATOR_API_PROVIDER as
+  | Provider
+  | undefined;
+const evalBaseURL = process.env.EVALUATOR_BASE_URL || undefined;
+
+function resolveEvalProvider(): Provider | undefined {
+  if (!evalModel) return undefined;
+  return evalProviderRaw || detectProvider(evalModel);
+}
+const evalProvider = resolveEvalProvider();
 
 // ── System prompt ────────────────────────────────────────────
 
@@ -189,6 +209,33 @@ async function main(): Promise<void> {
       baseURL: explicitBaseURL ?? defaultBaseURL,
     });
     chatClient = createOpenAIChatClient(openai);
+  }
+
+  // Build evaluator client if cross-validation is configured
+  let evalChatClient: ChatClient | undefined;
+  if (evalModel) {
+    const eKey = evalApiKey ?? apiKey;
+    const eProv = evalProvider ?? provider;
+    const eBase = evalBaseURL ?? (eProv === provider ? explicitBaseURL : undefined);
+    const eDefaultBase =
+      eProv === "anthropic" ? undefined : "https://api.deepseek.com/v1";
+
+    if (eProv === "anthropic") {
+      evalChatClient = await createAnthropicChatClient({
+        apiKey: eKey,
+        baseURL: eBase,
+        maxTokens: parseInt(process.env.ANTHROPIC_MAX_TOKENS ?? "65536", 10),
+      });
+    } else {
+      const eOpenai = new OpenAI({
+        apiKey: eKey,
+        baseURL: eBase ?? eDefaultBase,
+      });
+      evalChatClient = createOpenAIChatClient(eOpenai);
+    }
+    console.log(
+      `[bench-runner] cross-validation: generator=${model} (${provider}), evaluator=${evalModel} (${eProv})`,
+    );
   }
 
   const systemPrompt = buildSystemPrompt(session.useKernel);
@@ -355,6 +402,9 @@ async function main(): Promise<void> {
       temperature: 0.2,
       contextLimit,
       kernelMode: session.useKernel,
+      evalClient: evalChatClient,
+      evalModel,
+      evalContextLimit: evalModel ? guessContextLimit(evalModel) : undefined,
     });
   }
 

@@ -26,6 +26,10 @@ export interface EvalLoopOptions {
   temperature?: number;
   contextLimit?: number;
   kernelMode: boolean;
+  /** Separate model for the evaluator (cross-validation). Falls back to `model`. */
+  evalClient?: ChatClient;
+  evalModel?: string;
+  evalContextLimit?: number;
 }
 
 // ── Main entry point ──────────────────────────────────────────
@@ -76,6 +80,9 @@ interface EvalResult {
 }
 
 async function runEvaluator(opts: EvalLoopOptions): Promise<EvalResult> {
+  const evalClient = opts.evalClient ?? opts.client;
+  const evalModel = opts.evalModel ?? opts.model;
+
   const prompt = buildEvaluatorPrompt(opts.originalTask, opts.kernelMode);
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -88,13 +95,13 @@ async function runEvaluator(opts: EvalLoopOptions): Promise<EvalResult> {
   ];
 
   const loop = reactLoop({
-    client: opts.client,
-    model: opts.model,
+    client: evalClient,
+    model: evalModel,
     messages,
     tools: opts.tools,
     maxTurns: Math.min(opts.maxTurnsPerAgent, 100),
     temperature: opts.temperature ?? 0.2,
-    contextLimit: opts.contextLimit,
+    contextLimit: opts.evalContextLimit ?? opts.contextLimit,
   });
 
   let completeParams: LogosCompleteParams | undefined;
