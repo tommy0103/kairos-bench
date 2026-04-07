@@ -219,7 +219,12 @@ export const AGENT_SKILLS: AgentSkill[] = [
 - Only the **annealing portion** (the part that base-pairs with the template) counts for Tm, NOT the full primer including overhangs/insert.
 - If Tm is outside [58, 72]°C, adjust the annealing length: add 1-2 nt to raise Tm by ~3-5°C, remove 1-2 nt to lower it.
 - A common off-by-2°C error comes from computing Tm on the wrong portion (e.g., including overhang bases in the calculation). Double-check which bases actually anneal.
-- **FINAL STEP**: before writing primers.fasta, verify ALL primers with the exact oligotm command and confirm every Tm is in range. This takes 5 seconds and prevents a 0.0 reward.`,
+
+**CRITICAL — insertion boundary ambiguity**: When inserting sequence into a plasmid (SDM / Q5 mutagenesis), the insertion point often shares bases with the template at both ends. The verifier determines the insert region by its own \`rc(rev) + fwd\` concatenation and \`find(insert)\` — this may shift the boundary by 2-3 bases compared to your analysis. This means bases you consider "annealing" may be counted as part of the insert, shrinking your effective annealing region and lowering Tm.
+- **NEVER design primers where Tm barely passes the threshold** (e.g. 58.04°C for a 58°C minimum). Always target Tm **≥ 60°C** for BOTH primers to leave a ≥ 2°C safety margin.
+- If the reverse primer Tm is borderline, add 2-3 extra annealing bases to push Tm safely above 60°C. This costs nothing but prevents a 0.0 reward from boundary disagreement.
+
+- **FINAL STEP**: before writing primers.fasta, verify ALL primers with the exact oligotm command and confirm every Tm is ≥ 60°C (not merely ≥ 58°C). This takes 5 seconds and prevents a 0.0 reward.`,
   },
   {
     id: "golden-gate-assembly",
