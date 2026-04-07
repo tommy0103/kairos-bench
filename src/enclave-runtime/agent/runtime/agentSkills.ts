@@ -209,22 +209,24 @@ export const AGENT_SKILLS: AgentSkill[] = [
       ["oligotm"],
       ["primer", "mutagenesis"],
     ],
-    hint: `**Primer Tm — ALWAYS verify with the exact oligotm CLI before submitting**:
-- The verifier computes Tm using the \`oligotm\` CLI from primer3 with SPECIFIC flags: \`oligotm -tp 1 -sc 1 -mv 50 -dv 2 -n 0.8 -d 500 <sequence>\`. ANY other method (Python Tm libraries, different flags, Biopython MeltingTemp) will give DIFFERENT values.
-- **Recipe**: after designing each primer, immediately compute its Tm:
-  \`\`\`
-  apt-get install -y primer3
-  oligotm -tp 1 -sc 1 -mv 50 -dv 2 -n 0.8 -d 500 <annealing_portion>
-  \`\`\`
-- Only the **annealing portion** (the part that base-pairs with the template) counts for Tm, NOT the full primer including overhangs/insert.
-- If Tm is outside [58, 72]°C, adjust the annealing length: add 1-2 nt to raise Tm by ~3-5°C, remove 1-2 nt to lower it.
-- A common off-by-2°C error comes from computing Tm on the wrong portion (e.g., including overhang bases in the calculation). Double-check which bases actually anneal.
+    hint: `**Primer Tm — use oligotm CLI as ground truth, and design with generous margins**:
 
-**CRITICAL — insertion boundary ambiguity**: When inserting sequence into a plasmid (SDM / Q5 mutagenesis), the insertion point often shares bases with the template at both ends. The verifier determines the insert region by its own \`rc(rev) + fwd\` concatenation and \`find(insert)\` — this may shift the boundary by 2-3 bases compared to your analysis. This means bases you consider "annealing" may be counted as part of the insert, shrinking your effective annealing region and lowering Tm.
-- **NEVER design primers where Tm barely passes the threshold** (e.g. 58.04°C for a 58°C minimum). Always target Tm **≥ 60°C** for BOTH primers to leave a ≥ 2°C safety margin.
-- If the reverse primer Tm is borderline, add 2-3 extra annealing bases to push Tm safely above 60°C. This costs nothing but prevents a 0.0 reward from boundary disagreement.
+1. **Always use \`oligotm\` from primer3** to compute Tm — never use Python Tm libraries or manual estimates:
+   \`apt-get install -y primer3 && oligotm -tp 1 -sc 1 -mv 50 -dv 2 -n 0.8 -d 500 <annealing_sequence>\`
+   Only the **annealing portion** (the part that base-pairs with the template) counts, NOT the full primer.
 
-- **FINAL STEP**: before writing primers.fasta, verify ALL primers with the exact oligotm command and confirm every Tm is ≥ 60°C (not merely ≥ 58°C). This takes 5 seconds and prevents a 0.0 reward.`,
+2. **Insertion boundary ambiguity**: When comparing input and output plasmids to find the inserted sequence, shared bases at the insertion boundary (e.g. "ag") can be assigned to either the insert or the template. Different tools may define the boundary differently (shifted by 2-3 bases). This means your "annealing portion" and the evaluator's may differ, changing Tm by several degrees.
+
+3. **Design rules to handle ambiguity**:
+   - Target Tm **60-65°C** for both primers (not just ≥ 58°C).
+   - Keep Tm difference **≤ 3°C** (not just ≤ 5°C).
+   - These margins absorb 2-3 base boundary shifts without violating constraints.
+   - If the insertion boundary is ambiguous, try shifting it ±2 bases and check that Tm constraints still hold for all interpretations.
+
+4. **Common pitfalls**:
+   - Computing Tm on the wrong portion (including overhang bases).
+   - Designing a reverse primer whose Tm barely passes 58°C — a 2-base boundary shift can push it below.
+   - Designing primers with Tms far apart (e.g. 65°C vs 59°C) — a boundary shift widens the gap further.`,
   },
   {
     id: "golden-gate-assembly",
