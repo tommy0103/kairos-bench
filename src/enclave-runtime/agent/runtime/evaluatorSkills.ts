@@ -550,6 +550,89 @@ cap.release()
 4. **CRITICAL**: The verifier's tolerance is ±2 frames. Being 1 frame early can fail; being 1 frame late usually still passes. Always prefer the later frame when ambiguous.`,
   },
   {
+    id: "video-jump-robustness",
+    name: "Video Jump Detection Robustness Check",
+    triggers: [
+      ["jump", "video", "frame"],
+      ["jump", "mp4", "frame"],
+      ["takeoff", "land", "frame"],
+      ["jump_analyzer"],
+      ["hurdle", "video"],
+    ],
+    recipe: `### Skill: Video Jump Detection — Robustness to Unseen Videos
+
+**Purpose**: Verify that \`jump_analyzer.py\` doesn't crash on videos with different visual characteristics (different athlete appearance, brightness, contrast). The most common failure is \`ValueError: Could not detect athlete in video\` because thresholds are tuned too tightly to the example.
+
+**Why this matters**: The verifier runs the script on a HIDDEN test video with a different athlete (different clothing, body shape). If the detection parameters are too specific to the example video's visual properties, the script will crash or fail to detect anyone.
+
+**Recipe** — run this to test robustness with altered videos:
+
+\\\`\\\`\\\`python
+#!/usr/bin/env python3
+"""Skill test: Detection robustness — test with brightness/contrast perturbations."""
+import cv2
+import numpy as np
+import subprocess, sys, os, toml
+
+SCRIPT = "/app/jump_analyzer.py"
+EXAMPLE = "/app/example_video.mp4"
+OUTPUT = "/app/output.toml"
+
+# Get baseline result
+r = subprocess.run([sys.executable, SCRIPT, EXAMPLE], cwd="/app", capture_output=True, text=True)
+assert r.returncode == 0, f"Script fails on example video: {r.stderr[-500:]}"
+baseline = toml.load(OUTPUT)
+base_t = baseline["jump_takeoff_frame_number"]
+base_l = baseline["jump_land_frame_number"]
+print(f"Baseline: takeoff={base_t}, landing={base_l}")
+
+def make_perturbed_video(out_path, transform_fn):
+    cap = cv2.VideoCapture(EXAMPLE)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(out_path, fourcc, fps, (w, h))
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        writer.write(transform_fn(frame))
+    writer.release()
+    cap.release()
+
+tests = [
+    ("bright+40", lambda f: np.clip(f.astype(np.int16) + 40, 0, 255).astype(np.uint8)),
+    ("bright-40", lambda f: np.clip(f.astype(np.int16) - 40, 0, 255).astype(np.uint8)),
+    ("low_contrast", lambda f: np.clip(((f.astype(np.float32) - 128) * 0.5 + 128), 0, 255).astype(np.uint8)),
+]
+
+for name, fn in tests:
+    path = f"/tmp/_perturbed_{name}.mp4"
+    make_perturbed_video(path, fn)
+    r = subprocess.run([sys.executable, SCRIPT, path], cwd="/app", capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"FAIL [{name}]: script crashed: {r.stderr[-300:]}")
+        print(f"The detection is NOT robust to {name}. It will likely fail on the hidden test video.")
+        print(f"Fix: use adaptive/multi-threshold detection. Try multiple background subtraction thresholds "
+              f"and pick the one that gives the best signal. Never crash — always produce output.")
+        os.remove(path)
+        sys.exit(1)
+    result = toml.load(OUTPUT)
+    t, l = result["jump_takeoff_frame_number"], result["jump_land_frame_number"]
+    t_ok = abs(t - base_t) <= 3
+    l_ok = abs(l - base_l) <= 3
+    print(f"  [{name}] takeoff={t} (diff={t-base_t}), landing={l} (diff={l-base_l}) -> {'PASS' if t_ok and l_ok else 'WARN'}")
+    os.remove(path)
+
+print("PASS: Script is robust to brightness/contrast perturbations")
+\\\`\\\`\\\`
+
+**How to use**:
+1. Run this BEFORE the other jump detection skill tests. If the script crashes on perturbed videos, it will almost certainly crash on the hidden test video.
+2. If FAIL: report with the crash message. The fixer needs to make detection more robust (multi-threshold, adaptive, never crash).
+3. WARN results (frame off by 1-3) are acceptable — the key is that the script doesn't crash.`,
+  },
+  {
     id: "mips-doom-frame-check",
     name: "MIPS Interpreter Frame Output Check",
     triggers: [

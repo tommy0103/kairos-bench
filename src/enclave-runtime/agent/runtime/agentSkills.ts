@@ -113,16 +113,22 @@ export const AGENT_SKILLS: AgentSkill[] = [
       ["jump_analyzer"],
       ["hurdle", "video"],
     ],
-    hint: `**Jump detection — landing frame accuracy**:
-- The verifier has a TIGHT tolerance window (typically ±2 frames) for the landing frame. Being even 1 frame early will fail.
-- **Common mistake**: detecting "approaching the ground" instead of "feet on the ground". If you use a threshold like "foot position within X% of ground level", you will trigger TOO EARLY while the athlete is still descending.
-- **Correct approach for landing detection**: after the peak of the jump (minimum foot-y or maximum height), find the frame where the foot position **fully returns to AND STABILIZES at** the pre-jump ground level. Specifically:
-  1. Compute the ground-level baseline from the pre-jump frames (e.g., median of \`bot95\` or lowest-body-pixel over frames 0..takeoff-5).
-  2. After the jump peak, find the FIRST frame where the foot metric is within a very small margin (e.g., ≤2 pixels) of the baseline AND the next 2-3 frames also stay at that level.
-  3. This "sustained stability" criterion prevents triggering on transition frames where the feet are close but not yet planted.
-- **Err late, not early — this is the #1 cause of failure**: if uncertain, ALWAYS pick the later frame. The verifier's range starts at the first frame of full ground contact (e.g. [62, 64]), so frame 61 will FAIL but 62-64 will pass. Concretely: after your algorithm detects a candidate landing frame N, ADD 1-2 frames (use N+1 or N+2) as the reported landing. The standard threshold-based approach systematically detects landing ~1 frame early because it triggers on "approaching ground" rather than "feet planted". Compensating with +1 frame is not a hack — it corrects for this systematic bias.
-- **Takeoff is usually easier**: takeoff detection (when feet first leave the ground) is more clear-cut. Focus your debugging effort on the landing frame.
-- **Self-test on the example video**: after getting your takeoff/landing values, visually inspect ±3 frames around your detected landing by dumping those frames as images (\`cv2.imwrite\`) and checking if the athlete's feet are truly on the ground in your landing frame. If they're still slightly airborne, shift 1-2 frames later.`,
+    hint: `**Jump detection — robustness AND landing frame accuracy**:
+
+**#1 PRIORITY — robustness to unseen videos**:
+- The verifier tests on a HIDDEN video with a DIFFERENT athlete (different clothing, body shape, skin tone). Camera position, background, and hurdle are the same.
+- Your detection algorithm MUST NOT crash on unseen videos. The most common failure is \`ValueError: Could not detect athlete in video\` because the thresholds/parameters are tuned too tightly to the example video.
+- **Use very permissive detection**: try MULTIPLE background-subtraction thresholds (e.g. loop from 20 to 80 in steps of 5) and pick the one that gives the best signal. Never hardcode a single threshold.
+- **Use grayscale or LAB difference** for background subtraction — these are more robust to clothing color variation than RGB thresholds.
+- **Never raise errors**: if primary detection fails, fall back to progressively simpler methods. The script must ALWAYS produce an output.toml, even if the result is imperfect.
+- **Test your robustness**: alter the example video (e.g. adjust brightness ±30%, flip horizontally) and verify your script still detects the jump. If it breaks on simple perturbations, it will break on the test video.
+
+**#2 — landing frame accuracy**:
+- The verifier tolerance window is typically ±2 frames. Being 1 frame early will fail.
+- **Common mistake**: detecting "approaching the ground" instead of "feet on the ground". Threshold-based detection triggers 1-2 frames TOO EARLY during descent.
+- **Correct approach**: after the jump peak, find the frame where foot position **fully returns to AND STABILIZES at** the pre-jump ground level (sustained ≥2-3 consecutive frames at baseline).
+- **Err late, not early**: after detecting candidate landing frame N, report N+1 or N+2. The systematic early bias is the #1 accuracy failure.
+- **Takeoff is usually easier** — focus debugging effort on landing.`,
   },
   {
     id: "mips-interpreter-doom",
