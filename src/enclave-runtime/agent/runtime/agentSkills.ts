@@ -302,18 +302,39 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
       ["leaderboard", "curl"],
       ["leaderboard", "fetch"],
       ["mteb", "leaderboard"],
+      ["mteb", "embedding"],
+      ["mteb", "best"],
       ["huggingface", "leaderboard"],
       ["leaderboard", "ranking"],
       ["benchmark", "leaderboard"],
+      ["embedding", "leaderboard"],
       ["scrape", "web", "data"],
     ],
-    hint: `**Web data extraction — NEVER curl entire pages into context**:
+    hint: `**Web data extraction — NEVER curl entire pages or download huge datasets**:
 - Modern web pages (especially HuggingFace Spaces, Gradio apps, dashboards) can be 1-10 MB of HTML/JS. Curling them directly will exceed the LLM context window (1M tokens) and crash the agent.
 - **NEVER** do: \`curl https://some-leaderboard.hf.space/\` or pipe large HTML into the conversation.
-- **Strategy 1: Use Python libraries/APIs first**. For MTEB: \`pip install mteb && python3 -c "from mteb import MTEB; ..."\`. For HuggingFace: use the \`huggingface_hub\` API (\`list_models\`, \`model_info\`).
-- **Strategy 2: If you must scrape**, always limit output: \`curl -s URL | head -c 5000\` or use Python with BeautifulSoup to extract ONLY the data you need (e.g., table rows, JSON data attributes).
-- **Strategy 3: Check for JSON/API endpoints**. Many leaderboards have \`/api/\` endpoints or embed data as JSON in a \`<script>\` tag. Extract the JSON URL from the page head, not the full HTML.
-- **General rule**: any single command output should be < 50KB. If you expect more, pipe through \`head -c 50000\` or filter with \`grep\`/\`python3\` first.`,
+
+**MTEB leaderboard specifically**:
+- **DO NOT use \`mteb.load_results()\`** — it downloads the ENTIRE results repo from GitHub (GB of data), will timeout or OOM in a container.
+- **Best approach**: use the HuggingFace Datasets API to query the pre-computed leaderboard results:
+  \`\`\`
+  pip install datasets
+  from datasets import load_dataset
+  ds = load_dataset("mteb/results", split="train")
+  # Filter to the specific benchmark/tasks you need
+  \`\`\`
+- **Alternative**: use the Gradio API client to query the leaderboard Space:
+  \`\`\`
+  pip install gradio_client
+  from gradio_client import Client
+  client = Client("mteb/leaderboard")
+  result = client.predict(...)
+  \`\`\`
+- **Fallback**: curl the HuggingFace API for specific models: \`curl -s "https://huggingface.co/api/models?search=scandinavian+embedding&sort=downloads&limit=20" | python3 -m json.tool | head -100\`
+
+**General rules**:
+- Any single command output should be < 50KB. If you expect more, pipe through \`head -c 50000\` or filter with \`grep\`/\`python3\` first.
+- If a Python API call takes > 60 seconds, it's probably downloading too much. Use \`timeout 60\` and try a lighter approach.`,
   },
   {
     id: "html-js-sanitization",
