@@ -79,7 +79,7 @@ class LogosAgent(BaseInstalledAgent):
         )
 
     async def install(self, environment: BaseEnvironment) -> None:
-        # 1. System deps (apt with aliyun mirror)
+        # 1. System deps (apt with aliyun mirror) + ensure libssl3 for logos-kernel
         await self.exec_as_root(
             environment,
             command=(
@@ -89,7 +89,16 @@ class LogosAgent(BaseInstalledAgent):
                 "  apt-get update -qq && "
                 "  apt-get install -y -qq --fix-missing curl unzip git ca-certificates && break; "
                 "  echo \"apt retry $i/3...\"; sleep 5; "
-                "done"
+                "done && "
+                "("
+                "  apt-get install -y -qq libssl3 2>/dev/null || "
+                "  ( echo 'deb http://deb.debian.org/debian bookworm main' > /etc/apt/sources.list.d/bookworm-libssl.list && "
+                "    apt-get update -qq && "
+                "    apt-get install -y -qq libssl3 && "
+                "    rm -f /etc/apt/sources.list.d/bookworm-libssl.list && "
+                "    apt-get update -qq "
+                "  ) || echo '[logos-agent] WARNING: could not install libssl3'"
+                ")"
             ),
         )
 

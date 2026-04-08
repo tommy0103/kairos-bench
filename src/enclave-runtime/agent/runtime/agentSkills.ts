@@ -262,6 +262,104 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
 - **Common mistake**: forgetting the clamp. Even a single \`t\` before the BsaI site is sufficient. Without it, BsaI cutting efficiency drops dramatically AND the verifier rejects the primer.`,
   },
   {
+    id: "web-scraping-context-limit",
+    name: "Web scraping context management",
+    triggers: [
+      ["leaderboard", "scrape"],
+      ["leaderboard", "curl"],
+      ["leaderboard", "fetch"],
+      ["mteb", "leaderboard"],
+      ["huggingface", "leaderboard"],
+      ["leaderboard", "ranking"],
+      ["benchmark", "leaderboard"],
+      ["scrape", "web", "data"],
+    ],
+    hint: `**Web data extraction — NEVER curl entire pages into context**:
+- Modern web pages (especially HuggingFace Spaces, Gradio apps, dashboards) can be 1-10 MB of HTML/JS. Curling them directly will exceed the LLM context window (1M tokens) and crash the agent.
+- **NEVER** do: \`curl https://some-leaderboard.hf.space/\` or pipe large HTML into the conversation.
+- **Strategy 1: Use Python libraries/APIs first**. For MTEB: \`pip install mteb && python3 -c "from mteb import MTEB; ..."\`. For HuggingFace: use the \`huggingface_hub\` API (\`list_models\`, \`model_info\`).
+- **Strategy 2: If you must scrape**, always limit output: \`curl -s URL | head -c 5000\` or use Python with BeautifulSoup to extract ONLY the data you need (e.g., table rows, JSON data attributes).
+- **Strategy 3: Check for JSON/API endpoints**. Many leaderboards have \`/api/\` endpoints or embed data as JSON in a \`<script>\` tag. Extract the JSON URL from the page head, not the full HTML.
+- **General rule**: any single command output should be < 50KB. If you expect more, pipe through \`head -c 50000\` or filter with \`grep\`/\`python3\` first.`,
+  },
+  {
+    id: "html-js-sanitization",
+    name: "HTML JS filtering — preserve non-executable content",
+    triggers: [
+      ["filter", "javascript", "html"],
+      ["filter", "js", "html"],
+      ["sanitize", "html", "script"],
+      ["remove", "script", "html"],
+      ["strip", "javascript", "html"],
+    ],
+    hint: `**HTML JS/script filtering — critical edge cases that cause failures**:
+
+1. **HTML comments are NOT executable — preserve them verbatim**:
+   - \`<!-- <script>alert(1)</script> -->\` is a comment, NOT a script tag. Browsers do NOT execute JS inside HTML comments.
+   - Your filter must NOT modify, strip, or truncate content inside \`<!-- ... -->\`. The comment delimiters take precedence over any tags inside them.
+   - Implementation: detect comment boundaries (\`<!--\` to \`-->\`) FIRST, mark them as protected zones, then only process script/event handlers OUTSIDE comments.
+
+2. **Do NOT change attribute formatting**:
+   - If an attribute is unquoted in the input (\`<a href=http://example.com>\`), it must remain unquoted in the output.
+   - Only REMOVE dangerous attributes/values (e.g., \`javascript:\` URLs, \`on*\` event handlers). Do NOT add quotes, normalize whitespace, or reorder attributes.
+   - Avoid using HTML parsers that auto-normalize output (e.g., \`html.parser\` + \`str(soup)\` will reformat). Use regex-based or token-level processing to preserve original formatting.
+
+3. **What to remove vs. what to keep**:
+   - REMOVE: \`<script>...</script>\` tags (outside comments), \`on*\` event handler attributes (\`onclick\`, \`onerror\`, etc.), \`javascript:\` URLs in href/src/action.
+   - KEEP: \`<textarea>\` content (even if it contains the word "script"), plain text containing "script", comments containing script-like text, \`srcset\` attributes (clean only \`javascript:\` URLs, keep normal URLs).
+
+4. **Testing strategy**: after writing the filter, test with these edge cases:
+   \`<!-- <script> not a real tag in comment -->\\n<p>ok</p>\` → output must be identical.
+   \`<a href=http://x.com>\` → must remain unquoted.
+   \`<textarea><script>x</script></textarea><p>x</p>\` → textarea content preserved.`,
+  },
+  {
+    id: "sam-cell-segmentation",
+    name: "SAM/MobileSAM cell segmentation output format",
+    triggers: [
+      ["mobilesam", "segment"],
+      ["sam", "cell", "segment"],
+      ["sam", "mask", "polyline"],
+      ["cell", "segmentation", "csv"],
+      ["sam", "csv", "polyline"],
+    ],
+    hint: `**SAM/MobileSAM cell segmentation — ensure ALL masks are polylines**:
+
+- **CRITICAL**: The verifier checks that EVERY row in the output CSV has \`type=polyline\`, not \`type=rectangle\`. If any masks remain as rectangles, the submission FAILS.
+- **Common pitfall**: MobileSAM's auto-mask generator produces masks as binary arrays. The conversion pipeline often only converts SOME masks to polylines (e.g., those above a size threshold) and leaves others as their original bounding-box rectangles.
+- **Correct approach**:
+  1. Generate masks with MobileSAM's \`SamAutomaticMaskGenerator\`.
+  2. For EACH mask, extract the contour using \`cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)\`.
+  3. Convert the contour to a polyline string (list of x,y coordinate pairs).
+  4. Set \`type=polyline\` for ALL rows. There should be ZERO \`type=rectangle\` rows.
+- **Post-processing validation**: After generating the output CSV, ALWAYS run a sanity check:
+  \`python3 -c "import pandas as pd; df=pd.read_csv('/app/output.csv'); print('rectangle rows:', (df['type']=='rectangle').sum()); assert (df['type']=='rectangle').sum() == 0, 'FAIL: still have rectangle rows'"\`
+- **Overlap resolution**: After converting to polylines, there may be overlapping regions. Resolve overlaps by keeping the smaller mask (higher priority), then re-extract polylines from the final non-overlapping masks.`,
+  },
+  {
+    id: "service-daemon-startup",
+    name: "Start long-running services in daemon/background mode",
+    triggers: [
+      ["mailman", "start"],
+      ["mailman", "configure"],
+      ["mailman3"],
+      ["postfix", "mailman"],
+    ],
+    hint: `**Service startup — ALWAYS use daemon/background mode**:
+
+- **CRITICAL**: \`logos_exec\` has a timeout (typically 590s). If a service command blocks (runs in foreground), it will eat the entire timeout and the agent loses all remaining time.
+- **Mailman-specific**:
+  - \`mailman start\` can block if the runner process doesn't fully detach. ALWAYS use: \`mailman start &\` or \`su - list -s /bin/bash -c "mailman start &"\`, then \`sleep 3 && mailman status\` to verify.
+  - Start Postfix first (\`postfix start\` auto-daemonizes), THEN start Mailman.
+  - After starting, verify with \`mailman status\` and \`postfix status\` — don't assume success.
+- **General service rules**:
+  - \`nginx\` → auto-daemonizes (no \`&\` needed, but \`nginx -g "daemon off;"\` WILL block — never use that).
+  - \`uwsgi\` / \`gunicorn\` → use \`--daemon\` flag or \`&\`.
+  - Database servers (\`postgres\`, \`mysql\`) → use \`pg_ctlcluster ... start\` or \`service mysql start\`.
+  - Any unknown service → append \`&\`, wait 2-3s, check \`pgrep -a <name>\`.
+- **Recovery**: if a command times out, the process may still be alive. Check with \`pgrep -f <service>\` and proceed if it's running. Don't waste time restarting what's already working.`,
+  },
+  {
     id: "stan-mcmc-optimization",
     name: "Stan/MCMC sampling optimization",
     triggers: [
