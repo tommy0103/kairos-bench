@@ -1256,6 +1256,219 @@ fi
 4. If any check FAILs, report **FAIL** with the specific error. The diagnostic messages tell the fixer exactly what's wrong.
 5. **IMPORTANT**: The visual feedback check uses a slightly lower threshold (8%) than the verifier (10%) to catch borderline cases early. If this check barely passes (8-12%), warn that it's marginal.`,
   },
+  {
+    id: "mailman-mailing-list",
+    name: "Mailman3 Mailing List Verification",
+    triggers: [
+      ["mailman", "start"],
+      ["mailman", "configure"],
+      ["mailman3"],
+      ["postfix", "mailman"],
+      ["mailing list", "postfix"],
+      ["reading-group", "mailman"],
+    ],
+    recipe: `### Skill: Mailman3 Mailing List — End-to-End Verification
+
+**Purpose**: Verify that the mailman3 mailing list is fully functional: join by email, confirmation, posting to subscribers, and leave by email. This test must handle timing correctly — mailman processes emails asynchronously.
+
+**Why this matters**: The most common false negative is testing too fast. Mailman's command/pipeline runners process emails every ~1s. If you check the mailbox immediately after sending, the confirmation hasn't arrived yet and the test falsely fails. ALWAYS sleep between send and check.
+
+**Recipe** — adapt the list address and run:
+
+\\\`\\\`\\\`python
+#!/usr/bin/env python3
+"""Skill test: Mailman3 join → confirm → post → leave → confirm flow."""
+import subprocess, smtplib, time, mailbox, os, sys, re, pwd
+
+LIST_ADDR = "reading-group@local.edu"
+LIST_DOMAIN = LIST_ADDR.split("@")[1]
+
+def sh(cmd):
+    r = subprocess.run(cmd, shell=True, text=True, capture_output=True)
+    return r
+
+def ensure_user(name):
+    """Create unix user and empty mailbox with correct permissions."""
+    sh(f"id {name} || useradd -m {name}")
+    mbox_path = f"/var/mail/{name}"
+    sh(f"touch {mbox_path} && chown {name}:mail {mbox_path} && chmod 660 {mbox_path}")
+
+def send_mail(from_addr, to_addr, subject="", body=""):
+    from email.mime.text import MIMEText
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = from_addr
+    msg["To"] = to_addr
+    with smtplib.SMTP("127.0.0.1", 25) as s:
+        s.sendmail(from_addr, [to_addr], msg.as_string())
+
+def get_messages(user):
+    mbox_path = f"/var/mail/{user}"
+    if not os.path.exists(mbox_path):
+        return []
+    m = mailbox.mbox(mbox_path)
+    msgs = list(m)
+    m.close()
+    return msgs
+
+def wait_for_mail(user, min_count, description, timeout=30):
+    """Poll mailbox until min_count messages arrive."""
+    for _ in range(timeout // 2):
+        time.sleep(2)
+        msgs = get_messages(user)
+        if len(msgs) >= min_count:
+            return msgs
+    msgs = get_messages(user)
+    if len(msgs) < min_count:
+        print(f"TIMEOUT: {description} — {user} has {len(msgs)} messages, expected >= {min_count}")
+        for i, m in enumerate(msgs):
+            print(f"  [{i}] Subject: {m.get('Subject','?')}")
+        return None
+    return msgs
+
+def extract_confirm_addr(msgs):
+    """Find the confirm+TOKEN address in mailbox messages."""
+    for msg in msgs:
+        from_addr = msg.get("From", "")
+        match = re.search(r"[\\w.-]+-confirm\\+[a-f0-9]+@[\\w.-]+", from_addr)
+        if match:
+            return match.group(0)
+        body = ""
+        if msg.is_multipart():
+            for part in msg.walk():
+                if part.get_content_type() == "text/plain":
+                    body += part.get_payload(decode=True).decode("utf-8", errors="replace")
+        else:
+            body = msg.get_payload(decode=True).decode("utf-8", errors="replace") if msg.get_payload(decode=True) else ""
+        match = re.search(r"[\\w.-]+-confirm\\+[a-f0-9]+@[\\w.-]+", body)
+        if match:
+            return match.group(0)
+    return None
+
+failed = 0
+# --- Check 1: Services running ---
+r = sh("postfix status 2>&1")
+if "is running" not in r.stdout + r.stderr:
+    print("FAIL: postfix is not running")
+    failed += 1
+else:
+    print("OK: postfix running")
+
+r = sh("su -s /bin/bash list -c 'mailman status' 2>&1 || mailman --run-as-root status 2>&1")
+if "is running" not in r.stdout:
+    print("FAIL: mailman is not running")
+    failed += 1
+else:
+    print("OK: mailman running")
+
+# --- Check 2: Config file exists ---
+if os.path.exists("/etc/mailman3/mailman.cfg"):
+    print("OK: /etc/mailman3/mailman.cfg exists")
+else:
+    print("FAIL: /etc/mailman3/mailman.cfg missing")
+    failed += 1
+
+# --- Check 3: List exists ---
+r = sh("mailman --run-as-root lists 2>&1 || su -s /bin/bash list -c 'mailman lists' 2>&1")
+if LIST_ADDR in r.stdout:
+    print(f"OK: {LIST_ADDR} exists")
+else:
+    print(f"FAIL: {LIST_ADDR} not found in mailman lists")
+    failed += 1
+
+# --- Check 4: Join → Confirm → Post → Receive → Leave → Confirm ---
+USER1 = "evaluser1"
+USER2 = "evaluser2"
+ensure_user(USER1)
+ensure_user(USER2)
+
+# Clear mailboxes
+for u in [USER1, USER2]:
+    sh(f"> /var/mail/{u}")
+
+# Join user1
+list_join = LIST_ADDR.replace("@", "-join@")
+send_mail(f"{USER1}@{LIST_DOMAIN}", list_join, "join")
+msgs = wait_for_mail(USER1, 1, f"{USER1} gets join confirmation")
+if msgs is None:
+    print(f"FAIL: {USER1} never received join confirmation")
+    failed += 1
+else:
+    confirm_addr = extract_confirm_addr(msgs)
+    if not confirm_addr:
+        print(f"FAIL: could not find confirm address in {USER1}'s mail")
+        failed += 1
+    else:
+        print(f"OK: {USER1} received join confirmation (reply to {confirm_addr})")
+        send_mail(f"{USER1}@{LIST_DOMAIN}", confirm_addr, "confirm")
+        time.sleep(5)
+
+        # Verify membership
+        r = sh(f"mailman --run-as-root members {LIST_ADDR} 2>&1 || su -s /bin/bash list -c 'mailman members {LIST_ADDR}' 2>&1")
+        if f"{USER1}@{LIST_DOMAIN}" in r.stdout:
+            print(f"OK: {USER1} is now a member")
+        else:
+            print(f"FAIL: {USER1} not in member list after confirm")
+            failed += 1
+
+# Join user2
+send_mail(f"{USER2}@{LIST_DOMAIN}", list_join, "join")
+msgs = wait_for_mail(USER2, 1, f"{USER2} gets join confirmation")
+if msgs:
+    confirm_addr = extract_confirm_addr(msgs)
+    if confirm_addr:
+        send_mail(f"{USER2}@{LIST_DOMAIN}", confirm_addr, "confirm")
+        time.sleep(5)
+        print(f"OK: {USER2} confirmed join")
+
+# Post to list
+sh(f"> /var/mail/{USER1}")
+sh(f"> /var/mail/{USER2}")
+send_mail(f"{USER1}@{LIST_DOMAIN}", LIST_ADDR, "Test announcement", "Hello from the list")
+msgs = wait_for_mail(USER2, 1, f"{USER2} receives post")
+if msgs is None:
+    print(f"FAIL: {USER2} never received the list post")
+    failed += 1
+else:
+    print(f"OK: {USER2} received the list post")
+
+# Leave user2
+sh(f"> /var/mail/{USER2}")
+list_leave = LIST_ADDR.replace("@", "-leave@")
+send_mail(f"{USER2}@{LIST_DOMAIN}", list_leave, "leave")
+msgs = wait_for_mail(USER2, 1, f"{USER2} gets leave confirmation")
+if msgs is None:
+    print(f"FAIL: {USER2} never received leave confirmation")
+    failed += 1
+else:
+    confirm_addr = extract_confirm_addr(msgs)
+    if confirm_addr:
+        send_mail(f"{USER2}@{LIST_DOMAIN}", confirm_addr, "confirm")
+        time.sleep(5)
+        r = sh(f"mailman --run-as-root members {LIST_ADDR} 2>&1 || su -s /bin/bash list -c 'mailman members {LIST_ADDR}' 2>&1")
+        if f"{USER2}@{LIST_DOMAIN}" not in r.stdout:
+            print(f"OK: {USER2} successfully left the list")
+        else:
+            print(f"FAIL: {USER2} still in member list after leave confirm")
+            failed += 1
+    else:
+        print(f"FAIL: could not find leave confirm address")
+        failed += 1
+
+if failed > 0:
+    print(f"\\n{failed} check(s) FAILED")
+    sys.exit(1)
+print("\\nALL MAILMAN CHECKS PASSED")
+\\\`\\\`\\\`
+
+**How to use**:
+1. Adapt LIST_ADDR if the list name differs.
+2. Write to temp file, run: \`python3 /tmp/_skill_mailman_check.py\`
+3. **CRITICAL**: this script uses \`ensure_user\` to create users AND set correct mailbox ownership (\`chown user:mail\` + \`chmod 660\`). Without this, postfix cannot deliver and the test falsely fails with "Permission denied".
+4. **CRITICAL**: the script uses \`wait_for_mail\` with polling (sleep 2 × 15 rounds = 30s timeout). NEVER check the mailbox immediately after sending — always poll.
+5. If FAIL on join confirmation: check that postfix routes \`*-join@\` to mailman LMTP (\`transport_maps\`).
+6. If FAIL on post delivery: check that mailman's pipeline runner is alive (\`ps aux | grep runner\`) and the mail queue is empty (\`mailq\`).`,
+  },
 ];
 
 // ── Skill detection ──────────────────────────────────────────
