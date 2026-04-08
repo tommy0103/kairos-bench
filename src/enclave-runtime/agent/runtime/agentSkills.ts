@@ -430,7 +430,14 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
   1. \`postfix status\` → running
   2. \`mailman status\` → all runners alive
   3. Send a test message with \`/app/eval.py\` (if provided) or \`echo "test" | mail -s test reading-group@local.edu\`
-  4. Check \`/var/mail/<user>\` for delivery — if empty, check logs, don't just restart services.`,
+  4. Check \`/var/mail/<user>\` for delivery — if empty, check logs, don't just restart services.
+
+**Mailman3 confirmation timing — the hidden trap**:
+- Mailman processes emails asynchronously via runners (command, pipeline, etc.). The default \`sleep_time\` is 1s per runner cycle. After sending a join/leave/confirm email via SMTP, you must **wait for the runner to process it** before checking the result or sending the next email.
+- **Always \`sleep 5\` after sending any email** to mailman (join, confirm reply, leave, post). If you check too fast, the confirmation hasn't been processed yet and the next action fails.
+- **LMTP port (8024) may not be ready immediately** after \`mailman start\`. Always verify: \`python3 -c "import socket; s=socket.socket(); s.settimeout(5); s.connect(('127.0.0.1', 8024)); s.close(); print('OK')"\`. If it fails, wait and retry — don't proceed with list creation until LMTP is up.
+- **The join→confirm→leave flow must be sequential with waits**: send join → sleep 5 → read confirmation token from mailbox → send confirm reply → sleep 5 → verify membership → then proceed. Skipping waits causes "unverified email" errors on leave.
+- **Never patch mailman source code**. If the flow doesn't work, the problem is almost always: (a) runner not processing fast enough (add sleeps), (b) permissions on queue dirs, or (c) postfix not routing confirm emails back to mailman's LMTP. Check \`/var/log/mailman3/mailman.log\` for the actual error.`,
   },
   {
     id: "stan-mcmc-optimization",
