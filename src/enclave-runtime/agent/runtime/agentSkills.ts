@@ -419,7 +419,18 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
   - \`uwsgi\` / \`gunicorn\` → use \`--daemon\` flag or \`> /tmp/x.log 2>&1 &\`.
   - Database servers (\`postgres\`, \`mysql\`) → use \`pg_ctlcluster ... start\` or \`service mysql start\`.
   - Any unknown service → \`service_cmd > /tmp/svc.log 2>&1 &\`, wait 2-3s, check \`pgrep -a <name>\`.
-- **Recovery**: if a command times out, the process may still be alive. Check with \`pgrep -f <service>\` and proceed if it's running. Don't waste time restarting what's already working.`,
+- **Recovery**: if a command times out, the process may still be alive. Check with \`pgrep -f <service>\` and proceed if it's running. Don't waste time restarting what's already working.
+
+**Mailman3 message delivery — common pipeline failures**:
+- **Permissions are the #1 cause of stuck messages**. All files under \`/var/lib/mailman3/\` must be owned by the \`list\` user. Run \`chown -R list:list /var/lib/mailman3\` BEFORE starting mailman. Same for \`/run/mailman3\` and \`/var/log/mailman3\`.
+- **\`postmap\` must succeed**: mailman regenerates \`postfix_lmtp\` and \`postfix_domains\` maps when starting. If \`postmap\` fails (wrong permissions on data dir, or \`postmap\` not in PATH for the \`list\` user), postfix won't know how to route mail to mailman's LMTP. Fix: ensure \`/usr/sbin/postmap\` is accessible and the output \`.db\` files are writable by \`list\`.
+- **Check queue dirs, not just processes**: if \`/var/lib/mailman3/queue/pipeline/\` has stuck \`.pck\` files but \`/var/lib/mailman3/queue/out/\` is empty, the pipeline runner is failing silently. Check \`/var/log/mailman3/mailman.log\` and \`smtp.log\` for the actual error — don't just kill/restart.
+- **The \`list\` user's home dir**: \`su - list\` may warn "cannot change directory to /var/list". Fix: \`mkdir -p /var/list && chown list:list /var/list\` or use \`su -s /bin/bash list\` (without \`-\`) to skip home dir.
+- **Verify the full delivery path BEFORE calling done**:
+  1. \`postfix status\` → running
+  2. \`mailman status\` → all runners alive
+  3. Send a test message with \`/app/eval.py\` (if provided) or \`echo "test" | mail -s test reading-group@local.edu\`
+  4. Check \`/var/mail/<user>\` for delivery — if empty, check logs, don't just restart services.`,
   },
   {
     id: "stan-mcmc-optimization",
