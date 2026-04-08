@@ -113,28 +113,26 @@ export const AGENT_SKILLS: AgentSkill[] = [
       ["jump_analyzer"],
       ["hurdle", "video"],
     ],
-    hint: `**Jump detection — USE THE HURDLE POSITION as the anchor**:
+    hint: `**Jump detection — KEY DESIGN DECISIONS (these determine success or failure)**:
 
-**#1 CRITICAL — the hurdle is your best signal, not vertical motion alone**:
-- The test video is MUCH longer than the example (~270+ frames vs ~120). The athlete runs for 200+ frames before the hurdle jump. Looking for "the largest vertical displacement" or "first significant motion" WILL fail — running strides, the athlete entering the frame, and other events can produce false positives.
-- **The hurdle is at a FIXED horizontal position in ALL videos** (same camera, same track, same hurdle). Detect the hurdle's x-position from frame 0 (no runner, hurdle is visible as vertical edges in the lower half of the frame).
-- **The jump = the athlete passing over the hurdle**. Track the athlete's center-x across frames. The jump happens in the ~10-frame window where center-x is near the hurdle's x-position. Only analyze vertical displacement within this window.
-- **Algorithm recommendation**:
-  1. Frame 0: detect the hurdle (vertical edge features in the track region, y ∈ [200,400]). Record its x-position.
-  2. Track athlete bounding box across all frames via background subtraction.
-  3. Find the frame(s) where athlete center-x is closest to the hurdle's x-position.
-  4. Within a ±15 frame window around that crossing, find takeoff (last ground-level frame before the vertical peak) and landing (first stable ground-level frame after the peak).
-- **Fallback if hurdle detection is hard**: use the example video to determine the hurdle's approximate x-position (it's the same in all videos). In the example, note where center-x is during the jump peak — that x-coordinate is the hurdle position.
+The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump at ~53). Three design decisions separate working algorithms from broken ones:
 
-**#2 — robustness**:
-- Different athlete (clothing, body shape). Use adaptive multi-threshold background subtraction.
-- Never raise errors — always produce output.toml even with degraded accuracy.
+**Decision 1: Anchor to the hurdle position**
+- The hurdle is at a FIXED x-position in all videos (same camera, same track). Detect it from frame 0 (no runner) using vertical edge detection (e.g., Sobel) in the track region (lower-middle of the frame).
+- The jump = the athlete crossing the hurdle's x-position. Find the frame where athlete center-x is closest to hurdle_x, then analyze vertical displacement in a ±15 frame window around that crossing. This prevents false positives from running strides, athlete entry, or other motion events.
 
-**#3 — frame accuracy (±1 frame matters!)**:
-- Verifier tolerance is only ±2 frames. Getting it exactly right is crucial.
-- **Landing**: the first frame where your lower-body metric recovers is "foot touching ground" — the verifier wants "feet fully planted." ALWAYS add +1 to the first recovery frame. Example: if your metric shows frame 61 = first ground contact, report landing = **62**. This is not optional.
-- **Takeoff**: the verifier wants the LAST frame where the athlete is still on the ground before the jump. If your metric shows frame 53 = firmly on ground, frame 54 = pushing off (metric partially drops), report takeoff = **53** (the firmly-on-ground frame), NOT 54. When ambiguous, pick the EARLIER frame for takeoff.
-- **Self-check**: after computing both values, verify takeoff < landing and the gap is reasonable (8-15 frames for a hurdle jump).`,
+**Decision 2: Use frame-to-frame differencing, not just background subtraction**
+- Background subtraction alone (\`|frame - frame_0|\`) detects the hurdle itself as a foreground object (it has texture, shadows, etc.). This corrupts the athlete's center-x and bottom-y metrics.
+- Combine background diff with FRAME-TO-FRAME differencing (\`|frame_i - frame_{i-2}|\`): foreground = (bg_diff > T) AND (frame_diff > T/2). This isolates only MOVING objects, removing static features like the hurdle. This is the #1 reason some algorithms fail — they mistrack because they detect the hurdle as foreground.
+
+**Decision 3: Use a robust foot metric (bottom_95, not bottom_max)**
+- Use the 95th percentile of foreground y-coordinates as the foot position (bottom_95), not the maximum. The maximum is noisy (single outlier pixels). bottom_95 gives a stable signal for the actual foot level.
+- Ground level = median of the highest bottom_95 values (top 30%) in the detection window. Air vs ground threshold = ground_level minus ~20% of the total jump range.
+
+**Frame offset rules (±1 frame matters!)**:
+- **Takeoff**: report the LAST frame where the foot metric is firmly at ground level (with the NEXT frame clearly in the air). When ambiguous, pick the EARLIER frame.
+- **Landing**: the first recovery frame is "foot touching" not "feet planted." ALWAYS add +1. Example: if bottom_95 first recovers at frame 61, report landing = **62**.
+- Verify: takeoff < landing, gap ≈ 8-15 frames for a hurdle jump at 30fps.`,
   },
   {
     id: "mips-interpreter-doom",
