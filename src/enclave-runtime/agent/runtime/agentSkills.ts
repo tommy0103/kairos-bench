@@ -583,72 +583,88 @@ cleaned = cleaner.clean_html(html_content)
       ["regex", "substitution", "json"],
       ["re.json", "re.sub"],
       ["regex", "replacement", "pair"],
+      ["regex", "chess"],
+      ["re.json", "chess"],
     ],
     hint: `**Regex substitution pipelines — development speed is everything**:
 
-## CRITICAL — Do NOT enter plan mode
+## CRITICAL — Do NOT use plan mode (this determines success or failure)
 
-This task has a hard 1-hour time limit. Plan mode creates 5-7 executor sub-agents, each with startup + context-reading overhead (~2 min each). That's 10-15 minutes wasted on orchestration alone, and context is fragmented across step logs.
+This task has a hard 1-hour time limit. **Do NOT call \`logos_complete\` with a \`plan\` array.** Plan mode creates sub-agents with startup overhead (~2 min each), fragmenting context across step logs and wasting 10-15 minutes.
 
-**Stay in a single session.** You have a 1M-token context window — more than enough for the entire gen.py (typically <1500 lines) plus all debugging output. Benefits:
-- Save ~15 min of planner/executor overhead
-- Full context continuity — you can see all your code while debugging
-- Faster iteration — no need to re-read step logs
-
-**Do NOT call \`logos_complete\` with a \`plan\` array.** Instead, work through all phases sequentially in one session, calling \`logos_exec\` / \`logos_write\` / \`logos_read\` directly.
+**Stay in a single session.** Call \`logos_exec\` / \`logos_write\` / \`logos_read\` directly. You have a 1M-token context window — more than enough for gen.py (<500 lines) plus all debugging.
 
 ---
 
-Your biggest time constraint is the edit→test cycle. The provided test suite (e.g. \`check.py\`) often runs the ENTIRE regex pipeline on many inputs, taking 30-90 seconds per run. Running it after every small change will eat your entire time budget.
+## Proven architecture for chess regex move generation
 
-**Use a reference library as an instant oracle**:
-- If the task involves chess: \`python-chess\` is already installed. For ANY position, get ground truth in <1 second:
-  \`\`\`python
-  import chess
-  b = chess.Board(fen)
-  expected = sorted(set(
-      b.fen().rsplit(' ', 2)[0]  # strip move counters
-      for m in b.legal_moves
-      for _ in [b.push(m)]
-      for __ in [None]
-      if not b.pop()
-  ))
-  \`\`\`
-- Build a quick \`test_one(fen)\` function that runs your regex pipeline on a single FEN and compares against the oracle. This gives instant feedback.
+The following 6-phase architecture produces correct results with ~6300 rules, ~735KB, ~2-5s per position. Follow this blueprint exactly:
 
-**Build and test incrementally — phase by phase**:
-1. **Phase 1**: FEN expansion (numbers→dots) + compression (dots→numbers). Test: expand then compress should round-trip.
-2. **Phase 2**: Pseudo-legal move generation (one piece type at a time). Test: for the starting position, king has 0 pseudo-legal moves, each knight has 2, pawns have 16 total. Compare move counts against oracle.
-3. **Phase 3**: Legality filtering (remove positions where own king is in check). This is the hardest part — see incremental strategy below.
-4. **Phase 4**: Castling and en passant. Castling legality requires checking that the king does NOT pass through any attacked square (not just the destination). Test specific positions where castling is/isn't legal.
+**Phase 1 — FEN expansion** (~14 rules):
+- Strip halfmove/fullmove: \`' (\\d+) (\\d+)$' → ''\`
+- Expand digits to dots (8 down to 1) ONLY in the board part
+- **PITFALL**: en-passant field (e.g. \`d6\`, \`a3\`) contains digits that must NOT be expanded. Use double lookbehind: \`'(?<! )(?<! [a-h])' + str(d) + '(?=[^\\\\n]* )'\`. The naive pattern turns \`d6\` into \`d......\` and corrupts the FEN.
+- Mark original board with \`!\` prefix for later reference, append \`~\` separator
 
-## CRITICAL — Incremental legality filtering (Phase 3)
+**Phase 2 — Move generation** (~3836 rules):
+- Use a \`make_move(from_f, from_r, to_f, to_r, piece, dest_pattern, ...)\` helper that builds a regex matching the original board and appends \`~new_position\`
+- Generate: Knight (all from/to pairs), King (non-castling, adjacent squares), Pawn (single push, double push, captures, promotion to Q only, en passant), Bishop/Rook/Queen (all from/to pairs with path-clearance — intermediate squares must be \`.\`)
+- Board uses 9-char rows (8 squares + \`/\` separator), so \`sq(file, rank) = (7 - rank) * 9 + file\`
 
-Do NOT write all attack-detection rules at once and then debug them together. Build legality filtering **incrementally by attacker type**, testing after each:
+**Phase 2b — Castling safety pre-check** (~130 rules — KEY INSIGHT):
+- Before generating castling moves, check if e1/f1/g1 (kingside) or e1/d1/c1 (queenside) are attacked in the ORIGINAL board
+- For each attack pattern that could hit these squares, add a rule that REMOVES the corresponding castling letter (K/Q) from the original board's metadata
+- This prevents illegal castling moves from being generated in the first place, keeping the rule count low (~6300 total vs ~9200+ with post-filtering approaches)
 
-1. **Pawn attacks** (~16 rules): fixed-distance diagonal patterns. After adding, run your oracle test on 3-5 positions with pawn checks. All pawn-check positions should now be correctly filtered.
-2. **Knight attacks** (~50 rules): fixed L-shape offsets. Test on positions with knight forks/checks.
-3. **King proximity** (~46 rules): adjacent-square attacks. Test on positions with kings near each other.
-4. **Rook/Queen rank+file attacks** (~variable): sliding along ranks and files, blocked by any piece. Test on positions with rook pins, battery checks.
-5. **Bishop/Queen diagonal attacks** (~variable): sliding along diagonals. Test on positions with bishop pins, discovered checks.
+**Phase 2c — Castling moves** (~2 rules):
+- Now safe to generate O-O and O-O-O (pattern matches K at e1 + R at h1/a1 + castling letter present)
 
-After each attacker type, run your \`test_one(fen)\` oracle on 3-5 targeted positions to verify JUST that attacker type works. This way:
-- Each debugging round has a small, bounded scope (you know which rules just changed)
-- You don't end up debugging 2000+ rules at once
-- You catch bugs early when they're cheap to fix
+**Phase 3 — Convert to lines** (~3 rules):
+- Remove original board prefix (\`^[^~]*~\` → empty), split \`~\` → newlines
 
-**Only run the full test suite (\`check.py\`) after ALL attacker types are working individually.** Target: ≤2 full check.py runs.
+**Phase 4 — Castling rights update** (~12 rules):
+- Post-move update: if K not at e1 → remove K/Q; if R not at h1 → remove K; if R not at a1 → remove Q; same for black
+- Fix empty castling field: \` b  -\` → \` b - -\`
+
+**Phase 5 — Legality filter** (~2300 rules):
+- For each of 64 possible white King positions, check if attacked by black pawn/knight/bishop/rook/queen
+- Mark illegal lines with \`~\` prefix, then remove them
+- **Build incrementally by attacker type** (pawn → knight → king → rook/queen → bishop/queen), running oracle test on 3-5 targeted positions after each
+
+**Phase 6 — Compact** (~9 rules):
+- Compress dots→digits (8 down to 1), add \`0 0\` counters
 
 ---
 
-**Castling legality — the #1 debugging time sink**:
-- Kingside (O-O): king traverses e1→f1→g1. ALL THREE squares must not be attacked.
-- Queenside (O-O-O): king traverses e1→d1→c1. ALL THREE must not be attacked (b1 only needs to be empty, not unattacked).
-- Reuse your legality-filtering attack-detection patterns for these intermediate squares instead of writing separate logic.
+## CRITICAL — Time management (the #1 success factor)
+
+Once \`check.py\` passes, you are ~80% done. **Do NOT run exhaustive random tests.**
+
+**After check.py passes**:
+1. Run 5-10 targeted edge cases: castling through check, en passant, promotion, pins (~60s total)
+2. Verify the sample output from the task description matches exactly
+3. **Immediately call \`logos_complete\`** — do NOT attempt more random testing
+
+The evaluator/fixer cycle (up to 3 rounds) is specifically designed to catch remaining edge-case bugs. Trust it — that's a far better use of time than running 50+ random positions at ~5s each, which will hit the 590s logos_exec timeout and waste the entire window.
+
+Successful runs: agent completes in ~40 min, leaving ~20 min for evaluator/fixer to polish. Failed runs: agent spends all 60 min on random testing, times out, evaluator never runs.
+
+---
+
+**Use python-chess as an instant oracle**:
+\`\`\`python
+import chess
+b = chess.Board(fen)
+expected = sorted(set(
+    b.fen().rsplit(' ', 2)[0]
+    for m in b.legal_moves if not (m.promotion and m.promotion != chess.QUEEN)
+    for _ in [b.push(m)] for __ in [None] if not b.pop()
+))
+\`\`\`
+Build a \`test_one(fen)\` function for instant single-position feedback instead of running check.py repeatedly.
 
 **Common pitfall — marker character collisions**:
-- If you use a marker character (e.g. \`!\` or \`\\x00\`) to flag lines for deletion, make sure it cannot appear in valid FEN output. Use a character outside the FEN alphabet.
-- Apply deletion rules LAST, after all marking is done.`,
+- Marker characters (\`!\`, \`~\`) must not appear in valid FEN output. Apply deletion rules LAST.`,
   },
 ];
 
