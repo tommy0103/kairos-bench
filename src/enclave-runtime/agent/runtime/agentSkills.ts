@@ -439,6 +439,16 @@ def post_sanitize(text):
     return text
 \`\`\`
 
+**CRITICAL — Final output normalization step**:
+The verifier's \`test_clean_html_unchanged\` compares \`str(BeautifulSoup(original, "html.parser"))\` against the raw filtered output. This means the verifier expects the output to be normalized through BS4's html.parser. After all sanitization, always normalize before writing:
+\`\`\`python
+from bs4 import BeautifulSoup
+# After all sanitization/post-processing:
+final = str(BeautifulSoup(sanitized_content, "html.parser"))
+Path(sys.argv[1]).write_text(final)
+\`\`\`
+Without this step, clean HTML that passes through unchanged will FAIL because BS4 reorders attributes alphabetically, converts \`<br>\` to \`<br/>\`, and decodes entities like \`&copy;\` → \`©\`. The verifier normalizes the original but NOT the output, so your output must already be BS4-normalized.
+
 **Why NOT custom regex/tokenizer**:
 - XSS test downloads 400+ attack vectors from GitHub and tests them in a real Chrome browser via Selenium
 - Vectors include: \`<object><param value="javascript:...">\`, \`style="-moz-binding:url(data:...)">\`, \`<!--[if gte IE 4]> <SCRIPT>\`, \`<div oonmouseover=nmouseover=alert()>\`, etc.

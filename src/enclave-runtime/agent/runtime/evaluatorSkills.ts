@@ -793,7 +793,8 @@ print("\\nALL XSS SANITIZATION CHECKS PASSED")
 2. If many XSS vectors pass through: the agent is likely using a custom regex/tokenizer. The fix is to use \`bleach\` or \`lxml.html.clean\` — they handle all these vectors out of the box.
 3. If clean HTML check fails (content is missing): the filter is stripping legitimate HTML tags. Widen the tag whitelist.
 4. **If the solution uses bleach and passes all XSS vectors above, mark it PASS** — even if \`diff\` shows minor formatting differences like \`<tbody>\` insertion or attribute reordering. The real verifier normalizes through BeautifulSoup and accepts these.
-5. **DO NOT** write additional byte-for-byte or \`diff\`-based tests for clean HTML. These will produce false negatives that cause the fixer to abandon bleach.`,
+5. **DO NOT** write additional byte-for-byte or \`diff\`-based tests for clean HTML. These will produce false negatives that cause the fixer to abandon bleach.
+6. **Verifier quirk**: The verifier's \`test_clean_html_unchanged\` normalizes the original through \`BeautifulSoup(original, "html.parser")\` but compares against the RAW filtered output. This means the verifier expects BS4-normalized output (attributes alphabetized, \`<br>\` → \`<br/>\`, entities decoded). If you see the filter preserving HTML byte-for-byte but the verifier still fails, this is why — the fix is to normalize output through BS4, NOT to rewrite the sanitization approach.`,
   },
   {
     id: "sam-cell-output-validation",
