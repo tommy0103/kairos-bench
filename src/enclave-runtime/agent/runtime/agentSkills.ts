@@ -459,6 +459,53 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
 - **Sampling parameters**: if the task only asks for posterior means (not full diagnostics), you can often reduce chains to 1-2 and keep warmup minimal while still getting accurate point estimates. Check if the task explicitly requires a specific number of chains/iterations.
 - **Time budget**: if a trial run shows sampling is too slow (e.g. <10% done in 5 minutes), STOP and optimize the model first instead of waiting for it to finish.`,
   },
+  {
+    id: "regex-pipeline-dev-methodology",
+    name: "Regex substitution pipeline — fast development loop",
+    triggers: [
+      ["regex", "substitution", "json"],
+      ["re.json", "re.sub"],
+      ["regex", "replacement", "pair"],
+    ],
+    hint: `**Regex substitution pipelines — development speed is everything**:
+
+Your biggest time constraint is the edit→test cycle. The provided test suite (e.g. \`check.py\`) often runs the ENTIRE regex pipeline on many inputs, taking 30-90 seconds per run. Running it after every small change will eat your entire time budget.
+
+**Use a reference library as an instant oracle**:
+- If the task involves chess: \`python-chess\` is already installed. For ANY position, get ground truth in <1 second:
+  \`\`\`python
+  import chess
+  b = chess.Board(fen)
+  expected = sorted(set(
+      b.fen().rsplit(' ', 2)[0]  # strip move counters
+      for m in b.legal_moves
+      for _ in [b.push(m)]
+      for __ in [None]
+      if not b.pop()
+  ))
+  \`\`\`
+- Build a quick \`test_one(fen)\` function that runs your regex pipeline on a single FEN and compares against the oracle. This gives instant feedback.
+
+**Build and test incrementally — phase by phase**:
+1. **Phase 1**: FEN expansion (numbers→dots) + compression (dots→numbers). Test: expand then compress should round-trip.
+2. **Phase 2**: Pseudo-legal move generation (one piece type at a time). Test: for the starting position, king has 0 pseudo-legal moves, each knight has 2, pawns have 16 total. Compare move counts against oracle.
+3. **Phase 3**: Legality filtering (remove positions where own king is in check). This is the hardest part. Test specific tricky positions:
+   - King adjacent to enemy king (mutual attack detection)
+   - Pinned pieces (piece between own king and enemy slider)
+   - Discovered check from own move
+4. **Phase 4**: Castling and en passant. Castling legality requires checking that the king does NOT pass through any attacked square (not just the destination). Test specific positions where castling is/isn't legal.
+
+**Only run the full test suite (check.py) after each PHASE is working**, not after every code edit. Target: ≤3 full test runs total.
+
+**Castling legality — the #1 debugging time sink**:
+- Kingside (O-O): king traverses e1→f1→g1. ALL THREE squares must not be attacked.
+- Queenside (O-O-O): king traverses e1→d1→c1. ALL THREE must not be attacked (b1 only needs to be empty, not unattacked).
+- Reuse your legality-filtering attack-detection patterns for these intermediate squares instead of writing separate logic.
+
+**Common pitfall — marker character collisions**:
+- If you use a marker character (e.g. \`!\` or \`\\x00\`) to flag lines for deletion, make sure it cannot appear in valid FEN output. Use a character outside the FEN alphabet.
+- Apply deletion rules LAST, after all marking is done.`,
+  },
 ];
 
 // ── Skill detection ──────────────────────────────────────────
