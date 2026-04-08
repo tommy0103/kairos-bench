@@ -84,7 +84,7 @@ export async function executePlan(
       client,
       model,
       tools,
-      systemPrompt: buildExecutorPrompt(originalTask, subtask, kernelMode),
+      systemPrompt: buildExecutorPrompt(originalTask, subtask, kernelMode, completed),
       userMessage: subtask,
       maxTurns: maxTurnsPerAgent,
       temperature,
@@ -374,7 +374,35 @@ function buildExecutorPrompt(
   originalTask: string,
   subtask: string,
   kernelMode: boolean,
+  completed: CompletedSubtask[] = [],
 ): string {
+  let priorContextBlock = "";
+  if (completed.length > 0) {
+    const stepsBlock = completed
+      .map(
+        (c, i) =>
+          `${i + 1}. "${c.description}" — ${c.summary}\n` +
+          `   detailed log: \`${c.logPath}\``,
+      )
+      .join("\n\n");
+    const lastStep = completed[completed.length - 1];
+    priorContextBlock = `
+## Prior completed steps
+
+${stepsBlock}
+
+**IMPORTANT**: Read the most recent step's log first to understand current state and avoid redoing work:
+\`logos_read("${lastStep.logPath}")\`
+You may also read \`logos_read("logos://sandbox/plan/initial.log")\` for pre-plan context.
+`;
+  } else {
+    priorContextBlock = `
+## Prior context
+
+- **Check existing logs first**: call \`logos_read("logos://sandbox/plan/initial.log")\`. If it exists, a previous agent already made progress — review the log to understand what has been done and avoid duplicating work. If the file does not exist, proceed normally.
+`;
+  }
+
   return `You are an executor agent working on one specific subtask of a larger plan.
 
 ## Original task (context only — do NOT attempt the full task)
@@ -384,12 +412,11 @@ ${originalTask}
 ## Your assigned subtask
 
 ${subtask}
-
+${priorContextBlock}
 ${toolDocsBlock(kernelMode)}
 
 ## Rules
 
-- **Check existing logs first**: before starting, call \`logos_read("logos://sandbox/plan/initial.log")\`. If it exists, a previous agent already made progress — review the log to understand what has been done and avoid duplicating work. If the file does not exist, proceed normally.
 - Focus exclusively on your assigned subtask. Do not attempt unrelated parts of the original task.
 - When done, call logos_complete with:
   - \`summary\`: a concise description of what you accomplished.

@@ -3,11 +3,12 @@
 1/1 mailman
 1/1 qemu-alpine-ssh qemu-startup
 0/1 filter-js-from-html
+0/1 regex-chess
 
 dna-assembly__qHeBFQU	1.0
 feal-linear-cryptanalysis__P4Qifu3	1.0
 headless-terminal__NZXAkEF	1.0
 gcode-to-text__JUfSknQ	1.0
-regex-chess__2bLNsrh	1.0
+
 torch-pipeline-parallelism__PVKMzjx	1.0
 cobol-modernization__jXjjtGH
