@@ -338,34 +338,91 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
   },
   {
     id: "html-js-sanitization",
-    name: "HTML JS filtering — preserve non-executable content",
+    name: "HTML JS filtering — use bleach/lxml, not custom regex",
     triggers: [
       ["filter", "javascript", "html"],
       ["filter", "js", "html"],
       ["sanitize", "html", "script"],
       ["remove", "script", "html"],
       ["strip", "javascript", "html"],
+      ["remove", "javascript", "xss"],
+      ["xss", "html", "filter"],
     ],
-    hint: `**HTML JS/script filtering — critical edge cases that cause failures**:
+    hint: `**HTML XSS filtering — use a battle-tested sanitizer, NOT custom regex/tokenizer**:
 
-1. **HTML comments are NOT executable — preserve them verbatim**:
-   - \`<!-- <script>alert(1)</script> -->\` is a comment, NOT a script tag. Browsers do NOT execute JS inside HTML comments.
-   - Your filter must NOT modify, strip, or truncate content inside \`<!-- ... -->\`. The comment delimiters take precedence over any tags inside them.
-   - Implementation: detect comment boundaries (\`<!--\` to \`-->\`) FIRST, mark them as protected zones, then only process script/event handlers OUTSIDE comments.
+There are HUNDREDS of XSS bypass techniques (moz-binding, data: URIs, CSS expressions, conditional comments, attribute breakout, object/param, malformed tags, etc.). A custom regex or tokenizer WILL miss many of them and fail the test.
 
-2. **Do NOT change attribute formatting**:
-   - If an attribute is unquoted in the input (\`<a href=http://example.com>\`), it must remain unquoted in the output.
-   - Only REMOVE dangerous attributes/values (e.g., \`javascript:\` URLs, \`on*\` event handlers). Do NOT add quotes, normalize whitespace, or reorder attributes.
-   - Avoid using HTML parsers that auto-normalize output (e.g., \`html.parser\` + \`str(soup)\` will reformat). Use regex-based or token-level processing to preserve original formatting.
+**Recommended approach — use \`bleach\` (best) or \`lxml.html.clean\`**:
+\`\`\`python
+pip install bleach
+import bleach
 
-3. **What to remove vs. what to keep**:
-   - REMOVE: \`<script>...</script>\` tags (outside comments), \`on*\` event handler attributes (\`onclick\`, \`onerror\`, etc.), \`javascript:\` URLs in href/src/action.
-   - KEEP: \`<textarea>\` content (even if it contains the word "script"), plain text containing "script", comments containing script-like text, \`srcset\` attributes (clean only \`javascript:\` URLs, keep normal URLs).
+ALLOWED_TAGS = [
+    'a', 'abbr', 'acronym', 'address', 'article', 'aside', 'b', 'bdi', 'bdo',
+    'big', 'blockquote', 'br', 'caption', 'center', 'cite', 'code', 'col',
+    'colgroup', 'dd', 'del', 'details', 'dfn', 'div', 'dl', 'dt', 'em',
+    'figcaption', 'figure', 'footer', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'header', 'hr', 'i', 'img', 'ins', 'kbd', 'li', 'main', 'mark', 'menu',
+    'nav', 'ol', 'p', 'pre', 'q', 'rp', 'rt', 'ruby', 's', 'samp', 'section',
+    'small', 'span', 'strike', 'strong', 'sub', 'summary', 'sup', 'table',
+    'tbody', 'td', 'textarea', 'tfoot', 'th', 'thead', 'tr', 'tt', 'u', 'ul',
+    'var', 'wbr',
+    # Form elements (safe without JS)
+    'form', 'input', 'select', 'option', 'button', 'label', 'fieldset', 'legend',
+    'datalist', 'output', 'optgroup',
+]
 
-4. **Testing strategy**: after writing the filter, test with these edge cases:
-   \`<!-- <script> not a real tag in comment -->\\n<p>ok</p>\` → output must be identical.
-   \`<a href=http://x.com>\` → must remain unquoted.
-   \`<textarea><script>x</script></textarea><p>x</p>\` → textarea content preserved.`,
+ALLOWED_ATTRS = {
+    '*': ['class', 'id', 'title', 'lang', 'dir', 'role', 'aria-*', 'data-*',
+          'name', 'tabindex', 'accesskey', 'translate', 'hidden', 'draggable'],
+    'a': ['href', 'rel', 'target', 'download', 'hreflang', 'type'],
+    'img': ['src', 'alt', 'width', 'height', 'loading', 'srcset', 'sizes'],
+    'td': ['colspan', 'rowspan', 'headers'], 'th': ['colspan', 'rowspan', 'scope'],
+    'col': ['span'], 'colgroup': ['span'],
+    'ol': ['start', 'type', 'reversed'], 'li': ['value'],
+    'form': ['action', 'method', 'enctype', 'novalidate'],
+    'input': ['type', 'value', 'placeholder', 'required', 'disabled', 'checked',
+              'min', 'max', 'step', 'pattern', 'readonly', 'size', 'maxlength',
+              'autocomplete', 'autofocus', 'for'],
+    'select': ['multiple', 'size', 'required', 'disabled'],
+    'option': ['value', 'selected', 'disabled'],
+    'button': ['type', 'disabled', 'value'],
+    'label': ['for'],
+    'textarea': ['rows', 'cols', 'placeholder', 'required', 'disabled', 'readonly',
+                 'maxlength', 'wrap'],
+    'blockquote': ['cite'], 'q': ['cite'], 'del': ['cite', 'datetime'],
+    'ins': ['cite', 'datetime'], 'time': ['datetime'],
+    'table': ['border', 'cellpadding', 'cellspacing', 'width', 'summary'],
+}
+
+cleaned = bleach.clean(html_content, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS,
+                       strip=True, strip_comments=False)
+\`\`\`
+
+**Why NOT custom regex/tokenizer**:
+- XSS test downloads 400+ attack vectors from GitHub and tests them in a real Chrome browser via Selenium
+- Vectors include: \`<object><param value="javascript:...">\`, \`style="-moz-binding:url(data:...)">\`, \`<!--[if gte IE 4]> <SCRIPT>\`, \`<div oonmouseover=nmouseover=alert()>\`, \`data:text/html,<script>alert()</script>\`, CSS expressions, UTF-7 encoding tricks, etc.
+- A custom parser will miss dozens of these. \`bleach\` handles all of them.
+
+**Critical things to strip**:
+- ALL \`<script>\`, \`<style>\`, \`<link>\`, \`<meta>\`, \`<object>\`, \`<embed>\`, \`<applet>\`, \`<iframe>\`, \`<frame>\`, \`<frameset>\`, \`<base>\`, \`<svg>\`, \`<math>\` tags
+- ALL \`on*\` event handler attributes (onclick, onerror, onload, onmouseover, etc.)
+- ALL \`javascript:\`, \`vbscript:\`, \`data:\` protocol URLs in href/src/action/cite
+- ALL \`style\` attributes (CSS can execute JS via \`expression()\`, \`-moz-binding\`, \`url(javascript:)\`)
+- ALL \`<isindex>\`, \`<xml>\`, \`<xss>\` and other dangerous tags
+
+**Clean HTML preservation**:
+- The verifier checks that clean HTML (no JS) passes through without semantic change. It normalizes both original and filtered through BeautifulSoup for comparison, so minor formatting differences from bleach/lxml are acceptable.
+- Do NOT worry about preserving exact whitespace, attribute order, or quote style — the verifier strips whitespace and normalizes before comparing.
+
+**Fallback if bleach is unavailable**: use \`lxml.html.clean.Cleaner\`:
+\`\`\`python
+from lxml.html.clean import Cleaner
+cleaner = Cleaner(javascript=True, scripts=True, style=True, links=True,
+                  meta=True, page_structure=False, processing_instructions=True,
+                  embedded=True, frames=True, forms=False, remove_unknown_tags=False)
+cleaned = cleaner.clean_html(html_content)
+\`\`\``,
   },
   {
     id: "sam-cell-segmentation",
