@@ -198,10 +198,10 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
     ],
     hint: `**QEMU in minimal (Slim) containers — two critical traps**:
 
-1. **ALWAYS redirect stdout/stderr when backgrounding QEMU**:
-   - With \`-nographic\`, QEMU writes serial console output to stdout. If you background with just \`&\`, the shell still waits for stdout to close → \`logos_exec\` hangs forever.
+1. **\`&\` alone is NOT enough — you MUST redirect stdout/stderr**:
+   - With \`-nographic\`, QEMU writes serial console output to stdout. Even with \`&\`, the backgrounded process inherits the shell's stdout — \`logos_exec\` waits for all file descriptors to close, so it HANGS forever.
    - **CORRECT**: \`qemu-system-x86_64 ... > /tmp/qemu.log 2>&1 &\`
-   - **WRONG**: \`qemu-system-x86_64 ... &\` (hangs the shell)
+   - **WRONG**: \`qemu-system-x86_64 ... &\` (stdout still open → logos_exec hangs!)
    - Alternative: use \`-daemonize\` flag (QEMU forks and the parent exits immediately). But note that \`-daemonize\` is incompatible with \`-nographic\` — use \`-display none\` instead.
 
 2. **Install essential tools FIRST** — Debian Slim images lack basic utilities:
@@ -399,18 +399,23 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
       ["mailman3"],
       ["postfix", "mailman"],
     ],
-    hint: `**Service startup — ALWAYS use daemon/background mode**:
+    hint: `**Service startup — \`&\` alone is NOT enough, you MUST redirect stdout/stderr**:
 
-- **CRITICAL**: \`logos_exec\` has a timeout (typically 590s). If a service command blocks (runs in foreground), it will eat the entire timeout and the agent loses all remaining time.
+- **THE #1 MISTAKE**: using \`some_service &\` WITHOUT redirecting output. Even with \`&\`, the backgrounded process inherits the shell's stdout/stderr. \`logos_exec\` waits for ALL file descriptors to close before returning — so it HANGS until the background process exits. This wastes the entire timeout budget.
+- **CORRECT pattern**: \`some_service > /tmp/service.log 2>&1 &\`
+- **WRONG pattern**: \`some_service &\` (HANGS logos_exec!)
+
 - **Mailman-specific**:
-  - \`mailman start\` can block if the runner process doesn't fully detach. ALWAYS use: \`mailman start &\` or \`su - list -s /bin/bash -c "mailman start &"\`, then \`sleep 3 && mailman status\` to verify.
+  - \`mailman start\` can block if the runner process doesn't fully detach.
+  - **CORRECT**: \`su - list -s /bin/bash -c "mailman start > /tmp/mailman.log 2>&1 &"\` then \`sleep 3 && mailman status\`
+  - **WRONG**: \`su - list -s /bin/bash -c "mailman start" &\` (stdout still connected → hangs)
   - Start Postfix first (\`postfix start\` auto-daemonizes), THEN start Mailman.
   - After starting, verify with \`mailman status\` and \`postfix status\` — don't assume success.
 - **General service rules**:
   - \`nginx\` → auto-daemonizes (no \`&\` needed, but \`nginx -g "daemon off;"\` WILL block — never use that).
-  - \`uwsgi\` / \`gunicorn\` → use \`--daemon\` flag or \`&\`.
+  - \`uwsgi\` / \`gunicorn\` → use \`--daemon\` flag or \`> /tmp/x.log 2>&1 &\`.
   - Database servers (\`postgres\`, \`mysql\`) → use \`pg_ctlcluster ... start\` or \`service mysql start\`.
-  - Any unknown service → append \`&\`, wait 2-3s, check \`pgrep -a <name>\`.
+  - Any unknown service → \`service_cmd > /tmp/svc.log 2>&1 &\`, wait 2-3s, check \`pgrep -a <name>\`.
 - **Recovery**: if a command times out, the process may still be alive. Check with \`pgrep -f <service>\` and proceed if it's running. Don't waste time restarting what's already working.`,
   },
   {
