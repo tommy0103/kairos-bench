@@ -566,6 +566,19 @@ cleaned = cleaner.clean_html(html_content)
     ],
     hint: `**Regex substitution pipelines — development speed is everything**:
 
+## CRITICAL — Do NOT enter plan mode
+
+This task has a hard 1-hour time limit. Plan mode creates 5-7 executor sub-agents, each with startup + context-reading overhead (~2 min each). That's 10-15 minutes wasted on orchestration alone, and context is fragmented across step logs.
+
+**Stay in a single session.** You have a 1M-token context window — more than enough for the entire gen.py (typically <1500 lines) plus all debugging output. Benefits:
+- Save ~15 min of planner/executor overhead
+- Full context continuity — you can see all your code while debugging
+- Faster iteration — no need to re-read step logs
+
+**Do NOT call \`logos_complete\` with a \`plan\` array.** Instead, work through all phases sequentially in one session, calling \`logos_exec\` / \`logos_write\` / \`logos_read\` directly.
+
+---
+
 Your biggest time constraint is the edit→test cycle. The provided test suite (e.g. \`check.py\`) often runs the ENTIRE regex pipeline on many inputs, taking 30-90 seconds per run. Running it after every small change will eat your entire time budget.
 
 **Use a reference library as an instant oracle**:
@@ -586,13 +599,27 @@ Your biggest time constraint is the edit→test cycle. The provided test suite (
 **Build and test incrementally — phase by phase**:
 1. **Phase 1**: FEN expansion (numbers→dots) + compression (dots→numbers). Test: expand then compress should round-trip.
 2. **Phase 2**: Pseudo-legal move generation (one piece type at a time). Test: for the starting position, king has 0 pseudo-legal moves, each knight has 2, pawns have 16 total. Compare move counts against oracle.
-3. **Phase 3**: Legality filtering (remove positions where own king is in check). This is the hardest part. Test specific tricky positions:
-   - King adjacent to enemy king (mutual attack detection)
-   - Pinned pieces (piece between own king and enemy slider)
-   - Discovered check from own move
+3. **Phase 3**: Legality filtering (remove positions where own king is in check). This is the hardest part — see incremental strategy below.
 4. **Phase 4**: Castling and en passant. Castling legality requires checking that the king does NOT pass through any attacked square (not just the destination). Test specific positions where castling is/isn't legal.
 
-**Only run the full test suite (check.py) after each PHASE is working**, not after every code edit. Target: ≤3 full test runs total.
+## CRITICAL — Incremental legality filtering (Phase 3)
+
+Do NOT write all attack-detection rules at once and then debug them together. Build legality filtering **incrementally by attacker type**, testing after each:
+
+1. **Pawn attacks** (~16 rules): fixed-distance diagonal patterns. After adding, run your oracle test on 3-5 positions with pawn checks. All pawn-check positions should now be correctly filtered.
+2. **Knight attacks** (~50 rules): fixed L-shape offsets. Test on positions with knight forks/checks.
+3. **King proximity** (~46 rules): adjacent-square attacks. Test on positions with kings near each other.
+4. **Rook/Queen rank+file attacks** (~variable): sliding along ranks and files, blocked by any piece. Test on positions with rook pins, battery checks.
+5. **Bishop/Queen diagonal attacks** (~variable): sliding along diagonals. Test on positions with bishop pins, discovered checks.
+
+After each attacker type, run your \`test_one(fen)\` oracle on 3-5 targeted positions to verify JUST that attacker type works. This way:
+- Each debugging round has a small, bounded scope (you know which rules just changed)
+- You don't end up debugging 2000+ rules at once
+- You catch bugs early when they're cheap to fix
+
+**Only run the full test suite (\`check.py\`) after ALL attacker types are working individually.** Target: ≤2 full check.py runs.
+
+---
 
 **Castling legality — the #1 debugging time sink**:
 - Kingside (O-O): king traverses e1→f1→g1. ALL THREE squares must not be attacked.
