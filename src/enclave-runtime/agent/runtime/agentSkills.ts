@@ -186,6 +186,39 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
 - After assembling the protein sequence, verify its length matches what you expect (sum of all subprotein lengths minus removed Met residues plus linkers).`,
   },
   {
+    id: "qemu-general",
+    name: "QEMU general — backgrounding & minimal environments",
+    triggers: [
+      ["qemu", "telnet"],
+      ["qemu", "alpine"],
+      ["qemu", "ssh"],
+      ["qemu", "start", "background"],
+      ["qemu", "image", "boot"],
+      ["qemu-system"],
+    ],
+    hint: `**QEMU in minimal (Slim) containers — two critical traps**:
+
+1. **ALWAYS redirect stdout/stderr when backgrounding QEMU**:
+   - With \`-nographic\`, QEMU writes serial console output to stdout. If you background with just \`&\`, the shell still waits for stdout to close → \`logos_exec\` hangs forever.
+   - **CORRECT**: \`qemu-system-x86_64 ... > /tmp/qemu.log 2>&1 &\`
+   - **WRONG**: \`qemu-system-x86_64 ... &\` (hangs the shell)
+   - Alternative: use \`-daemonize\` flag (QEMU forks and the parent exits immediately). But note that \`-daemonize\` is incompatible with \`-nographic\` — use \`-display none\` instead.
+
+2. **Install essential tools FIRST** — Debian Slim images lack basic utilities:
+   - \`apt-get install -y procps\` → gives you \`ps\`, \`pgrep\`, \`pkill\`
+   - \`apt-get install -y net-tools\` → gives you \`netstat\`
+   - \`apt-get install -y iproute2\` → gives you \`ss\`
+   - Without these, you cannot check if QEMU is running or if ports are listening.
+   - Do this BEFORE launching QEMU, not after.
+
+3. **Verify QEMU is running and the port is ready**:
+   - After starting: \`sleep 3 && pgrep -a qemu\` (need procps).
+   - Check telnet port: \`(echo "" | telnet 127.0.0.1 6665) 2>&1 | head -5\` or use \`ss -tlnp | grep 6665\`.
+   - For Alpine boot: allow 10-30 seconds for boot. Poll in a loop: \`for i in $(seq 1 30); do echo | telnet 127.0.0.1 6665 2>&1 | grep -q "login" && break; sleep 2; done\`.
+
+4. **No KVM in containers**: \`/dev/kvm\` is usually not available. QEMU falls back to TCG (software emulation), which is slower but works. Do NOT pass \`-enable-kvm\` — it will fail. Expect boot to take 10-60 seconds depending on the OS.`,
+  },
+  {
     id: "qemu-vm-setup",
     name: "QEMU VM setup & verification",
     triggers: [
