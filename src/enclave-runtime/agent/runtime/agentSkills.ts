@@ -401,14 +401,17 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
     ],
     hint: `**Service startup — \`&\` alone is NOT enough, you MUST redirect stdout/stderr**:
 
-- **THE #1 MISTAKE**: using \`some_service &\` WITHOUT redirecting output. Even with \`&\`, the backgrounded process inherits the shell's stdout/stderr. \`logos_exec\` waits for ALL file descriptors to close before returning — so it HANGS until the background process exits. This wastes the entire timeout budget.
-- **CORRECT pattern**: \`some_service > /tmp/service.log 2>&1 &\`
-- **WRONG pattern**: \`some_service &\` (HANGS logos_exec!)
+- **You need BOTH \`&\` AND output redirection — either one alone will hang**:
+  - \`some_service &\` → HANGS (stdout still connected to shell pipe)
+  - \`some_service > /tmp/svc.log 2>&1\` → HANGS (no \`&\`, runs synchronously)
+  - \`some_service > /tmp/svc.log 2>&1 &\` → **CORRECT** (background + detached output)
+- \`logos_exec\` waits for ALL file descriptors to close AND all foreground processes to exit. Without BOTH \`&\` and \`> file 2>&1\`, it blocks until the service exits.
 
-- **Mailman-specific**:
-  - \`mailman start\` can block if the runner process doesn't fully detach.
-  - **CORRECT**: \`su - list -s /bin/bash -c "mailman start > /tmp/mailman.log 2>&1 &"\` then \`sleep 3 && mailman status\`
-  - **WRONG**: \`su - list -s /bin/bash -c "mailman start" &\` (stdout still connected → hangs)
+- **Mailman-specific** — \`mailman start\` can block if it doesn't fully detach:
+  - \`su - list -s /bin/bash -c "mailman start" &\` → **WRONG** (stdout open → hangs)
+  - \`su - list -s /bin/bash -c "mailman start > /tmp/mailman.log 2>&1"\` → **WRONG** (no \`&\` → synchronous block)
+  - \`su - list -s /bin/bash -c "mailman start > /tmp/mailman.log 2>&1 &"\` → **CORRECT** (\`&\` INSIDE the quotes!)
+  - Then: \`sleep 3 && mailman status\` to verify.
   - Start Postfix first (\`postfix start\` auto-daemonizes), THEN start Mailman.
   - After starting, verify with \`mailman status\` and \`postfix status\` — don't assume success.
 - **General service rules**:
