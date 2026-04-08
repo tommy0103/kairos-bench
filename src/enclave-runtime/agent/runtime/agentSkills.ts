@@ -363,6 +363,26 @@ The verifier normalizes both original and filtered HTML through BeautifulSoup be
 
 Switching from bleach to custom regex is the #1 cause of failure on this task: you trade a working XSS defense for "exact formatting" that the verifier doesn't even check.
 
+## CRITICAL — The verifier runs in a SEPARATE container
+
+The verifier runs \`/app/filter.py\` in a different Docker container that shares \`/app\` but NOT the agent's Python site-packages. If your script does \`import bleach\` but bleach was only installed via \`pip install\` in the agent container, the verifier will get \`ModuleNotFoundError\`.
+
+**Fix**: At the top of \`filter.py\`, auto-install dependencies if missing:
+\`\`\`python
+import subprocess, sys
+try:
+    import bleach
+    from bleach.css_sanitizer import CSSSanitizer
+    from bs4 import BeautifulSoup
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "bleach", "beautifulsoup4"])
+    import bleach
+    from bleach.css_sanitizer import CSSSanitizer
+    from bs4 import BeautifulSoup
+\`\`\`
+
+This ensures the script works even when run in a fresh Python environment.
+
 **Recommended approach — use \`bleach\` (best) or \`lxml.html.clean\`**:
 \`\`\`python
 pip install bleach
