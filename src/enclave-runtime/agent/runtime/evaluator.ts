@@ -11,6 +11,7 @@ import type { ChatClient } from "../core/chatClient";
 import { reactLoop } from "../core/reactLoop";
 import type { AgentTool, LogosCompleteParams } from "../core/types";
 import { detectSkills } from "./evaluatorSkills";
+import { buildAgentSkillsSection } from "./agentSkills";
 import { executePlan } from "./planExecutor";
 import { executeExplore } from "./exploreExecutor";
 
@@ -335,7 +336,7 @@ function buildEvaluatorPrompt(
   const skills = detectSkills(originalTask);
   const skillsBlock =
     skills.length > 0
-      ? `\n## Testing skills (MANDATORY)\n\nThe following skills matched this task. You MUST execute every skill recipe below. Copy each test template, adapt the marked constants to match the actual solution, and run it. If ANY skill test fails, report FAIL.\n\n${skills.map((s) => s.recipe).join("\n\n---\n\n")}\n`
+      ? `\n## Testing skills (MANDATORY)\n\nThe following skills matched this task. You MUST execute every skill recipe below. Copy each test template, adapt the marked constants to match the actual solution, and run it. If ANY skill test fails, report FAIL.\n\n**CRITICAL — skill restrictions override general guidelines**: When a skill explicitly says "DO NOT test X", "DO NOT fail on Y", or "DO NOT write Z tests", those restrictions are ABSOLUTE. Your additional adversarial tests MUST NOT contradict or circumvent skill-level DO NOT instructions. Skill authors have domain knowledge about the real verifier's behavior — if a skill says a certain type of test produces false negatives, trust it.\n\n${skills.map((s) => s.recipe).join("\n\n---\n\n")}\n`
       : "";
 
   return `You are an adversarial evaluator agent. Your job is to rigorously verify that a task has been completed correctly by designing and running your own tests.
@@ -362,6 +363,8 @@ ${toolDocsBlock(kernelMode)}
 ${skillsBlock}
 ## Adversarial testing guidelines
 
+**Respect skill restrictions**: If a testing skill above says "DO NOT write byte-for-byte comparison tests" or "DO NOT fail on formatting differences", you MUST NOT design additional tests that do exactly that. Skill-level "DO NOT" instructions take precedence over general adversarial instincts. Violating them causes false negatives that derail the fixer.
+
 **Combinatorial parameter coverage**: When the task involves parameters (e.g. \`max_concurrent\`, \`timeout\`, \`limit\`), always test multiple combinations — especially where parameters interact to create different code paths.
 
 **External process testing**: When behavior involves signals (SIGINT, SIGTERM), cancellation, or timeouts, always test from an **external process** using \`subprocess.Popen\` + \`proc.send_signal()\`.
@@ -384,6 +387,8 @@ function buildFixerPrompt(
   detailedLog: string | undefined,
   kernelMode: boolean,
 ): string {
+  const agentSkills = buildAgentSkillsSection(originalTask);
+
   return `You are a fixer agent. A previous agent attempted a task, but an adversarial evaluator found issues.
 
 ## Original task
@@ -396,7 +401,7 @@ ${feedback}
 ${detailedLog ? `\n## Detailed test output\n\n\`\`\`\n${detailedLog}\n\`\`\`` : ""}
 
 ${toolDocsBlock(kernelMode)}
-
+${agentSkills ? `\n${agentSkills}\n\n**IMPORTANT**: The guidance above reflects domain expertise about the real verifier's behavior. If the evaluator feedback contradicts it (e.g., tells you to "preserve formatting exactly" but the skill says to use a specific library), follow the skill guidance — the evaluator may have produced a false negative.\n` : ""}
 ## Rules
 
 - Focus on fixing the specific test failures described above. Do not redo work that is already correct.
