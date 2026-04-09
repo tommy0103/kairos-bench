@@ -1589,6 +1589,80 @@ print("\\nALL HEADLESS TERMINAL CHECKS PASSED")
 - If timing tests fail: increase sleep durations — don't immediately declare FAIL.`,
   },
   {
+    id: "fasttext-model-verification",
+    name: "FastText Model Verification",
+    triggers: [
+      ["fasttext", "model"],
+      ["fasttext", "accuracy"],
+      ["fasttext", "yelp"],
+      ["model.bin", "accuracy"],
+      ["train", "fasttext"],
+    ],
+    recipe: `### Skill: FastText Model — Verify accuracy and size, check for preprocessing bug
+
+**CRITICAL — the #1 failure mode is text preprocessing mismatch**:
+The verifier tests with \`model.predict(RAW_TEXT)\` — no lowercasing, no special char removal. If the agent trained on preprocessed text, accuracy on raw text drops ~10%.
+
+**Recipe**:
+\\\`\\\`\\\`python
+#!/usr/bin/env python3
+import os, sys
+failed = 0
+
+# Check 1: model.bin exists
+if not os.path.exists("/app/model.bin"):
+    print("FAIL: /app/model.bin not found")
+    sys.exit(1)
+
+# Check 2: model size < 150 MB
+size_mb = os.path.getsize("/app/model.bin") / (1024*1024)
+if size_mb >= 150:
+    print(f"FAIL: model.bin is {size_mb:.1f} MB (must be < 150 MB)")
+    failed += 1
+else:
+    print(f"PASS: model size {size_mb:.1f} MB")
+
+# Check 3: model loads
+import fasttext
+model = fasttext.load_model("/app/model.bin")
+print(f"PASS: model loaded, labels={model.labels}, dim={model.get_dimension()}")
+
+# Check 4: CRITICAL — test on RAW text from parquet (not preprocessed)
+import pandas as pd
+df = pd.read_parquet("/app/data/test-00000-of-00001.parquet")
+correct = 0
+total = 0
+for _, row in df.iterrows():
+    raw_text = str(row["text"]).replace("\\n", " ").replace("\\r", " ")
+    pred = model.predict(raw_text)[0][0]
+    true_label = f"__label__{row['label']}"
+    if pred == true_label:
+        correct += 1
+    total += 1
+acc = correct / total if total > 0 else 0
+print(f"Accuracy on RAW test data: {acc:.4f} ({correct}/{total})")
+
+if acc < 0.60:
+    print(f"FAIL: accuracy {acc:.4f} < 0.60 — likely trained on preprocessed text")
+    print("  The verifier tests on RAW text. If you lowercased or removed special chars")
+    print("  during training, the vocabulary won't match. RETRAIN WITHOUT preprocessing.")
+    failed += 1
+elif acc < 0.62:
+    print(f"WARN: accuracy {acc:.4f} — close but may not pass verifier threshold of 0.62")
+    print("  Try: increase epochs (up to 10), or try wordNgrams=3, or adjust lr")
+else:
+    print(f"PASS: accuracy {acc:.4f} >= 0.62")
+
+if failed > 0:
+    print(f"\\n{failed} FAILED")
+    sys.exit(1)
+print("\\nALL FASTTEXT CHECKS PASSED")
+\\\`\\\`\\\`
+
+**Verdict**: If accuracy < 0.60 → FAIL (preprocessing bug). If 0.60-0.62 → WARN (needs tuning). If >= 0.62 → PASS.
+**CRITICAL for fixer**: If accuracy < 0.60, the fix is to RETRAIN without text preprocessing (no lowercase, no special char removal). Just replace newlines with spaces.`,
+  },
+  {
     id: "cryptanalysis-output-verification",
     name: "Cryptanalysis Output Verification",
     triggers: [
@@ -2050,7 +2124,8 @@ for name, seq in primers.items():
     binding_len = len(seq) - annealing_start
     if binding_len > 41:
         print(f"FAIL: {name} binding={binding_len} nt — verifier adds up to 4 nt overhang overlap, total could be {binding_len+4} > 45")
-        print(f"  Fix: shorten binding to <= 41 nt to leave room for overhang extension.")
+        print(f"  CRITICAL: Do NOT fix by trimming 5-prime end of binding — this shifts the amplicon boundary and breaks assembly.")
+        print(f"  The ENTIRE primer pair for this fragment must be redesigned with shorter binding (15-35 nt).")
         failed += 1
     elif 15 <= binding_len <= 41:
         print(f"PASS: {name} binding ~{binding_len} nt (safe: max extended = {binding_len+4})")
@@ -2141,9 +2216,10 @@ print("\\nALL GOLDEN GATE PRIMER CHECKS PASSED")
 **Verdict rules (MANDATORY)**:
 1. **If any primer uses \`gagacc\` instead of \`ggtctc\` -> immediate FAIL.** The fixer MUST rewrite ALL primers with \`ggtctc\`. Both fwd and rev primers use \`[clamp][ggtctc][N][overhang][binding]\`.
 2. **If \`ggtctc\` is at position 0 (no clamp) -> FAIL.** The verifier requires at least 1 nt before the BsaI site.
-3. **Do NOT use the Primer Tm evaluator skill** (it uses \`rc(rev)+fwd\` insert detection which does not apply to Golden Gate).
-4. **Do NOT verify by reconstructing the assembled product** from raw primers — enzymatic digestion removes the BsaI sites.
-5. If all checks pass -> report PASS. Do NOT write additional tests.`,
+3. **If binding > 41 nt -> FAIL.** The fixer must REDESIGN the entire primer pair for that fragment with shorter binding (15-35 nt). **NEVER trim binding from the 5' end** — this shifts the amplicon boundary and causes "Assembled sequence does not match expected output". If binding must be shortened, the fixer must recalculate the binding from the same template position but with fewer bases from the 3' end of the written sequence.
+4. **Do NOT use the Primer Tm evaluator skill** (it uses \`rc(rev)+fwd\` insert detection which does not apply to Golden Gate).
+5. **Do NOT verify by reconstructing the assembled product** from raw primers — enzymatic digestion removes the BsaI sites.
+6. If all checks pass -> report PASS. Do NOT write additional tests.`,
   },
 ];
 

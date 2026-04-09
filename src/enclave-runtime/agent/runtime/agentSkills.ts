@@ -128,6 +128,58 @@ After writing plaintexts.txt, verify line count, then call logos_complete. Do NO
 - Start services in background mode if needed (e.g. data preprocessing pipelines).`,
   },
   {
+    id: "fasttext-training",
+    name: "FastText model training (text classification)",
+    triggers: [
+      ["fasttext", "train"],
+      ["fasttext", "model"],
+      ["fasttext", "accuracy"],
+      ["fasttext", "yelp"],
+      ["train", "fasttext"],
+      ["model.bin", "accuracy"],
+      ["model.bin", "fasttext"],
+    ],
+    hint: `**FastText text classification — the #1 mistake is text preprocessing**:
+
+## CRITICAL — Do NOT preprocess text (lowercase, remove special chars, etc.)
+
+The verifier tests the model with RAW text (\`model.predict(raw_text)\`). If you train on lowercased/cleaned text but the verifier tests on raw text, the vocabulary won't match and accuracy drops ~10% (from 63% to 50-55%). This was the failure mode in ALL 5 past trials.
+
+**Correct approach**: convert parquet to fasttext format with MINIMAL preprocessing:
+\`\`\`python
+import pandas as pd
+df = pd.read_parquet('data/train-00000-of-00001.parquet')
+with open('train.txt', 'w') as f:
+    for _, row in df.iterrows():
+        text = str(row['text']).replace('\\n', ' ').replace('\\r', ' ')  # only replace newlines
+        f.write(f'__label__{row["label"]} {text}\\n')
+\`\`\`
+Do NOT lowercase. Do NOT remove punctuation. Do NOT remove special characters.
+
+## Training parameters that work (under 590s logos_exec timeout)
+
+With 650K training examples, many configurations timeout. Use these proven-safe parameters:
+- **lr=1.0, epoch=5, wordNgrams=2, dim=50, bucket=500000, minCount=5** → fits in ~3 min, ~110 MB, agent got 63% on provided test
+- Do NOT use epoch >= 15 (will timeout at 590s)
+- Do NOT use dim >= 100 with bucket >= 500000 (model > 150 MB)
+- loss='softmax' (default) is fine for 5-class classification
+
+## Model size control (must be < 150 MB)
+- Model size ≈ (vocab_size × dim + bucket × dim) × 2 × 4 bytes
+- To reduce: lower bucket (200000-500000), lower dim (50), higher minCount (5+)
+- Quantization (\`model.quantize()\`) can shrink further but has been unreliable in past runs
+
+## Workflow (budget: 60 min total)
+1. Install deps: \`apt-get install -y g++ build-essential && pip install fasttext pandas pyarrow\` (5 min)
+2. Convert parquet to fasttext format WITHOUT preprocessing (2 min)
+3. Train with safe params: lr=1.0, epoch=5, wordNgrams=2, dim=50, bucket=500000, minCount=5 (3 min)
+4. Test on provided test set: \`model.test('test.txt')\` — expect ~62-65%
+5. If accuracy < 62%: try epoch=8 or lr=0.8 or wordNgrams=3 (stay under 590s)
+6. Save as /app/model.bin, verify size < 150 MB
+7. Call logos_complete immediately
+8. Do NOT delete train.txt / test.txt — the evaluator may need them`,
+  },
+  {
     id: "database-recovery",
     name: "Database / WAL file recovery",
     triggers: [
@@ -389,6 +441,11 @@ The verifier computes "effective annealing" by extending the binding into the ov
 - **Step 3**: All 4-nt overhangs must be unique and non-palindromic.
 - **Step 4**: Circular assembly: the overhang at position 0 of the output = the overhang that closes the circle (backbone right = backbone left).
 - **ANTI-PATTERN**: Do NOT pick overhangs from arbitrary sliding windows or arbitrary context. They MUST match the output sequence at the exact junction coordinates, or the final assembly check will fail.
+
+## CRITICAL — Binding length limits (max 41 nt for ALL primers)
+- The verifier checks \`15 <= len(extended_annealing) <= 45\`. Since fwd gets +4 extension, fwd binding max = 41. For safety, keep ALL bindings <= 41 nt.
+- If you need higher Tm, use GC-rich binding regions, NOT longer binding. Binding of 15-35 nt should always give Tm 58-72°C.
+- **NEVER fix binding length by trimming from the 5' end of the written binding** — this shifts the PCR amplicon boundary and breaks the assembly assertion (\`Assembled sequence does not match expected output\`). If binding must be shortened, trim from the **3' end** of the written primer (= the inner end of the amplicon on the template). But it is better to design with correct lengths from the start.
 
 ## Time management (1800s agent timeout)
 - Write \`primers.fasta\` EARLY — a correct file before timeout gets scored; perfect analysis with no output gets 0.

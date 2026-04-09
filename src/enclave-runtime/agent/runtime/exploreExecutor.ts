@@ -266,12 +266,13 @@ You have Logos kernel primitives:
 
 1. **logos_exec(command)** — Execute a shell command. Output truncated to ~200 lines;
    full output saved to terminal log (read via logos_read when truncated).
+   **Time limit: each logos_exec call has a ~590 second timeout.** If a command exceeds this, it is killed and returns exit_code -1. For long-running tasks (training, compilation), design commands to complete within this limit. Use the shell \`timeout\` utility for additional safety (e.g. \`timeout 300 ./my_program\`).
 2. **logos_read(uri)** — Read from any Logos URI.
 3. **logos_write(uri, content)** — Write to a Logos URI.
 4. **logos_complete(...)** — MANDATORY final call to finish your turn.`
     : `## Tools
 
-- **logos_exec(command)** — Execute a shell command. Output truncated to ~200 lines.
+- **logos_exec(command)** — Execute a shell command. Output truncated to ~200 lines. Each call has a ~590 second timeout.
 - **logos_complete(...)** — MANDATORY: call this when done or blocked.`;
 
   const taskLogSection = taskLog
