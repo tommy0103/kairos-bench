@@ -1597,6 +1597,10 @@ print("\\nALL HEADLESS TERMINAL CHECKS PASSED")
       ["known-plaintext", "attack"],
       ["recover", "key", "decrypt"],
       ["feal", "plaintext"],
+      ["feal", "key", "recover"],
+      ["feal", "round", "decrypt"],
+      ["round key", "seed", "decrypt"],
+      ["plaintext", "ciphertext", "attack"],
     ],
     recipe: `### Skill: Cryptanalysis — Verify Decrypted Output, Don't Read Source Code
 

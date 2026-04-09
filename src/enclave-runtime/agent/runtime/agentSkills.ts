@@ -37,13 +37,27 @@ export const AGENT_SKILLS: AgentSkill[] = [
       ["cryptanalysis"],
       ["known-plaintext", "attack"],
       ["known plaintext", "attack"],
+      ["feal", "round"],
+      ["feal", "key"],
+      ["feal", "linear"],
+      ["linear", "attack", "round"],
+      ["round key", "seed", "decrypt"],
+      ["plaintext", "ciphertext", "round key"],
     ],
-    hint: `**Cryptanalysis strategy — brute-force first**:
+    hint: `**Cryptanalysis strategy — brute-force first, then MITM**:
 - Before implementing a sophisticated cryptanalytic attack, ALWAYS estimate the effective key space size.
-- If the key is derived from a seed of N bits, the search space is 2^N. For N ≤ 24 (~16M), a C brute-force loop can exhaust the space in seconds.
+- If the key is derived from a seed of N bits, the search space is 2^N. For N <= 24 (~16M), a C brute-force loop can exhaust the space in seconds.
 - Even if the task says "you can't brute force the entire keyspace", check if a SEED or KEY SCHEDULE reduces the effective space to something tractable.
 - Recipe: write a C program that (1) iterates all seed values, (2) derives the round keys from each seed, (3) encrypts a known plaintext with those keys, (4) compares to the known ciphertext. Print the seed when matched. Compile with \`gcc -O3\`.
-- Only fall back to linear/differential cryptanalysis if the effective key space exceeds ~2^28.`,
+- Only fall back to linear/differential cryptanalysis if the effective key space exceeds ~2^28.
+
+**For multi-round Feistel ciphers with per-round seeds (e.g. FEAL-like, 4 rounds x 20-bit seeds)**:
+- Total keyspace is 2^80 (brute-force impossible), but each seed is only 2^20.
+- **Step 1 — Find perfect linear approximations of F**: search input/output masks where \`parity(F(x) & out_mask) == parity(x & in_mask) ^ constant\` has bias exactly 0.5 (deterministic). These exist in FEAL-like ciphers and give exact parity constraints on intermediate round values.
+- **Step 2 — Meet-in-the-middle on outer rounds**: For each seed0 (2^20), compute intermediate state after round 0 for all known pairs, derive a compact "signature" from the parity constraints. Do the same backwards for each seed3 (2^20). Match signatures using sorted arrays + binary search. This is O(2^20 + 2^20) instead of O(2^40).
+- **Step 3 — Brute inner rounds**: For each matched (seed0, seed3) candidate, brute-force seed1 and seed2 (each 2^20) using Feistel round equations: e.g. \`F(R1 ^ K1) == R0 ^ R2\` must hold for all 32 pairs. Filter false positives with multiple pairs.
+- **Step 4 — Decrypt and write output immediately**: Once seeds/keys are found, use the provided \`decrypt.c\` or your own code to decrypt \`ciphertexts.txt\` and write \`plaintexts.txt\`. Do this BEFORE any further verification.
+- **CRITICAL time management**: Always wrap C programs with \`timeout 300\`. Never use the \`time\` command (not installed in the container). Do NOT spend > 15 minutes on exploratory bias analysis — if you haven't found perfect approximations by then, try a different mask search strategy. Write \`plaintexts.txt\` the MOMENT you have recovered keys.`,
   },
   {
     id: "compilation-from-source",
