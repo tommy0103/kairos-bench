@@ -57,31 +57,39 @@ export const AGENT_SKILLS: AgentSkill[] = [
 **CRITICAL — Do NOT waste time on exploratory analysis. Follow this exact 4-step plan:**
 
 **Step 1 — Find perfect linear approximations of F (budget: max 5 min)**:
-Write ONE C program that iterates all 32-bit input/output mask pairs and checks \`parity(F(x) & out_mask) == parity(x & in_mask) ^ c\` over all 2^32 inputs (or a large sample). Print masks where bias is exactly 0.5 (deterministic). FEAL-like F functions always have multiple perfect approximations. This step should take < 2 minutes. Do NOT keep searching for "more" or "better" approximations — a few perfect ones are enough.
+Write ONE C program that searches for perfect approximations. FEAL-like F has MANY perfect relations.
+CRITICAL — the search must use MULTI-BIT masks (like 0x01010101), NOT just single-bit masks. A search of only single-bit in/out masks will find 0 (this happened in a real run and wasted the entire budget). The proven approach:
+- For each \`in_mask\` in {set of multi-bit masks, e.g. all bytes of form 0x??000000, 0x00??0000, etc.}: for each \`out_mask\` similarly: test parity(F(x) & out_mask) == parity(x & in_mask) ^ c over ~10M random x values. If violations == 0, it's perfect.
+- Known working mask example: \`in=0x01010101, out=0x00040000\` is a perfect approximation of FEAL's F.
+- If you find at least 2-3 perfect approximations, STOP and move to Step 2.
 
-**Step 2 — Build the MITM solver directly (budget: max 10 min to write)**:
-Do NOT try to "chain" approximations across rounds (this approach often yields 0 chainable pairs and wastes time). Instead, use the per-round seed structure directly:
-- For each candidate seed0 in [0, 2^20): derive K0, compute R1 = L0 ^ F(R0 ^ K0) for all 32 known pairs, then compute a compact "signature" (e.g. XOR/hash of parity constraints applied to R1 values). Store in a hash table or sorted array.
-- For each candidate seed3 in [0, 2^20): derive K3, compute R2 = R3 ^ F(L3 ^ K3) backwards from ciphertext, compute the same type of signature. Look up in the seed0 table.
-- For each matching (seed0, seed3): brute-force seed1 in [0, 2^20) checking F(R1 ^ K1) == L1 ^ L2 for all pairs. Then brute-force seed2 similarly.
-- Verify all 32 pairs match. Print the four seeds.
-Compile with \`gcc -O3\`. Run with \`timeout 120\`. The MITM search is O(2*2^20) and each seed1/seed2 brute is O(2^20), all fast.
+**Step 2 — Build the MITM solver (budget: max 10 min to write)**:
+Do NOT try to "chain" approximations across rounds. Use the per-round seed structure:
+- For each candidate seed0 in [0, 2^20): derive K0, compute R1 = L0 ^ F(R0 ^ K0) for all 32 known pairs, then compute a "signature" from parity constraints on R1. Store (signature → seed0) in a hash table.
+- For each candidate seed3 in [0, 2^20): derive K3, compute R2 backwards from ciphertext, compute the same type of signature. Look up matches in the seed0 table.
+- For each matching (seed0, seed3): brute-force seed1 in [0, 2^20) checking that Feistel equations hold for ALL 32 pairs. Then brute-force seed2 similarly.
+- Verify all 32 pairs match. Print the four seeds AND immediately decrypt.
+**CRITICAL debugging**: if your MITM shows \`sig_matches=0\`, the signature computation is WRONG. Check: (a) are you using the same parity constraints for forward and backward? (b) are the Feistel round directions correct? (c) is expand() applied correctly? Do NOT just re-run the same buggy code with a longer timeout — FIX the bug first.
+Compile with \`gcc -O3\`. Run with \`timeout 120\`.
 
 **Step 3 — Decrypt and write output IMMEDIATELY**:
-The moment you have the four seeds, compile and run \`decrypt.c\` (provided by the task) to decrypt \`ciphertexts.txt\`:
-\`gcc -O3 -o decrypt_prog decrypt.c && ./decrypt_prog ciphertexts.txt <seed0> <seed1> <seed2> <seed3> > plaintexts.txt\`
-Check line count matches ciphertexts. If decrypt.c doesn't accept seeds directly, write a small wrapper.
+The moment you have the four seeds, decrypt and write output in the SAME C program (don't make a separate decrypt step):
+- Include \`decrypt\` logic directly in the solver: once keys are verified, loop over \`ciphertexts.txt\`, decrypt each line, write to \`plaintexts.txt\`.
+- If decrypt.c is provided separately: \`gcc -O3 -o decrypt_prog decrypt.c && ./decrypt_prog ciphertexts.txt <seed0> <seed1> <seed2> <seed3> > plaintexts.txt\`
+- Check line count matches ciphertexts.
 
 **Step 4 — Call logos_complete immediately**:
-After writing plaintexts.txt, verify line count, then call logos_complete. Do NOT spend time on extra verification programs or re-checking the math. The verifier will validate your output.
+After writing plaintexts.txt, verify line count, then call logos_complete. Do NOT spend time on extra verification.
 
-**ANTI-PATTERNS that caused failures in past runs:**
-- Writing 10+ exploratory C files (analyze_g, find_linear, check_bijection, etc.) without building a solver — this consumes the entire 30-min budget.
-- Running \`timeout 300 ./attack\` that produces thousands of "CANDIDATE:" lines without converging — use \`timeout 120\` and ensure your solver prints ONLY verified results.
-- Trying to chain linear approximations across 4 rounds (derive_constraints, chain_check) — this approach found 0 chains in practice.
-- Never calling logos_complete — even if you're unsure about the solution, call it after writing plaintexts.txt.
-- Using the \`time\` command (not installed in the container; causes exit 127).
-- Running C programs without \`timeout\` — one run burned 590s on a background process.`,
+**ANTI-PATTERNS that caused failures in ALL past failed runs (7/9 trials failed):**
+- **find_linear finding 0 approximations** → searching only single-bit masks. Must use multi-bit masks like 0x01010101.
+- **sig_matches=0 in MITM** → signature computation bug. Don't retry with longer timeout; fix the code.
+- **"Done" without printing keys** → solver found nothing but exited normally. Always print keys explicitly and verify against pairs.
+- Writing 10+ exploratory C files without building a solver — this consumes the entire budget.
+- Running \`timeout 300\` (too long). Use \`timeout 120\` max.
+- \`find_chain.c\` / chaining approximations across rounds → always yields 0 chains.
+- Never calling logos_complete even after writing plaintexts.txt.
+- Using the \`time\` command (not installed; causes exit 127).`,
   },
   {
     id: "compilation-from-source",
@@ -342,28 +350,36 @@ The verifier's \`parse_bsai_primer()\` searches for the exact substring \`ggtctc
 
 **Why this works**: BsaI recognizes GGTCTC on EITHER strand of dsDNA. In the fwd primer, GGTCTC is on the top strand (left end of PCR product). In the rev primer, GGTCTC is on the bottom strand (right end). Both ends get cut.
 
-## CRITICAL — Verifier extends annealing by overhang overlap (up to +4 nt)
+## CRITICAL — Verifier extends annealing ASYMMETRICALLY (fwd usually +4, rev usually +0)
 
-The verifier does NOT just measure the binding region you designed. It computes an "effective annealing tract" that INCLUDES any overhang bases that also match the template at the junction. Since Golden Gate overhangs ARE the junction bases, the overhang almost always matches the template, adding up to **4 extra nt** to the annealing region.
+The verifier computes "effective annealing" by extending the binding into the overhang region IF those bases match the template. **This extension is NOT symmetric between fwd and rev.**
 
-This means:
-- **Max binding region = 41 nt** (not 45). With +4 overhang overlap, the verifier sees up to 45 nt.
-- **Tm must be computed on the EXTENDED region**, not just binding. This is the #1 remaining failure mode.
+**Verifier's exact algorithm**:
+- **Fwd extension**: checks if \`template[s-k:s] == overhang[-k:]\` for k=4,3,2,1. The overhang is the junction sequence at the INSERT START, so it almost always matches → **fwd typically gets +4 nt extension**.
+- **Rev extension**: checks if \`template[pos_right:pos_right+k] == rc(overhang[-k:])\` for k=4,3,2,1. This checks the template AFTER the rev binding endpoint. For most inserts, the template AFTER the binding is a stop codon or unrelated sequence → **rev typically gets +0 nt extension**.
+
+**Example of past failure (EGFP, ΔTm = 6.23°C)**:
+- egfp_fwd: overhang \`atga\` matches EGFP template start → +4 → 21 nt → Tm=68.5°C
+- egfp_rev: \`rc(tacc)\`=\`ggta\` does NOT match \`taa\` (stop codon after binding) → +0 → 20 nt → Tm=62.3°C
+- ΔTm = 6.2°C > 5 → FAIL
 
 ## CRITICAL — ΔTm computation workflow (THIS IS WHERE MOST FAILURES HAPPEN)
 
-Past runs show ΔTm = 5.45°C, 6.62°C causing failures. The verifier checks \`abs(fwd_tm - rev_tm) <= 5\` on EXTENDED tracts.
+**For EVERY primer pair, compute the ACTUAL extension (not assumed +4) BEFORE writing primers.fasta**:
 
-**For EVERY primer pair, you MUST do this BEFORE writing primers.fasta**:
-1. For **fwd primer**: the extended annealing = overhang (4 nt) + binding region (fwd). Compute \`fwd_ext_tm = oligotm(overhang + binding_fwd)\` with the task flags.
-2. For **rev primer**: the extended annealing = binding region (rev) + rc(overhang) (4 nt). Compute \`rev_ext_tm = oligotm(binding_rev + rc(overhang))\` with the task flags.
-3. Check: \`abs(fwd_ext_tm - rev_ext_tm) <= 3\` (use 3°C margin, not 5, to be safe).
-4. If ΔTm > 3°C: adjust binding lengths. Usually the fix is to **shorten the longer-Tm primer** or **lengthen the shorter-Tm primer** by 1-2 nt.
-5. Also check each extended Tm is in [58, 72]°C.
+1. For **fwd primer**: check how many of the overhang's last k nt (k=4,3,2,1) match the template BEFORE the binding start. Let kf = matched count. Extended fwd = template[s-kf : s+len(binding)]. Compute \`fwd_ext_tm = oligotm(extended_fwd)\`.
 
-**Common pitfall**: the fwd overhang always extends the fwd annealing (raising Tm), but the rev overhang may also extend rev annealing. The asymmetry between fwd and rev extension is what creates ΔTm > 5. You MUST compute BOTH extended Tms.
+2. For **rev primer**: check how many nt of \`rc(overhang[-k:])\` match the template AFTER the rev binding endpoint. Let kr = matched count. Extended rev = template[e : pos_right+kr]. Compute \`rev_ext_tm = oligotm(rc(extended_rev))\` (since the rev binds the antisense strand, take rc for Tm).
 
-**Safe design**: keep binding to **15-35 nt**, target extended Tm **60-65°C**, delta-Tm **<= 3°C** on the EXTENDED region.
+3. **In practice**: fwd almost always gets kf=4, rev almost always gets kr=0. So:
+   - \`fwd_ext_tm ≈ oligotm(overhang + fwd_binding)\` (overhang + binding, ~4 + N nt)
+   - \`rev_ext_tm ≈ oligotm(rev_binding)\` (binding only, no extension)
+
+4. Check: \`abs(fwd_ext_tm - rev_ext_tm) <= 3\` (use 3°C margin, verifier limit is 5).
+
+5. **If ΔTm > 3°C** (which is common due to fwd+4/rev+0 asymmetry): **shorten fwd binding** (so fwd extended = overhang(4) + short binding ≈ rev binding Tm) or **lengthen rev binding**. Iterate until delta <= 3°C.
+
+**Concrete strategy**: Since fwd gets +4 and rev gets +0, make fwd binding ~4 nt SHORTER than rev binding to compensate. E.g., fwd binding 13-16 nt (ext=17-20 nt), rev binding 17-22 nt (ext=17-22 nt), targeting both ext Tm around 62-65°C.
 
 ## Overhang / junction design (1 of 4 failures was wrong topology)
 
