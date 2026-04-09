@@ -22,11 +22,38 @@ Usage (Harbor CLI):
 
 import os
 import shlex
+from pathlib import Path
 
 from harbor.agents.installed.base import BaseInstalledAgent, with_prompt_template
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
+
+def _load_env_file() -> None:
+    """Load .env from the project root into os.environ (existing vars take precedence)."""
+    env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+    if not env_path.is_file():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        eq = line.find("=")
+        if eq < 1:
+            continue
+        key = line[:eq].strip()
+        val = line[eq + 1 :].strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+            val = val[1:-1]
+        else:
+            # strip inline comments (only for unquoted values)
+            comment_idx = val.find(" #")
+            if comment_idx >= 0:
+                val = val[:comment_idx].rstrip()
+        os.environ.setdefault(key, val)
+
+
+_load_env_file()
 
 KAIROS_DIR = "/opt/kairos"
 LOGOS_BIN_DIR = "/opt/logos"
@@ -63,7 +90,9 @@ class LogosAgent(BaseInstalledAgent):
                 break
 
         for key in (
-            "MODEL", "BASE_URL", "MAX_TURNS", "OPENAI_API_MODE",
+            "MODEL", "API_PROVIDER", "BASE_URL",
+            "MAX_TURNS", "ANTHROPIC_MAX_TOKENS", "CONTEXT_LIMIT",
+            "EVAL_RETRIES", "OPENAI_API_MODE",
             "EVALUATOR_MODEL", "EVALUATOR_API_KEY",
             "EVALUATOR_API_PROVIDER", "EVALUATOR_BASE_URL",
         ):
@@ -71,8 +100,11 @@ class LogosAgent(BaseInstalledAgent):
             if val:
                 pairs[key] = val
 
-        pairs["http_proxy"] = os.environ.get("http_proxy")
-        pairs["https_proxy"] = os.environ.get("https_proxy")
+        for key in ("http_proxy", "https_proxy"):
+            val = os.environ.get(key)
+            if val:
+                pairs[key] = val
+        
 
         return " && ".join(
             f"export {k}={shlex.quote(v)}" for k, v in pairs.items()

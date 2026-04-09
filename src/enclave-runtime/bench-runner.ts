@@ -11,10 +11,8 @@
  *   2. Standalone (no LOGOS_SOCKET): local shell exec, no kernel needed
  *
  * Usage:
- *   bun run bench-runner.ts "Install nginx and verify it's running"
- *
- * Configuration: create a .env file in the project root (see .env.example).
- * Env vars set explicitly still take precedence over .env values.
+ *   API_KEY=sk-xxx bun run bench-runner.ts "Install nginx and verify it's running"
+ *   API_KEY=sk-xxx LOGOS_SOCKET=/tmp/logos.sock bun run bench-runner.ts "..."
  *
  * Env vars:
  *   API_KEY              — LLM API key (required)
@@ -35,41 +33,6 @@
  *   EVALUATOR_API_PROVIDER — "openai"|"anthropic" for evaluator (auto-detected)
  *   EVALUATOR_BASE_URL   — API endpoint for evaluator model (default: same as BASE_URL)
  */
-
-// ── Load .env (before any process.env reads) ─────────────────
-import { readFileSync, existsSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-
-function loadEnvFile(): void {
-  const scriptDir = dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    resolve(scriptDir, "../../.env"),  // project root from src/enclave-runtime/
-    resolve(scriptDir, ".env"),        // same dir as script
-    resolve(process.cwd(), ".env"),    // CWD
-  ];
-  for (const envPath of candidates) {
-    if (!existsSync(envPath)) continue;
-    const content = readFileSync(envPath, "utf-8");
-    for (const line of content.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const eqIdx = trimmed.indexOf("=");
-      if (eqIdx < 1) continue;
-      const key = trimmed.slice(0, eqIdx).trim();
-      let val = trimmed.slice(eqIdx + 1).trim();
-      if ((val.startsWith('"') && val.endsWith('"')) ||
-          (val.startsWith("'") && val.endsWith("'"))) {
-        val = val.slice(1, -1);
-      }
-      if (!(key in process.env)) {
-        process.env[key] = val;
-      }
-    }
-    return; // only load the first .env found
-  }
-}
-loadEnvFile();
 
 import OpenAI from "openai";
 import { reactLoop } from "./agent/core/reactLoop";
