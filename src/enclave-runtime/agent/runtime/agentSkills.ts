@@ -347,27 +347,38 @@ The verifier's \`parse_bsai_primer()\` searches for the exact substring \`ggtctc
 The verifier does NOT just measure the binding region you designed. It computes an "effective annealing tract" that INCLUDES any overhang bases that also match the template at the junction. Since Golden Gate overhangs ARE the junction bases, the overhang almost always matches the template, adding up to **4 extra nt** to the annealing region.
 
 This means:
-- **Max binding region = 41 nt** (not 45). With +4 overhang overlap, the verifier sees up to 45 nt. If you use 45 nt binding + 4 nt overlap = 49 nt, it FAILS (one trial failed exactly this way: 49 > 45).
-- **Tm must be computed on the EXTENDED region** (binding + overhang overlap), not just binding. If the overhang adds 4 nt to the fwd primer's annealing but not the rev, the Tm shifts asymmetrically and the delta-Tm can exceed 5°C (two trials failed with delta-Tm of 5.77 and 6.04).
-- **Safe design**: keep binding to **15-35 nt**, target Tm **60-65°C**, delta-Tm **<= 3°C** on the binding region alone (leaving margin for the verifier's extension).
+- **Max binding region = 41 nt** (not 45). With +4 overhang overlap, the verifier sees up to 45 nt.
+- **Tm must be computed on the EXTENDED region**, not just binding. This is the #1 remaining failure mode.
 
-**How to verify like the verifier**: for each primer, after extracting the binding region, also check if the 4-nt overhang matches the template at the junction. If it does, compute Tm on \`overhang + binding\` (for fwd) or \`binding + rc(overhang)\` (for rev) as the verifier does. Ensure this extended Tm is 58-72°C and the pair delta-Tm <= 5°C.
+## CRITICAL — ΔTm computation workflow (THIS IS WHERE MOST FAILURES HAPPEN)
 
-**Proven successful example** (all 8 primers use \`ttggtctca\` = tt clamp + ggtctc + a spacer):
-- input_fwd: ttggtctcatgaggatcccgggaattctc
-- input_rev: ttggtctcatcatatgtatatctccttcttaaagttaaacaaaattattt
-- egfp_fwd: ttggtctcaatgagcaagggcgagga
-- egfp_rev: ttggtctcatacctttgtacagctcgtccatgc
+Past runs show ΔTm = 5.45°C, 6.62°C causing failures. The verifier checks \`abs(fwd_tm - rev_tm) <= 5\` on EXTENDED tracts.
 
-## Overhang design
-- All 4-nt overhangs must be unique and non-palindromic.
-- Circular assembly: last fragment's right overhang matches first fragment's left overhang.
-- Overhangs come from junction sequences in the output plasmid.
+**For EVERY primer pair, you MUST do this BEFORE writing primers.fasta**:
+1. For **fwd primer**: the extended annealing = overhang (4 nt) + binding region (fwd). Compute \`fwd_ext_tm = oligotm(overhang + binding_fwd)\` with the task flags.
+2. For **rev primer**: the extended annealing = binding region (rev) + rc(overhang) (4 nt). Compute \`rev_ext_tm = oligotm(binding_rev + rc(overhang))\` with the task flags.
+3. Check: \`abs(fwd_ext_tm - rev_ext_tm) <= 3\` (use 3°C margin, not 5, to be safe).
+4. If ΔTm > 3°C: adjust binding lengths. Usually the fix is to **shorten the longer-Tm primer** or **lengthen the shorter-Tm primer** by 1-2 nt.
+5. Also check each extended Tm is in [58, 72]°C.
+
+**Common pitfall**: the fwd overhang always extends the fwd annealing (raising Tm), but the rev overhang may also extend rev annealing. The asymmetry between fwd and rev extension is what creates ΔTm > 5. You MUST compute BOTH extended Tms.
+
+**Safe design**: keep binding to **15-35 nt**, target extended Tm **60-65°C**, delta-Tm **<= 3°C** on the EXTENDED region.
+
+## Overhang / junction design (1 of 4 failures was wrong topology)
+
+**How to derive correct overhangs**: The verifier reconstructs the assembled product by concatenating \`[overhang][internal_sequence]\` for each fragment in order. This assembled product must match the \`output\` sequence (circular). So overhangs MUST be derived from the output sequence at the exact junction points.
+- **Step 1**: Map each insert (egfp, flag, snap) to its position in the output sequence.
+- **Step 2**: At each junction, the 4-nt overhang = the 4 bases in the output at that splice point.
+- **Step 3**: All 4-nt overhangs must be unique and non-palindromic.
+- **Step 4**: Circular assembly: the overhang at position 0 of the output = the overhang that closes the circle (backbone right = backbone left).
+- **ANTI-PATTERN**: Do NOT pick overhangs from arbitrary sliding windows or arbitrary context. They MUST match the output sequence at the exact junction coordinates, or the final assembly check will fail.
 
 ## Time management (1800s agent timeout)
 - Write \`primers.fasta\` EARLY — a correct file before timeout gets scored; perfect analysis with no output gets 0.
-- After writing primers, quickly verify with \`oligotm\`, then call \`logos_complete\`.
-- Check templates for internal GGTCTC/GAGACC sites before designing primers.`,
+- After writing primers, verify extended Tm for ALL pairs (see ΔTm workflow above), then call \`logos_complete\` immediately.
+- Check templates for internal GGTCTC/GAGACC sites before designing primers.
+- Do NOT spend time on elaborate verification scripts — the verifier handles correctness.`,
   },
   {
     id: "web-scraping-context-limit",

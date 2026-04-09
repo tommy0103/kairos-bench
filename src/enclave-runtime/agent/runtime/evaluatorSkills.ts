@@ -2075,36 +2075,48 @@ def get_tm(seq_str):
         return float(r.stdout.strip())
     return None
 
+def rc(s):
+    comp = {"a":"t","t":"a","c":"g","g":"c"}
+    return "".join(comp.get(c,c) for c in reversed(s))
+
 if has_oligotm:
-    tm_values = {}
+    # Compute Tm on EXTENDED annealing (overhang + binding) — this is what the verifier does
+    ext_tm_values = {}
     for name, seq in primers.items():
         pos = seq.find("ggtctc")
         if pos == -1:
             continue
-        annealing_start = pos + 6 + 1 + 4
-        binding = seq[annealing_start:]
+        overhang_start = pos + 6 + 1  # ggtctc(6) + spacer(1)
+        overhang = seq[overhang_start:overhang_start+4]
+        binding = seq[overhang_start+4:]
         if len(binding) < 10:
             continue
-        tm_val = get_tm(binding)
-        if tm_val is not None:
-            tm_values[name] = tm_val
-            status = "PASS" if 58 <= tm_val <= 72 else "WARN"
-            print(f"{status}: {name} Tm={tm_val:.1f} (binding={len(binding)} nt)")
+        # Extended region: overhang + binding (fwd); binding + rc(overhang) (rev)
+        if "_fwd" in name:
+            extended = overhang + binding
+        else:
+            extended = binding + rc(overhang)
+        ext_tm = get_tm(extended)
+        bind_tm = get_tm(binding)
+        if ext_tm is not None:
+            ext_tm_values[name] = ext_tm
+            status = "PASS" if 58 <= ext_tm <= 72 else "WARN"
+            binfo = f", bind_only={bind_tm:.1f}" if bind_tm else ""
+            print(f"{status}: {name} ext_Tm={ext_tm:.1f} (extended={len(extended)} nt{binfo})")
 
-    # Check delta-Tm for each fwd/rev pair
+    # Check delta-Tm on EXTENDED Tm for each fwd/rev pair
     for template in ["input", "egfp", "flag", "snap"]:
         fwd_key = f"{template}_fwd"
         rev_key = f"{template}_rev"
-        if fwd_key in tm_values and rev_key in tm_values:
-            delta = abs(tm_values[fwd_key] - tm_values[rev_key])
+        if fwd_key in ext_tm_values and rev_key in ext_tm_values:
+            delta = abs(ext_tm_values[fwd_key] - ext_tm_values[rev_key])
             if delta > 4:
-                print(f"FAIL: {template} pair delta-Tm={delta:.1f} > 4 (verifier limit is 5, but overhang extension can add ~1-2 degrees)")
-                print(f"  fwd={tm_values[fwd_key]:.1f}, rev={tm_values[rev_key]:.1f}")
-                print(f"  Note: verifier computes Tm on EXTENDED annealing (binding + overhang overlap).")
-                print(f"  The actual delta-Tm the verifier sees may differ by 1-2 degrees.")
+                print(f"FAIL: {template} pair delta-ext-Tm={delta:.1f} > 4 (verifier limit is 5)")
+                print(f"  fwd_ext={ext_tm_values[fwd_key]:.1f}, rev_ext={ext_tm_values[rev_key]:.1f}")
+                print(f"  Fix: adjust binding lengths so EXTENDED Tm values are closer (target delta <= 3).")
                 failed += 1
             else:
-                print(f"PASS: {template} pair delta-Tm={delta:.1f}")
+                print(f"PASS: {template} pair delta-ext-Tm={delta:.1f}")
 
 # Check 6: no blank lines
 with open(PRIMERS_PATH) as f:
