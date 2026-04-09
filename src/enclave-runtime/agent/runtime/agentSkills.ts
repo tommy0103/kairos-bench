@@ -551,7 +551,8 @@ The following 6-phase architecture produces correct results with ~6300 rules, ~7
 
 **Phase 2b — Castling safety pre-check** (~130 rules — KEY INSIGHT):
 - Before generating castling moves, check if e1/f1/g1 (kingside) or e1/d1/c1 (queenside) are attacked in the ORIGINAL board
-- For each attack pattern that could hit these squares, add a rule that REMOVES the corresponding castling letter (K/Q) from the original board's metadata
+- **CRITICAL — e1 must be checked for BOTH K and Q**: if e1 is attacked (king is in check), BOTH kingside AND queenside castling are illegal. This is the #1 castling bug: checking only f1/g1 for kingside and d1/c1 for queenside, but forgetting that e1 being attacked blocks ALL castling. The failed run LPiUHJ2 had exactly this bug — it only filtered f1/d1 attacks, allowing O-O when a rook was giving check on the e-file.
+- For each attack pattern (by pawn/knight/bishop/rook/queen/king) that could hit e1, f1, or g1: add a rule removing \`K\` from metadata. For e1, d1, or c1: add a rule removing \`Q\`. Since e1 is shared, attacks on e1 must remove BOTH K and Q.
 - This prevents illegal castling moves from being generated in the first place, keeping the rule count low (~6300 total vs ~9200+ with post-filtering approaches)
 
 **Phase 2c — Castling moves** (~2 rules):
@@ -579,7 +580,10 @@ The following 6-phase architecture produces correct results with ~6300 rules, ~7
 Once \`check.py\` passes, you are ~80% done. **Do NOT run exhaustive random tests.**
 
 **After check.py passes**:
-1. Run 5-10 targeted edge cases: castling through check, en passant, promotion, pins (~60s total)
+1. Run 5-10 targeted edge cases (~60s total). MUST include these castling positions:
+   - Castling OUT of check (king on e1 attacked): \`r3r1k1/pp3pbp/1qp3p1/2B5/2BP2b1/Q1n2N2/P4PPP/3RK2R w K - 2 17\` → only 6 legal moves, O-O is ILLEGAL (Re8 gives check on e-file)
+   - Castling THROUGH check (f1 attacked): e.g. bishop on b5 attacking f1
+   - En passant, promotion, pins
 2. Verify the sample output from the task description matches exactly
 3. **Immediately call \`logos_complete\`** — do NOT attempt more random testing
 

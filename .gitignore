@@ -71,9 +71,10 @@ src/vfs/target
 .artifacts/
 
 src/sandbox/target
-
 jobs/
 
 state-daemon/
 sandbox/
 bench/
+
+commit_jobs/

@@ -2,7 +2,7 @@
 1/1 dna-insert
 1/1 mailman
 1/1 qemu-alpine-ssh qemu-startup
-0/1 filter-js-from-html
+1/1 filter-js-from-html
 0/1 regex-chess
 
 dna-assembly__qHeBFQU	1.0
