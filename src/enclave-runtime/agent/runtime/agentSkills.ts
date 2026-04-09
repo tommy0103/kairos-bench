@@ -282,17 +282,44 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
       ["bsai-hf", "primer"],
       ["nebbridge", "golden gate"],
       ["golden gate", "overhang"],
+      ["dna", "assembly", "primer"],
+      ["pcr", "primer", "golden"],
+      ["primers.fasta", "golden"],
+      ["primers.fasta", "bsai"],
     ],
-    hint: `**Golden Gate assembly primer design — BsaI site structure**:
-- BsaI primers have a STRICT structure (5'→3'): \`[clamp][ggtctc][N][4-nt overhang][binding region]\`
-  - **clamp**: AT LEAST 1 nucleotide (ideally 2-6 nt, e.g. \`tt\` or \`aagc\`) BEFORE the BsaI site. The verifier checks \`i >= 1\` where \`i = primer.find("ggtctc")\`. A primer starting directly with \`ggtctc\` will FAIL.
-  - **ggtctc**: the BsaI recognition site (always this exact sequence in the forward primer).
-  - **N**: a single spacer nucleotide between the recognition site and the cut position.
-  - **4-nt overhang**: the 4-nucleotide sticky end that defines how fragments assemble. Adjacent fragments must have COMPLEMENTARY overhangs.
-  - **binding region**: 15-45 nt that anneals to the template. Tm must be 58-72°C (use \`oligotm -tp 1 -sc 1 -mv 50 -dv 2 -n 0.8 -d 500\`).
-- For the **reverse primer**, the BsaI site is the reverse complement: \`gagacc\`. Structure: \`[clamp][gagacc][N][4-nt overhang rc][binding region rc]\`.
-- **Overhang design**: all 4-nt overhangs must be unique and non-palindromic. The assembly is circular if input is circular — the last fragment's right overhang must match the first fragment's left overhang.
-- **Common mistake**: forgetting the clamp. Even a single \`t\` before the BsaI site is sufficient. Without it, BsaI cutting efficiency drops dramatically AND the verifier rejects the primer.`,
+    hint: `**Golden Gate assembly primer design — BsaI site encoding**:
+
+## CRITICAL — ALL primers must contain literal \`ggtctc\`, NEVER \`gagacc\`
+
+The verifier's \`parse_bsai_primer()\` searches for the exact substring \`ggtctc\` in EVERY primer — **both forward AND reverse**. If a reverse primer uses \`gagacc\` (the conventional Type IIS complement-strand encoding), the verifier FAILS with "BsaI site ggtctc not found in primer". This was the #1 failure mode: 3/4 trials failed for this exact reason.
+
+**Primer structure for BOTH forward and reverse** (5'->3'):
+\`[clamp][ggtctc][N][4-nt overhang][binding region]\`
+
+- **clamp**: AT LEAST 1 nt (ideally \`tt\`) BEFORE the BsaI site. The verifier checks \`i >= 1\` where \`i = primer.find("ggtctc")\`. Starting directly with \`ggtctc\` FAILS.
+- **ggtctc**: the BsaI recognition site — use this EXACT sequence on ALL primers.
+- **N**: a single spacer nucleotide (typically \`a\`).
+- **4-nt overhang**: For **fwd**, the left junction overhang (sense). For **rev**, the **reverse complement** of the right junction overhang.
+- **binding region**: For **fwd**, 15-45 nt matching template (sense strand). For **rev**, the **reverse complement** of 15-45 nt from the template's right end. Tm 58-72°C, delta-Tm <= 5°C per pair.
+
+**Why this works**: BsaI recognizes GGTCTC on EITHER strand of dsDNA. In the fwd primer, GGTCTC is on the top strand (left end of PCR product). In the rev primer, GGTCTC is on the bottom strand (right end). Both ends get cut.
+
+**Proven successful example** (all 8 primers use \`ttggtctca\` = tt clamp + ggtctc + a spacer):
+- input_fwd: ttggtctcatgaggatcccgggaattctc
+- input_rev: ttggtctcatcatatgtatatctccttcttaaagttaaacaaaattattt
+- egfp_fwd: ttggtctcaatgagcaagggcgagga
+- egfp_rev: ttggtctcatacctttgtacagctcgtccatgc
+
+## Overhang design
+- All 4-nt overhangs must be unique and non-palindromic.
+- Circular assembly: last fragment's right overhang matches first fragment's left overhang.
+- Overhangs come from junction sequences in the output plasmid.
+
+## Time management (1800s agent timeout)
+- Write \`primers.fasta\` EARLY — a correct file before timeout gets scored; perfect analysis with no output gets 0.
+- Target Tm **60-65°C** (center of 58-72°C range) for robustness.
+- After writing primers, quickly verify with \`oligotm\`, then call \`logos_complete\`.
+- Check templates for internal GGTCTC/GAGACC sites before designing primers.`,
   },
   {
     id: "web-scraping-context-limit",
