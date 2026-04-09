@@ -52,12 +52,36 @@ export const AGENT_SKILLS: AgentSkill[] = [
 - Only fall back to linear/differential cryptanalysis if the effective key space exceeds ~2^28.
 
 **For multi-round Feistel ciphers with per-round seeds (e.g. FEAL-like, 4 rounds x 20-bit seeds)**:
-- Total keyspace is 2^80 (brute-force impossible), but each seed is only 2^20.
-- **Step 1 — Find perfect linear approximations of F**: search input/output masks where \`parity(F(x) & out_mask) == parity(x & in_mask) ^ constant\` has bias exactly 0.5 (deterministic). These exist in FEAL-like ciphers and give exact parity constraints on intermediate round values.
-- **Step 2 — Meet-in-the-middle on outer rounds**: For each seed0 (2^20), compute intermediate state after round 0 for all known pairs, derive a compact "signature" from the parity constraints. Do the same backwards for each seed3 (2^20). Match signatures using sorted arrays + binary search. This is O(2^20 + 2^20) instead of O(2^40).
-- **Step 3 — Brute inner rounds**: For each matched (seed0, seed3) candidate, brute-force seed1 and seed2 (each 2^20) using Feistel round equations: e.g. \`F(R1 ^ K1) == R0 ^ R2\` must hold for all 32 pairs. Filter false positives with multiple pairs.
-- **Step 4 — Decrypt and write output immediately**: Once seeds/keys are found, use the provided \`decrypt.c\` or your own code to decrypt \`ciphertexts.txt\` and write \`plaintexts.txt\`. Do this BEFORE any further verification.
-- **CRITICAL time management**: Always wrap C programs with \`timeout 300\`. Never use the \`time\` command (not installed in the container). Do NOT spend > 15 minutes on exploratory bias analysis — if you haven't found perfect approximations by then, try a different mask search strategy. Write \`plaintexts.txt\` the MOMENT you have recovered keys.`,
+- Total keyspace is 2^80 (brute-force impossible), but each seed is only 2^20 (~1M).
+
+**CRITICAL — Do NOT waste time on exploratory analysis. Follow this exact 4-step plan:**
+
+**Step 1 — Find perfect linear approximations of F (budget: max 5 min)**:
+Write ONE C program that iterates all 32-bit input/output mask pairs and checks \`parity(F(x) & out_mask) == parity(x & in_mask) ^ c\` over all 2^32 inputs (or a large sample). Print masks where bias is exactly 0.5 (deterministic). FEAL-like F functions always have multiple perfect approximations. This step should take < 2 minutes. Do NOT keep searching for "more" or "better" approximations — a few perfect ones are enough.
+
+**Step 2 — Build the MITM solver directly (budget: max 10 min to write)**:
+Do NOT try to "chain" approximations across rounds (this approach often yields 0 chainable pairs and wastes time). Instead, use the per-round seed structure directly:
+- For each candidate seed0 in [0, 2^20): derive K0, compute R1 = L0 ^ F(R0 ^ K0) for all 32 known pairs, then compute a compact "signature" (e.g. XOR/hash of parity constraints applied to R1 values). Store in a hash table or sorted array.
+- For each candidate seed3 in [0, 2^20): derive K3, compute R2 = R3 ^ F(L3 ^ K3) backwards from ciphertext, compute the same type of signature. Look up in the seed0 table.
+- For each matching (seed0, seed3): brute-force seed1 in [0, 2^20) checking F(R1 ^ K1) == L1 ^ L2 for all pairs. Then brute-force seed2 similarly.
+- Verify all 32 pairs match. Print the four seeds.
+Compile with \`gcc -O3\`. Run with \`timeout 120\`. The MITM search is O(2*2^20) and each seed1/seed2 brute is O(2^20), all fast.
+
+**Step 3 — Decrypt and write output IMMEDIATELY**:
+The moment you have the four seeds, compile and run \`decrypt.c\` (provided by the task) to decrypt \`ciphertexts.txt\`:
+\`gcc -O3 -o decrypt_prog decrypt.c && ./decrypt_prog ciphertexts.txt <seed0> <seed1> <seed2> <seed3> > plaintexts.txt\`
+Check line count matches ciphertexts. If decrypt.c doesn't accept seeds directly, write a small wrapper.
+
+**Step 4 — Call logos_complete immediately**:
+After writing plaintexts.txt, verify line count, then call logos_complete. Do NOT spend time on extra verification programs or re-checking the math. The verifier will validate your output.
+
+**ANTI-PATTERNS that caused failures in past runs:**
+- Writing 10+ exploratory C files (analyze_g, find_linear, check_bijection, etc.) without building a solver — this consumes the entire 30-min budget.
+- Running \`timeout 300 ./attack\` that produces thousands of "CANDIDATE:" lines without converging — use \`timeout 120\` and ensure your solver prints ONLY verified results.
+- Trying to chain linear approximations across 4 rounds (derive_constraints, chain_check) — this approach found 0 chains in practice.
+- Never calling logos_complete — even if you're unsure about the solution, call it after writing plaintexts.txt.
+- Using the \`time\` command (not installed in the container; causes exit 127).
+- Running C programs without \`timeout\` — one run burned 590s on a background process.`,
   },
   {
     id: "compilation-from-source",

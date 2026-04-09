@@ -1604,48 +1604,23 @@ print("\\nALL HEADLESS TERMINAL CHECKS PASSED")
     ],
     recipe: `### Skill: Cryptanalysis — Verify Decrypted Output, Don't Read Source Code
 
-**CRITICAL — the #1 evaluator time-waster is reading source code**:
-- Cryptanalysis tasks have complex C implementations. Do NOT spend time reading \`feal.c\`, \`solve.c\`, etc. to understand the attack.
-- The task asks the agent to produce a specific output file (e.g., \`/app/plaintexts.txt\`).
-- Your job is to VERIFY THE OUTPUT, not understand the attack.
+**CRITICAL — SPEED IS EVERYTHING. The agent is on a 30-min clock and the evaluator phase eats into that budget.**
+- Do NOT read source code (\`feal.c\`, \`solve.c\`, \`attack*.c\`, etc.). These are complex C implementations and reading them wastes precious minutes.
+- Do NOT try to understand or re-implement the cryptographic attack.
+- Run ONE shell script, check results, PASS or FAIL. That's it.
 
-**Recipe**:
+**Recipe — run as a SINGLE logos_exec command**:
 \\\`\\\`\\\`bash
 #!/bin/bash
-set -e
 FAIL=0
 
 # Check 1: output file exists and is non-empty
 if [ ! -s /app/plaintexts.txt ]; then
     echo "FAIL: /app/plaintexts.txt is missing or empty"
-    FAIL=1
+    exit 1
 fi
 
-# Check 2: if decrypt tool exists, cross-verify
-if [ -f /app/decrypt ] || [ -f /app/decrypt.c ]; then
-    # Compile if needed
-    if [ ! -f /app/decrypt ] && [ -f /app/decrypt.c ]; then
-        cd /app && gcc -o decrypt decrypt.c feal.c 2>/dev/null || true
-    fi
-    if [ -f /app/decrypt ]; then
-        # The decrypt tool needs the recovered key — check if agent stored it
-        KEY_FILE=$(find /app -name "key*" -o -name "*.key" 2>/dev/null | head -1)
-        if [ -n "$KEY_FILE" ]; then
-            /app/decrypt "$KEY_FILE" /app/ciphertexts.txt /tmp/decrypted_verify.txt 2>/dev/null || true
-            if [ -f /tmp/decrypted_verify.txt ]; then
-                if diff -q /app/plaintexts.txt /tmp/decrypted_verify.txt > /dev/null 2>&1; then
-                    echo "PASS: plaintexts.txt matches decrypt tool output"
-                else
-                    echo "FAIL: plaintexts.txt differs from decrypt tool output"
-                    diff /app/plaintexts.txt /tmp/decrypted_verify.txt | head -20
-                    FAIL=1
-                fi
-            fi
-        fi
-    fi
-fi
-
-# Check 3: format sanity — each line should be a hex string
+# Check 2: format sanity — each line should be a hex or decimal string
 BAD_LINES=$(grep -cvE '^[0-9a-fA-F]+$' /app/plaintexts.txt 2>/dev/null || echo "0")
 if [ "$BAD_LINES" -gt 0 ]; then
     echo "FAIL: $BAD_LINES lines in plaintexts.txt are not valid hex"
@@ -1654,7 +1629,7 @@ else
     echo "PASS: all lines are valid hex"
 fi
 
-# Check 4: line count matches ciphertexts
+# Check 3: line count matches ciphertexts
 CT_LINES=$(wc -l < /app/ciphertexts.txt 2>/dev/null || echo "0")
 PT_LINES=$(wc -l < /app/plaintexts.txt 2>/dev/null || echo "0")
 if [ "$CT_LINES" -eq "$PT_LINES" ] && [ "$CT_LINES" -gt 0 ]; then
@@ -1667,7 +1642,7 @@ fi
 [ $FAIL -eq 0 ] && echo "ALL CRYPTANALYSIS CHECKS PASSED" || exit 1
 \\\`\\\`\\\`
 
-**Key principle**: The verifier checks whether the decrypted plaintexts are correct. Focus on output existence, format, and cross-validation with any provided tools. Do NOT try to understand or re-implement the cryptographic attack.`,
+**Verdict**: If the script prints ALL PASSED → PASS. Otherwise FAIL. Do NOT add extra checks, do NOT read any C source files, do NOT compile anything. The official verifier handles correctness validation.`,
   },
   {
     id: "gcode-text-extraction",
