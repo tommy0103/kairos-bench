@@ -300,9 +300,20 @@ The verifier's \`parse_bsai_primer()\` searches for the exact substring \`ggtctc
 - **ggtctc**: the BsaI recognition site — use this EXACT sequence on ALL primers.
 - **N**: a single spacer nucleotide (typically \`a\`).
 - **4-nt overhang**: For **fwd**, the left junction overhang (sense). For **rev**, the **reverse complement** of the right junction overhang.
-- **binding region**: For **fwd**, 15-45 nt matching template (sense strand). For **rev**, the **reverse complement** of 15-45 nt from the template's right end. Tm 58-72°C, delta-Tm <= 5°C per pair.
+- **binding region**: For **fwd**, matching template (sense strand). For **rev**, the **reverse complement** of template right end. See length/Tm rules below.
 
 **Why this works**: BsaI recognizes GGTCTC on EITHER strand of dsDNA. In the fwd primer, GGTCTC is on the top strand (left end of PCR product). In the rev primer, GGTCTC is on the bottom strand (right end). Both ends get cut.
+
+## CRITICAL — Verifier extends annealing by overhang overlap (up to +4 nt)
+
+The verifier does NOT just measure the binding region you designed. It computes an "effective annealing tract" that INCLUDES any overhang bases that also match the template at the junction. Since Golden Gate overhangs ARE the junction bases, the overhang almost always matches the template, adding up to **4 extra nt** to the annealing region.
+
+This means:
+- **Max binding region = 41 nt** (not 45). With +4 overhang overlap, the verifier sees up to 45 nt. If you use 45 nt binding + 4 nt overlap = 49 nt, it FAILS (one trial failed exactly this way: 49 > 45).
+- **Tm must be computed on the EXTENDED region** (binding + overhang overlap), not just binding. If the overhang adds 4 nt to the fwd primer's annealing but not the rev, the Tm shifts asymmetrically and the delta-Tm can exceed 5°C (two trials failed with delta-Tm of 5.77 and 6.04).
+- **Safe design**: keep binding to **15-35 nt**, target Tm **60-65°C**, delta-Tm **<= 3°C** on the binding region alone (leaving margin for the verifier's extension).
+
+**How to verify like the verifier**: for each primer, after extracting the binding region, also check if the 4-nt overhang matches the template at the junction. If it does, compute Tm on \`overhang + binding\` (for fwd) or \`binding + rc(overhang)\` (for rev) as the verifier does. Ensure this extended Tm is 58-72°C and the pair delta-Tm <= 5°C.
 
 **Proven successful example** (all 8 primers use \`ttggtctca\` = tt clamp + ggtctc + a spacer):
 - input_fwd: ttggtctcatgaggatcccgggaattctc
@@ -317,7 +328,6 @@ The verifier's \`parse_bsai_primer()\` searches for the exact substring \`ggtctc
 
 ## Time management (1800s agent timeout)
 - Write \`primers.fasta\` EARLY — a correct file before timeout gets scored; perfect analysis with no output gets 0.
-- Target Tm **60-65°C** (center of 58-72°C range) for robustness.
 - After writing primers, quickly verify with \`oligotm\`, then call \`logos_complete\`.
 - Check templates for internal GGTCTC/GAGACC sites before designing primers.`,
   },
