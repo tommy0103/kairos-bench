@@ -2113,6 +2113,26 @@ for name, seq in primers.items():
     else:
         print(f"PASS: {name} has ggtctc at pos {pos} (clamp={pos} nt)")
 
+# Check 3b: CRITICAL — fwd binding must NOT start with the overhang
+# If it does, the verifier's make_fragment includes overhang bases in the
+# internal fragment, causing 4-nt duplication at every junction → assembly FAIL.
+for name, seq in primers.items():
+    if "_fwd" not in name:
+        continue
+    pos = seq.find("ggtctc")
+    if pos == -1:
+        continue
+    oh_start = pos + 6 + 1  # ggtctc(6) + spacer(1)
+    overhang = seq[oh_start:oh_start+4]
+    binding = seq[oh_start+4:]
+    if len(binding) >= 4 and binding[:4] == overhang:
+        print(f"FAIL: {name} binding starts with overhang '{overhang}' — causes 4-nt duplication in assembly!")
+        print(f"  binding = '{binding[:20]}...'")
+        print(f"  The fwd binding must start AFTER the overhang position on the template, not AT it.")
+        print(f"  Fix: remove first 4 nt of binding so it starts 4 nt later on template, then extend")
+        print(f"  from the 3' end if needed to keep binding >= 15 nt.")
+        failed += 1
+
 # Check 4: binding region length
 # IMPORTANT: The verifier extends the annealing region by up to 4 nt
 # (overhang overlap with template). Binding alone should be <= 41 nt.
@@ -2216,10 +2236,11 @@ print("\\nALL GOLDEN GATE PRIMER CHECKS PASSED")
 **Verdict rules (MANDATORY)**:
 1. **If any primer uses \`gagacc\` instead of \`ggtctc\` -> immediate FAIL.** The fixer MUST rewrite ALL primers with \`ggtctc\`. Both fwd and rev primers use \`[clamp][ggtctc][N][overhang][binding]\`.
 2. **If \`ggtctc\` is at position 0 (no clamp) -> FAIL.** The verifier requires at least 1 nt before the BsaI site.
-3. **If binding > 41 nt -> FAIL.** The fixer must REDESIGN the entire primer pair for that fragment with shorter binding (15-35 nt). **NEVER trim binding from the 5' end** — this shifts the amplicon boundary and causes "Assembled sequence does not match expected output". If binding must be shortened, the fixer must recalculate the binding from the same template position but with fewer bases from the 3' end of the written sequence.
-4. **Do NOT use the Primer Tm evaluator skill** (it uses \`rc(rev)+fwd\` insert detection which does not apply to Golden Gate).
-5. **Do NOT verify by reconstructing the assembled product** from raw primers — enzymatic digestion removes the BsaI sites.
-6. If all checks pass -> report PASS. Do NOT write additional tests.`,
+3. **If fwd binding starts with overhang -> FAIL (4-nt assembly duplication).** The fixer must rewrite the fwd primer: keep the same overhang, but set binding = template starting 4 nt AFTER the overhang position (remove the first 4 nt of binding). Extend from the 3' end if needed to keep binding >= 15 nt and Tm 58-72°C.
+4. **If binding > 41 nt -> FAIL.** The fixer must REDESIGN the entire primer pair for that fragment with shorter binding (15-35 nt). **NEVER trim binding from the 5' end** — this shifts the amplicon boundary and causes "Assembled sequence does not match expected output". If binding must be shortened, the fixer must recalculate the binding from the same template position but with fewer bases from the 3' end of the written sequence.
+5. **Do NOT use the Primer Tm evaluator skill** (it uses \`rc(rev)+fwd\` insert detection which does not apply to Golden Gate).
+6. **Do NOT verify by reconstructing the assembled product** from raw primers — enzymatic digestion removes the BsaI sites.
+7. If all checks pass -> report PASS. Do NOT write additional tests.`,
   },
 ];
 

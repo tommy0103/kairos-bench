@@ -402,6 +402,17 @@ The verifier's \`parse_bsai_primer()\` searches for the exact substring \`ggtctc
 
 **Why this works**: BsaI recognizes GGTCTC on EITHER strand of dsDNA. In the fwd primer, GGTCTC is on the top strand (left end of PCR product). In the rev primer, GGTCTC is on the bottom strand (right end). Both ends get cut.
 
+## CRITICAL — Fwd binding must NOT overlap with the overhang on the template
+
+The verifier's \`make_fragment()\` computes the internal fragment starting from the binding position on the template. If the fwd binding starts at the junction point (position K, where the overhang is), the internal will include \`template[K:K+4]\` = the overhang bases, causing **4-nt DUPLICATION at every junction** → \`Assembled sequence does not match expected output\`.
+
+**Rule**: If \`overhang = template[K:K+4]\`, the fwd binding MUST start at \`template[K+4]\`, NOT at \`template[K]\`.
+
+**CORRECT** (egfp example): overhang = \`atga\` = egfp[0:4], binding = \`gcaagggcgaggagc\` (starts at egfp[4])
+**WRONG** (trial iheMoVo bug): overhang = \`atga\` = egfp[0:4], binding = \`atgagcaagggcgagga\` (starts at egfp[0] → binding[0:4] = overhang → DUPLICATED!)
+
+**Quick self-check**: For each fwd primer, verify \`binding[0:4] != overhang\`. If they match, the binding is wrong.
+
 ## CRITICAL — Verifier extends annealing ASYMMETRICALLY (fwd usually +4, rev usually +0)
 
 The verifier computes "effective annealing" by extending the binding into the overhang region IF those bases match the template. **This extension is NOT symmetric between fwd and rev.**
