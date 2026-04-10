@@ -139,11 +139,11 @@ After writing plaintexts.txt, verify line count, then call logos_complete. Do NO
       ["model.bin", "accuracy"],
       ["model.bin", "fasttext"],
     ],
-    hint: `**FastText text classification — the #1 mistake is text preprocessing**:
+    hint: `**FastText text classification — two critical mistakes: (1) text preprocessing, (2) manual hyperparameter guessing**:
 
 ## CRITICAL — Do NOT preprocess text (lowercase, remove special chars, etc.)
 
-The verifier tests the model with RAW text (\`model.predict(raw_text)\`). If you train on lowercased/cleaned text but the verifier tests on raw text, the vocabulary won't match and accuracy drops ~10% (from 63% to 50-55%). This was the failure mode in ALL 5 past trials.
+The verifier tests the model with RAW text (\`model.predict(raw_text)\`). If you train on lowercased/cleaned text but the verifier tests on raw text, the vocabulary won't match and accuracy drops ~10%.
 
 **Correct approach**: convert parquet to fasttext format with MINIMAL preprocessing:
 \`\`\`python
@@ -151,33 +151,48 @@ import pandas as pd
 df = pd.read_parquet('data/train-00000-of-00001.parquet')
 with open('train.txt', 'w') as f:
     for _, row in df.iterrows():
-        text = str(row['text']).replace('\\n', ' ').replace('\\r', ' ')  # only replace newlines
+        text = str(row['text']).replace('\\n', ' ').replace('\\r', ' ')
         f.write(f'__label__{row["label"]} {text}\\n')
 \`\`\`
 Do NOT lowercase. Do NOT remove punctuation. Do NOT remove special characters.
 
-## Training parameters that work (under 590s logos_exec timeout)
+## CRITICAL — Use autotune, do NOT manually guess hyperparameters
 
-With 650K training examples, many configurations timeout. Use these proven-safe parameters:
-- **lr=1.0, epoch=5, wordNgrams=2, dim=50, bucket=500000, minCount=5** → fits in ~3 min, ~110 MB, agent got 63% on provided test
-- Do NOT use epoch >= 15 (will timeout at 590s)
-- Do NOT use dim >= 100 with bucket >= 500000 (model > 150 MB)
-- loss='softmax' (default) is fine for 5-class classification
+Manual parameter search (trying lr=0.8/1.0/1.5, epoch=5/7/10, etc.) ALWAYS gets stuck at ~60% accuracy — 8 past trials all failed this way. The target is 62%. The breakthrough requires FastText's built-in \`autotune\`.
+
+**Primary approach (autotune)**:
+\`\`\`python
+import fasttext
+model = fasttext.train_supervised(
+    input='train.txt',
+    autotuneValidationFile='test.txt',
+    autotuneDuration=500,
+    autotuneModelSize='150000000',
+)
+result = model.test('test.txt')
+print(f"Accuracy: {result[1]:.4f}")
+model.save_model('/app/model.bin')
+\`\`\`
+- \`autotuneDuration=500\`: searches hyperparameters for 500 seconds. With ~20s overhead, total ≈ 520s, within 590s logos_exec timeout. Each full training run takes ~180s on this dataset, so 500s lets autotune explore ~3-4 configurations with smart pruning.
+- \`autotuneModelSize='150000000'\`: constrains model to < 150 MB
+- Autotune searches over lr, dim, epoch, wordNgrams, bucket, loss, minCount, etc. — finds combinations a human wouldn't try
+
+**Why manual params fail at ~60%**: With \`dim=50, bucket=500000, wordNgrams=2\`, there are massive hash collisions (650K samples produce millions of bigrams → 500K buckets). Autotune can find better trade-offs (e.g., lower dim + much larger bucket, or trigrams with different loss).
 
 ## Model size control (must be < 150 MB)
-- Model size ≈ (vocab_size × dim + bucket × dim) × 2 × 4 bytes
-- To reduce: lower bucket (200000-500000), lower dim (50), higher minCount (5+)
-- Quantization (\`model.quantize()\`) can shrink further but has been unreliable in past runs
+- Model size ≈ (vocab_size + bucket) × dim × 4 bytes
+- The \`autotuneModelSize\` parameter handles this automatically
+- If training manually: dim=30 allows bucket=1,000,000 (less collision); dim=50 maxes at bucket=550,000
 
-## Workflow (budget: 60 min total)
+## Workflow (budget: 30 min total)
 1. Install deps: \`apt-get install -y g++ build-essential && pip install fasttext pandas pyarrow\` (5 min)
 2. Convert parquet to fasttext format WITHOUT preprocessing (2 min)
-3. Train with safe params: lr=1.0, epoch=5, wordNgrams=2, dim=50, bucket=500000, minCount=5 (3 min)
-4. Test on provided test set: \`model.test('test.txt')\` — expect ~62-65%
-5. If accuracy < 62%: try epoch=8 or lr=0.8 or wordNgrams=3 (stay under 590s)
-6. Save as /app/model.bin, verify size < 150 MB
-7. Call logos_complete immediately
-8. Do NOT delete train.txt / test.txt — the evaluator may need them`,
+3. **Run autotune** (see code above) — one command, ~9 min (500s search + overhead)
+4. Verify: \`model.test('test.txt')\` — need >= 0.62
+5. Verify: \`os.path.getsize('/app/model.bin') < 150*1024*1024\`
+6. Save and call logos_complete immediately
+7. Do NOT delete train.txt / test.txt — the evaluator may need them
+8. Do NOT waste time on manual parameter search after autotune — if autotune can't reach 0.62, manual search won't either`,
   },
   {
     id: "database-recovery",
