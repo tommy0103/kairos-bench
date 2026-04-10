@@ -38,6 +38,8 @@ export interface KernelSessionOptions {
   socketPath: string;
   taskDescription: string;
   agentConfigId: string;
+  /** Per-command timeout for logos_exec (default: 590s). */
+  execTimeoutMs?: number;
 }
 
 // ── Kernel session ───────────────────────────────────────────
@@ -63,7 +65,9 @@ export async function createKernelSession(
   await logosClient.handshake(token);
   console.log(`[bench-runtime] kernel session bound to task ${taskId}`);
 
-  const logosTools = createAllLogosTools(logosClient);
+  const logosTools = createAllLogosTools(logosClient, {
+    execTimeoutMs: opts.execTimeoutMs,
+  });
   const tools = [...logosTools, createLogosCompleteTool()];
   const handler = createCompleteHandler({ logosClient });
 

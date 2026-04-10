@@ -34,6 +34,8 @@ export interface ExploreExecutorOptions {
   temperature?: number;
   kernelMode: boolean;
   contextLimit?: number;
+  /** Actual per-command timeout in seconds (shown in tool docs). */
+  execTimeoutSec?: number;
 }
 
 // ── Main entry point ─────────────────────────────────────────
@@ -52,6 +54,7 @@ export async function executeExplore(
     temperature = 0.2,
     kernelMode,
     contextLimit,
+    execTimeoutSec,
   } = opts;
 
   const bounded = approaches.slice(0, MAX_PARALLEL);
@@ -85,6 +88,7 @@ export async function executeExplore(
         idx,
         maxTurns: maxTurnsPerApproach,
         temperature,
+        execTimeoutSec,
         kernelMode,
         contextLimit,
       }),
@@ -141,6 +145,7 @@ async function runApproach(opts: {
   temperature: number;
   kernelMode: boolean;
   contextLimit?: number;
+  execTimeoutSec?: number;
 }): Promise<boolean> {
   const tag = `explore-${opts.idx}`;
   console.log(`[${tag}] starting: "${opts.approach.slice(0, 100)}"`);
@@ -151,6 +156,7 @@ async function runApproach(opts: {
     opts.workDir,
     opts.taskLog,
     opts.kernelMode,
+    opts.execTimeoutSec,
   );
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
@@ -258,6 +264,7 @@ function buildExplorePrompt(
   workDir: string,
   taskLog: string | undefined,
   kernelMode: boolean,
+  execTimeoutSec = 590,
 ): string {
   const toolDocs = kernelMode
     ? `## Tools
@@ -266,13 +273,13 @@ You have Logos kernel primitives:
 
 1. **logos_exec(command)** — Execute a shell command. Output truncated to ~200 lines;
    full output saved to terminal log (read via logos_read when truncated).
-   **Time limit: each logos_exec call has a ~590 second timeout.** If a command exceeds this, it is killed and returns exit_code -1. For long-running tasks (training, compilation), design commands to complete within this limit. Use the shell \`timeout\` utility for additional safety (e.g. \`timeout 300 ./my_program\`).
+   **Time limit: each logos_exec call has a ~${execTimeoutSec} second timeout.** If a command exceeds this, it is killed and returns exit_code -1. For long-running tasks (training, compilation), design commands to complete within this limit. Use the shell \`timeout\` utility for additional safety (e.g. \`timeout ${Math.round(execTimeoutSec * 0.5)} ./my_program\`).
 2. **logos_read(uri)** — Read from any Logos URI.
 3. **logos_write(uri, content)** — Write to a Logos URI.
 4. **logos_complete(...)** — MANDATORY final call to finish your turn.`
     : `## Tools
 
-- **logos_exec(command)** — Execute a shell command. Output truncated to ~200 lines. Each call has a ~590 second timeout.
+- **logos_exec(command)** — Execute a shell command. Output truncated to ~200 lines. Each call has a ~${execTimeoutSec} second timeout.
 - **logos_complete(...)** — MANDATORY: call this when done or blocked.`;
 
   const taskLogSection = taskLog

@@ -195,7 +195,7 @@ model.save_model('/app/model.bin')
 
 ## Do NOT use autotune on full data
 
-Autotune on 650K samples ALWAYS exceeds the 590s logos_exec timeout — even \`autotuneDuration=300\` fails because autotune adds a "Training again with best arguments" final pass. This has been confirmed in 4+ trials. Do NOT attempt it.
+Autotune on 650K samples ALWAYS exceeds the logos_exec timeout — even with \`autotuneDuration=300\`, autotune adds a "Training again with best arguments" final pass that pushes total time past the limit. This has been confirmed in 4+ trials. Do NOT attempt it.
 
 ## Do NOT use dim >= 50
 

@@ -41,6 +41,8 @@ export interface PlanExecutorOptions {
   kernelMode: boolean;
   depth?: number;
   contextLimit?: number;
+  /** Actual per-command timeout in seconds (shown in tool docs). */
+  execTimeoutSec?: number;
 }
 
 // ── Main entry point ─────────────────────────────────────────
@@ -58,6 +60,7 @@ export async function executePlan(
     kernelMode,
     depth = 0,
     contextLimit,
+    execTimeoutSec,
   } = opts;
 
   if (depth >= MAX_PLAN_DEPTH) {
@@ -84,7 +87,7 @@ export async function executePlan(
       client,
       model,
       tools,
-      systemPrompt: buildExecutorPrompt(originalTask, subtask, kernelMode, completed),
+      systemPrompt: buildExecutorPrompt(originalTask, subtask, kernelMode, completed, execTimeoutSec),
       userMessage: subtask,
       maxTurns: maxTurnsPerAgent,
       temperature,
@@ -163,6 +166,7 @@ export async function executePlan(
         completed,
         remaining,
         kernelMode,
+        execTimeoutSec,
       ),
       userMessage: "Review progress and decide how to proceed.",
       maxTurns: Math.min(maxTurnsPerAgent, 50),
@@ -340,7 +344,7 @@ async function runSubAgent(opts: {
 
 // ── Prompt fragments ─────────────────────────────────────────
 
-function toolDocsBlock(kernelMode: boolean): string {
+function toolDocsBlock(kernelMode: boolean, timeoutSec = 590): string {
   if (kernelMode) {
     return `## Tools
 
@@ -348,14 +352,14 @@ You have Logos kernel primitives:
 
 1. **logos_exec(command)** — Execute a shell command. Output truncated to ~200 lines;
    full output saved to terminal log (read via logos_read when truncated).
-   **Time limit: each logos_exec call has a ~590 second timeout.** If a command exceeds this, it is killed and returns exit_code -1. For long-running tasks (training, compilation), design commands to complete within this limit. Use the shell \`timeout\` utility for additional safety (e.g. \`timeout 300 ./my_program\`).
+   **Time limit: each logos_exec call has a ~${timeoutSec} second timeout.** If a command exceeds this, it is killed and returns exit_code -1. For long-running tasks (training, compilation), design commands to complete within this limit. Use the shell \`timeout\` utility for additional safety (e.g. \`timeout ${Math.round(timeoutSec * 0.5)} ./my_program\`).
 2. **logos_read(uri)** — Read from any Logos URI.
 3. **logos_write(uri, content)** — Write to a Logos URI.
 4. **logos_complete(...)** — MANDATORY final call to finish your turn.`;
   }
   return `## Tools
 
-- **logos_exec(command)** — Execute a shell command. Output truncated to ~200 lines. Each call has a ~590 second timeout.
+- **logos_exec(command)** — Execute a shell command. Output truncated to ~200 lines. Each call has a ~${timeoutSec} second timeout.
 - **logos_complete(...)** — MANDATORY: call this when done or blocked.`;
 }
 
@@ -376,6 +380,7 @@ function buildExecutorPrompt(
   subtask: string,
   kernelMode: boolean,
   completed: CompletedSubtask[] = [],
+  execTimeoutSec?: number,
 ): string {
   let priorContextBlock = "";
   if (completed.length > 0) {
@@ -414,7 +419,7 @@ ${originalTask}
 
 ${subtask}
 ${priorContextBlock}
-${toolDocsBlock(kernelMode)}
+${toolDocsBlock(kernelMode, execTimeoutSec)}
 
 ## Rules
 
@@ -435,6 +440,7 @@ function buildPlannerPrompt(
   completed: CompletedSubtask[],
   remaining: string[],
   kernelMode: boolean,
+  execTimeoutSec?: number,
 ): string {
   const completedBlock =
     completed.length > 0
@@ -465,7 +471,7 @@ ${completedBlock}
 
 ${remainingBlock}
 
-${toolDocsBlock(kernelMode)}
+${toolDocsBlock(kernelMode, execTimeoutSec)}
 
 ## Your decision
 

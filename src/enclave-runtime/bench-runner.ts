@@ -97,6 +97,17 @@ if (!apiKey) {
 
 const useKernel = !!logosSocket;
 
+/**
+ * Some tasks involve long-running training or compilation that benefit from
+ * a longer per-command timeout. Returns undefined to use the default (590s).
+ */
+function inferExecTimeout(task: string): number | undefined {
+  const t = task.toLowerCase();
+  if (t.includes("fasttext") || t.includes("train a") || t.includes("train model"))
+    return 900_000; // 15 min
+  return undefined;
+}
+
 function guessContextLimit(m: string): number {
   const s = m.toLowerCase();
   if (s.includes("deepseek")) return 64_000;
@@ -204,11 +215,19 @@ async function main(): Promise<void> {
     `[bench-runner] model: ${model} | provider: ${provider} | kernel: ${useKernel ? logosSocket : "standalone"}`,
   );
 
+  const execTimeoutMs = inferExecTimeout(taskDescription);
+  if (execTimeoutMs !== undefined) {
+    console.log(
+      `[bench-runner] custom logos_exec timeout: ${execTimeoutMs / 1000}s`,
+    );
+  }
+
   const session = useKernel
     ? await createKernelSession({
         socketPath: logosSocket,
         taskDescription,
         agentConfigId,
+        execTimeoutMs,
       })
     : createStandaloneSession();
 
@@ -377,6 +396,7 @@ async function main(): Promise<void> {
           temperature: 0.2,
           kernelMode: session.useKernel,
           contextLimit,
+          execTimeoutSec: execTimeoutMs ? execTimeoutMs / 1000 : undefined,
         });
         break;
       }
@@ -408,6 +428,7 @@ async function main(): Promise<void> {
           temperature: 0.2,
           kernelMode: session.useKernel,
           contextLimit,
+          execTimeoutSec: execTimeoutMs ? execTimeoutMs / 1000 : undefined,
         });
         break;
       }
