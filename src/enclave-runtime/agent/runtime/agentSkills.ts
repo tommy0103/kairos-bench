@@ -465,6 +465,70 @@ The verifier computes "effective annealing" by extending the binding into the ov
 - Do NOT spend time on elaborate verification scripts — the verifier handles correctness.`,
   },
   {
+    id: "gcode-text-reading",
+    name: "G-code 3D text recognition",
+    triggers: [
+      ["gcode", "text"],
+      ["gcode", "print"],
+      [".gcode", "text"],
+      [".gcode", "out.txt"],
+      ["gcode", "out.txt"],
+      ["prusa", "text"],
+    ],
+    hint: `**G-code text recognition — render toolpaths then OCR**:
+
+## Strategy overview (budget: 15 min)
+1. Parse gcode → find text object → extract extrusion segments (~2 min)
+2. Compute 3D slope → project onto text plane → render as image (~3 min)
+3. OCR with Tesseract → semantic disambiguation → write out.txt (~3 min)
+4. Call logos_complete immediately
+
+## Step 1 — Identify the text object
+\`grep "M486 A" text.gcode\` reveals named objects (e.g., "Embossed text", "Shape-Box"). Use \`M486 S0/S1\` markers to track which object each G1 move belongs to. Only extract extrusion moves (G1 with E > previous E) for the TEXT object.
+
+## Step 2 — 3D projection (CRITICAL)
+The text is usually embossed on a **sloped surface** — X, Y, and Z all change as the text progresses. You CANNOT just do a top-down (XY) projection — it will look compressed/illegible.
+
+**Proven approach**:
+1. Collect centroids for each Z layer of the text object
+2. Fit a slope direction from centroids: \`slope_3d = (max_centroid - min_centroid)\` in XYZ
+3. Compute 2 orthogonal axes on the text plane:
+   - axis1 (along text) = normalize(slope_3d)
+   - axis2 (perpendicular) = normalize(cross(slope_3d, [0,0,1])) or similar
+4. Project each segment onto (axis1, axis2) → 2D coordinates
+5. Render with Pillow at HIGH resolution (width >= 8000 px). Low-res renders make OCR fail.
+
+## Step 3 — OCR (THIS IS WHERE MOST FAILURES HAPPEN)
+
+Install: \`pip install pytesseract Pillow && apt-get install -y tesseract-ocr\`
+
+Run Tesseract with MULTIPLE psm modes and pick the best:
+\`\`\`python
+results = {}
+for psm in [6, 7, 8, 13]:
+    text = pytesseract.image_to_string(img, config=f'--psm {psm}').strip()
+    results[psm] = text
+    print(f"psm {psm}: {text!r}")
+\`\`\`
+
+## CRITICAL — OCR ambiguous characters: use SEMANTIC CONTEXT to disambiguate
+OCR CANNOT reliably distinguish visually similar characters: \`0\`/\`O\`, \`1\`/\`l\`/\`I\`, \`5\`/\`S\`, etc. Tesseract will consistently return the wrong one in some cases. Do NOT spend 10+ minutes trying different configs/thresholds/scales to resolve these — it will NEVER work.
+
+**Instead, use semantic reasoning**:
+1. Read the OCR output as a whole phrase/sentence
+2. Infer what natural-language word or phrase it represents (including leet-speak, abbreviations, etc.)
+3. Replace ambiguous characters based on which interpretation makes semantic sense
+4. For example: if the text is about "coding" and OCR gives \`cOding\`, consider whether \`c0ding\` (leet-speak with zero) fits the context better
+
+**Common OCR confusions**: O↔0, I↔l↔1, S↔5, B↔8, Z↔2, g↔9, rn↔m
+
+## Time management
+- **Write out.txt with your FIRST reasonable OCR result** before refining — a close answer beats timeout
+- If multiple psm modes agree, that's your answer (after semantic correction)
+- Do NOT try to read ASCII art manually character by character — it wastes time and is error-prone
+- Do NOT attempt character-level OCR by cropping individual characters — it's less reliable than full-line OCR`,
+  },
+  {
     id: "web-scraping-context-limit",
     name: "Web scraping context management",
     triggers: [

@@ -1718,60 +1718,7 @@ fi
 
 **Verdict**: If the script prints ALL PASSED → PASS. Otherwise FAIL. Do NOT add extra checks, do NOT read any C source files, do NOT compile anything. The official verifier handles correctness validation.`,
   },
-  {
-    id: "gcode-text-extraction",
-    name: "G-code Text Extraction Verification",
-    triggers: [
-      ["gcode", "text"],
-      ["gcode", "print"],
-      [".gcode", "what will"],
-    ],
-    recipe: `### Skill: G-code Text Extraction — Text Is Encoded in Geometry, Not in Strings
-
-**CRITICAL — do NOT search the gcode file for the answer text**:
-- The text is physically encoded in the **toolpath geometry** (XY coordinates of extrusion moves). It is NOT present as a plaintext string, comment, or metadata anywhere in the .gcode file.
-- Searching for the flag/text with \`grep\` will find nothing. This is expected.
-- The correct approach requires: parsing toolpath coordinates → projecting onto print surface → rendering as image → OCR. Do NOT attempt this — just verify the output.
-
-**Recipe**:
-\\\`\\\`\\\`bash
-#!/bin/bash
-FAIL=0
-
-# Check 1: output file exists
-if [ ! -s /app/out.txt ]; then
-    echo "FAIL: /app/out.txt is missing or empty"
-    exit 1
-fi
-
-ANSWER=$(cat /app/out.txt | tr -d '\\n\\r ')
-echo "Agent's answer: '$ANSWER'"
-
-# Check 2: non-trivial answer (not just "text" or "hello")
-if [ \${#ANSWER} -lt 3 ]; then
-    echo "FAIL: answer too short (\${#ANSWER} chars)"
-    FAIL=1
-else
-    echo "PASS: answer has reasonable length (\${#ANSWER} chars)"
-fi
-
-# Check 3: if gcode has object labels, check they were analyzed
-OBJECTS=$(grep -c 'M486 S' /app/text.gcode 2>/dev/null || echo "0")
-echo "INFO: gcode has $OBJECTS named objects (M486 markers)"
-
-# Check 4: verify the agent actually processed the gcode (check for any intermediate files)
-INTERMEDIATES=$(find /app /tmp -name "*.png" -o -name "*.svg" -o -name "*render*" -o -name "*plot*" 2>/dev/null | head -5)
-if [ -n "$INTERMEDIATES" ]; then
-    echo "PASS: agent created intermediate rendering files"
-else
-    echo "WARN: no intermediate rendering files found — agent may have guessed"
-fi
-
-[ $FAIL -eq 0 ] && echo "ALL GCODE CHECKS PASSED" || exit 1
-\\\`\\\`\\\`
-
-**Key principle**: You CANNOT independently verify the answer by analyzing the raw gcode — that requires complex 3D rendering and OCR. Trust the agent's toolpath analysis approach if it produced intermediate images/plots. Focus on output format and completeness.`,
-  },
+  // gcode-text-extraction replaced by gcode-text-verification (below) which adds leet-speak O/0 checking
   {
     id: "pipeline-parallel-test",
     name: "Pipeline Parallel Training Verification",
@@ -2022,6 +1969,103 @@ PY
 3. **If check.py is missing → report FAIL** (solution is incomplete).
 4. **NEVER write a Python loop that tests multiple FEN positions** — it WILL timeout at 120s and produce a false FAIL that wastes a fixer round.
 5. The real verifier runs 3 full chess games. check.py already covers a representative game. Trust it.`,
+  },
+  {
+    id: "gcode-text-verification",
+    name: "G-code Text OCR Verification",
+    triggers: [
+      ["gcode", "text"],
+      ["gcode", "print"],
+      [".gcode", "text"],
+      [".gcode", "out.txt"],
+      ["gcode", "out.txt"],
+      ["prusa", "text"],
+    ],
+    recipe: `### Skill: G-code Text — Verify OCR output and cross-check with independent OCR
+
+**CRITICAL — the verifier checks out.txt for an EXACT string match. A single wrong character = FAIL.**
+
+The #1 failure mode is OCR confusing visually similar characters: \`0\`/\`O\`, \`1\`/\`l\`/\`I\`, \`5\`/\`S\`, etc. The evaluator should independently OCR the rendered image and flag any discrepancies.
+
+**Recipe**:
+\\\`\\\`\\\`python
+#!/usr/bin/env python3
+import os, sys, re, subprocess
+
+failed = 0
+
+# Check 1: out.txt exists and is non-empty
+if not os.path.exists("/app/out.txt"):
+    print("FAIL: /app/out.txt not found")
+    sys.exit(1)
+
+answer = open("/app/out.txt").read().strip()
+if not answer:
+    print("FAIL: /app/out.txt is empty")
+    sys.exit(1)
+print(f"Agent answer: {answer!r} ({len(answer)} chars)")
+
+# Check 2: verify agent created intermediate rendering files
+render_files = [f for f in os.listdir("/app") if f.endswith(".png")]
+if render_files:
+    print(f"PASS: agent created {len(render_files)} rendering file(s)")
+else:
+    print("WARN: no .png rendering files found — agent may not have rendered the gcode")
+
+# Check 3: independent OCR cross-check
+# Install deps if needed
+subprocess.run(["pip", "install", "-q", "pytesseract", "Pillow"], capture_output=True)
+subprocess.run(["apt-get", "install", "-y", "-qq", "tesseract-ocr"], capture_output=True)
+
+ocr_results = {}
+try:
+    import pytesseract
+    from PIL import Image
+    best_imgs = sorted(
+        [f for f in render_files if any(k in f.lower() for k in ["text", "final", "highres", "flat"])],
+        key=lambda f: os.path.getsize(f"/app/{f}"), reverse=True
+    )
+    if not best_imgs:
+        best_imgs = sorted(render_files, key=lambda f: os.path.getsize(f"/app/{f}"), reverse=True)[:1]
+    if best_imgs:
+        img = Image.open(f"/app/{best_imgs[0]}")
+        print(f"Using image: {best_imgs[0]} ({img.size[0]}x{img.size[1]})")
+        for psm in [7, 8, 13]:
+            ocr = pytesseract.image_to_string(img, config=f"--psm {psm}").strip()
+            if ocr:
+                ocr_results[psm] = ocr
+                match = "MATCH" if ocr == answer else "DIFFER"
+                print(f"  OCR psm {psm}: {ocr!r} [{match}]")
+except Exception as e:
+    print(f"INFO: could not run independent OCR: {e}")
+
+# Check 4: flag ambiguous character discrepancies
+if ocr_results:
+    all_variants = set(ocr_results.values()) | {answer}
+    if len(all_variants) > 1:
+        print(f"WARN: {len(all_variants)} distinct OCR variants detected — likely ambiguous characters (0/O, 1/l, etc.)")
+        print("  The agent should use semantic context to choose the correct interpretation.")
+        print("  Common confusions: O↔0, I↔l↔1, S↔5, B↔8, Z↔2")
+        # Check if any OCR result differs from agent answer only in ambiguous chars
+        ambiguous_pairs = [("O","0"),("o","0"),("l","1"),("I","1"),("S","5"),("s","5"),("B","8"),("Z","2")]
+        for ocr_text in ocr_results.values():
+            if ocr_text != answer and len(ocr_text) == len(answer):
+                diffs = [(i, answer[i], ocr_text[i]) for i in range(len(answer)) if answer[i] != ocr_text[i]]
+                if all(((a,b) in ambiguous_pairs or (b,a) in ambiguous_pairs) for _, a, b in diffs):
+                    print(f"  Agent and OCR differ ONLY in ambiguous characters: {diffs}")
+                    print(f"  Agent should re-examine these positions using semantic context.")
+
+if failed > 0:
+    print(f"\\n{failed} FAILED")
+    sys.exit(1)
+print("\\nGCODE TEXT CHECKS PASSED")
+\\\`\\\`\\\`
+
+**Verdict**:
+- If out.txt is missing or empty → FAIL
+- If independent OCR produces a DIFFERENT result from the agent's answer (differing only in ambiguous characters like O/0) → **WARN** the agent to re-examine using semantic context. Do NOT auto-replace — the evaluator doesn't know which is correct.
+- Otherwise → PASS
+- **CRITICAL for fixer**: If the evaluator flags ambiguous characters, the fixer should read the OCR result in context (what word/phrase does it represent?) and pick the interpretation that makes semantic sense. Do NOT re-render from scratch.`,
   },
   {
     id: "golden-gate-assembly-primers",
