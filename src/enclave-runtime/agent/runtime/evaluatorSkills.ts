@@ -1844,20 +1844,24 @@ print("\\nALL PIPELINE PARALLEL CHECKS PASSED")
 3. Import fails → FAIL: "fix import errors"
 4. Loss incorrect → FAIL: check loss computation below
 
-**CRITICAL for fixer — three failure modes and fixes**:
+**CRITICAL for fixer — five failure modes and fixes**:
 
 1. **File missing**: Agent timed out before writing the file. Fixer must write the complete implementation to \`/app/pipeline_parallel.py\`. Install torch CPU: \`pip3 install torch --index-url https://download.pytorch.org/whl/cpu --no-cache-dir\` and transformers.
 
-2. **Loss/gradient mismatch**: The loss MUST match \`LlamaForCausalLM.forward(labels=...)\` exactly. The critical detail is the **shift**: \`shift_logits = logits[..., :-1, :]\`, \`shift_labels = labels[..., 1:]\`, then \`CrossEntropyLoss()(shift_logits.view(-1, V), shift_labels.view(-1))\`, scaled by \`1/num_microbatches\`.
+2. **\`lm_head.bwd\` gradient mismatch (constant diff like ~0.0417)**: Loss scaling bug. Each microbatch's loss must be divided by \`num_microbatches\` BEFORE calling \`.backward()\`. If you scale after backward or forget to scale, all gradients are off by a constant factor. Also verify the shift: \`shift_logits = logits[..., :-1, :]\`, \`shift_labels = labels[..., 1:]\`, then \`CrossEntropyLoss()(shift_logits.view(-1, V), shift_labels.view(-1)) / num_microbatches\`.
 
-3. **Port 12355 EADDRINUSE in verifier**: Agent left zombie processes. Fixer should: \`pkill -9 -f python3; sleep 2\` before submitting. Also ensure the implementation does NOT call \`dist.init_process_group\` at module level — it should only use \`dist.get_rank()\`/\`dist.get_world_size()\` assuming the caller already initialized.
+3. **\`microbatch count mismatch\` (e.g. at rotary_emb.fwd)**: The implementation processes microbatches incorrectly — likely concatenating them or running them through modules in a non-standard way. Fix: process each microbatch ONE BY ONE through the model's actual module objects. Each microbatch must trigger exactly one forward pass through each module (embed_tokens, each decoder layer, norm, lm_head). Never batch multiple microbatches together.
+
+4. **\`model.layers.X.bwd\` gradient mismatch**: Decoder layer forward call is wrong. Make sure to pass \`position_ids=torch.arange(seq_len).unsqueeze(0).to(device)\` and extract the hidden states correctly: \`layer_output = layer(hidden_states, position_ids=position_ids); hidden_states = layer_output[0]\`.
+
+5. **Port 12355 EADDRINUSE in verifier**: Agent left zombie processes. Fixer should: \`pkill -9 -f python3; sleep 2\` before submitting. Ensure the implementation does NOT call \`dist.init_process_group\` at module level.
 
 **Key implementation reference for fixer**:
-- Partition \`model.model.layers\` evenly across ranks
-- AFAB: all-forward-all-backward over microbatches
-- P2P: \`dist.isend\`/\`dist.irecv\` for hidden states between stages
-- world_size=1: skip P2P, just run all layers sequentially
-- Never use hooks — explicit \`layer(hidden_states, ...)\` calls only`,
+- **Module ownership**: rank 0 = embed_tokens + first half of decoder layers; last rank = remaining layers + norm + lm_head
+- **AFAB**: for each microbatch: forward through owned modules, P2P send/recv hidden states. Then for each microbatch: backward with pre-scaled loss
+- **P2P**: \`dist.isend\`/\`dist.irecv\` for hidden states \`[batch, seq_len, hidden_size]\` between stages
+- **world_size=1**: skip P2P, run all modules sequentially, still process each microbatch individually
+- **Never use hooks** — explicit \`layer(hidden_states, position_ids=...)\` calls only`,
   },
   {
     id: "cobol-modernization-test",

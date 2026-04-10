@@ -923,9 +923,18 @@ end = start + chunk + (1 if rank < remainder else 0)
 my_layers = layers[start:end]
 \`\`\`
 
-### AFAB scheduling
-1. **All-Forward**: for each microbatch, run forward through local layers. Between stages, use \`dist.isend\`/\`dist.irecv\` for hidden states \`[batch, seq_len, hidden_size]\`.
-2. **All-Backward**: for each microbatch (reverse order), run backward. Between stages, send/receive gradients.
+### AFAB scheduling — process each microbatch INDIVIDUALLY
+1. **All-Forward**: for EACH microbatch separately, run forward through local layers. Between stages, use \`dist.isend\`/\`dist.irecv\` for hidden states \`[batch, seq_len, hidden_size]\`.
+2. **All-Backward**: for EACH microbatch separately (same order as forward), run backward. Between stages, send/receive gradients.
+
+**CRITICAL**: Process microbatches ONE BY ONE through the model's actual module objects (embed_tokens, each layer, norm, lm_head). The verifier tracks per-module per-microbatch activations and gradients via hooks, so each microbatch must trigger exactly one forward pass and one backward pass through each module. If you concatenate microbatches or process them in batches, the hook counts will mismatch and the test will fail with "microbatch count mismatch".
+
+### Module ownership across stages
+For \`world_size=2\` with \`n\` decoder layers:
+- **Rank 0 owns**: \`model.model.embed_tokens\` + first \`n//2\` decoder layers
+- **Rank last owns**: remaining decoder layers + \`model.model.norm\` + \`model.lm_head\`
+- \`embed_tokens\` is ALWAYS on the first rank; \`norm\` and \`lm_head\` are ALWAYS on the last rank
+- Each rank runs forward through ONLY its owned modules, then sends the hidden state to the next rank
 
 ### Loss computation (THE critical correctness detail)
 The last stage must compute loss EXACTLY like \`LlamaForCausalLM.forward()\`:
@@ -938,10 +947,25 @@ loss_fct = CrossEntropyLoss()
 loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
 loss = loss / num_microbatches  # scale by microbatch count
 \`\`\`
-**Do NOT** skip the shift — LLM causal loss shifts logits left by 1 position vs labels. This is by far the most common source of gradient mismatch.
+**Do NOT** skip the shift — LLM causal loss shifts logits left by 1 position vs labels. This is the most common gradient mismatch source.
+
+**ALSO**: Make sure each microbatch loss is scaled by \`1/num_microbatches\` BEFORE calling \`.backward()\`. The gradients accumulate across microbatches, so each one's contribution must be pre-scaled. If you scale after backward or forget to scale, gradients at \`lm_head\` (and everywhere else) will be off by a constant factor.
+
+### Forward pass through decoder layers — critical details
+When calling each \`LlamaDecoderLayer\`, you must pass the correct arguments:
+\`\`\`python
+# For each decoder layer in this rank's partition:
+layer_output = layer(
+    hidden_states,
+    position_ids=position_ids,  # shape [batch, seq_len], values 0..seq_len-1
+)
+hidden_states = layer_output[0]  # layer returns a tuple, first element is hidden states
+\`\`\`
+- **position_ids**: Create once as \`torch.arange(seq_len).unsqueeze(0)\` and reuse. If omitted, the layer will auto-generate them, but they MUST be consistent across ranks.
+- **attention_mask**: For causal LM, you typically don't need to pass it explicitly (the model generates a causal mask internally). But if you do pass it, use \`None\` to let the model handle it.
 
 ### world_size=1 handling
-When \`world_size=1\`, all layers are on rank 0. Skip all P2P communication. The function degenerates to a simple forward-backward with AFAB over microbatches.
+When \`world_size=1\`, all layers are on rank 0. Skip all P2P communication. The function degenerates to a simple forward-backward with AFAB over microbatches. **But you must still process each microbatch individually through embed_tokens → all layers → norm → lm_head → loss → backward.**
 
 ### Forbidden: hooks
 The verifier checks that \`pipeline_parallel.py\` does NOT contain \`register_forward_hook\`, \`register_backward_hook\`, \`register_full_backward_hook\`, etc. Use explicit forward calls only.
