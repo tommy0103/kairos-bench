@@ -512,6 +512,7 @@ The text is usually embossed on a **sloped surface** — X, Y, and Z all change 
    - axis2 (perpendicular) = normalize(cross(slope_3d, [0,0,1])) or similar
 4. Project each segment onto (axis1, axis2) → 2D coordinates
 5. Render with Pillow at HIGH resolution (width >= 8000 px). Low-res renders make OCR fail.
+6. **IMPORTANT**: Keep total image pixels UNDER 100 million (e.g., 8000×4000 = 32M is fine; 30000×30000 = 900M is NOT). Oversized images cause PIL "decompression bomb" errors and slow down the evaluator.
 
 ## Step 3 — OCR (THIS IS WHERE MOST FAILURES HAPPEN)
 

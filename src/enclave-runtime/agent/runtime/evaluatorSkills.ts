@@ -1995,16 +1995,21 @@ PY
       ["gcode", "out.txt"],
       ["prusa", "text"],
     ],
-    recipe: `### Skill: G-code Text — Verify OCR output and cross-check with independent OCR
+    recipe: `### Skill: G-code Text — Verify OCR output, keep checks LIGHTWEIGHT
 
 **CRITICAL — the verifier checks out.txt for an EXACT string match. A single wrong character = FAIL.**
 
-The #1 failure mode is OCR confusing visually similar characters: \`0\`/\`O\`, \`1\`/\`l\`/\`I\`, \`5\`/\`S\`, etc. The evaluator should independently OCR the rendered image and flag any discrepancies.
+**CRITICAL — keep evaluator checks FAST (under 30s total). Do NOT:**
+- Run \`apt-get install\` or \`pip install\` — wastes 60-120s and risks timeout
+- Run the agent's scripts (\`parse_gcode.py\`, \`verify.py\`, etc.) — they are heavy and WILL timeout
+- Re-parse or re-render the G-code from scratch — this is the agent's job, not the evaluator's
+
+The evaluator should ONLY check: (1) out.txt exists, (2) .png files exist, (3) IF tesseract is already installed, do a quick OCR on the SMALLEST suitable image.
 
 **Recipe**:
 \\\`\\\`\\\`python
 #!/usr/bin/env python3
-import os, sys, re, subprocess
+import os, sys
 
 failed = 0
 
@@ -2026,30 +2031,40 @@ if render_files:
 else:
     print("WARN: no .png rendering files found — agent may not have rendered the gcode")
 
-# Check 3: independent OCR cross-check
-# Install deps if needed
-subprocess.run(["pip", "install", "-q", "pytesseract", "Pillow"], capture_output=True)
-subprocess.run(["apt-get", "install", "-y", "-qq", "tesseract-ocr"], capture_output=True)
-
+# Check 3: lightweight OCR cross-check — ONLY if deps already installed
 ocr_results = {}
 try:
     import pytesseract
     from PIL import Image
-    best_imgs = sorted(
-        [f for f in render_files if any(k in f.lower() for k in ["text", "final", "highres", "flat"])],
-        key=lambda f: os.path.getsize(f"/app/{f}"), reverse=True
-    )
-    if not best_imgs:
-        best_imgs = sorted(render_files, key=lambda f: os.path.getsize(f"/app/{f}"), reverse=True)[:1]
-    if best_imgs:
-        img = Image.open(f"/app/{best_imgs[0]}")
-        print(f"Using image: {best_imgs[0]} ({img.size[0]}x{img.size[1]})")
+    Image.MAX_IMAGE_PIXELS = 200_000_000  # avoid decompression bomb on huge images
+
+    # Pick smallest reasonable image (avoids timeout on giant renders)
+    safe_imgs = []
+    for f in render_files:
+        try:
+            sz = os.path.getsize(f"/app/{f}")
+            if sz < 50_000_000:  # skip files > 50 MB
+                safe_imgs.append((f, sz))
+        except: pass
+    safe_imgs.sort(key=lambda x: -x[1])  # largest-first among safe ones
+
+    # Prefer images with keywords
+    keyword_imgs = [f for f, _ in safe_imgs if any(k in f.lower() for k in ["hires", "flip", "final", "flat", "pca"])]
+    pick = keyword_imgs[0] if keyword_imgs else (safe_imgs[0][0] if safe_imgs else None)
+
+    if pick:
+        img = Image.open(f"/app/{pick}")
+        print(f"Using image: {pick} ({img.size[0]}x{img.size[1]})")
         for psm in [7, 8, 13]:
             ocr = pytesseract.image_to_string(img, config=f"--psm {psm}").strip()
             if ocr:
                 ocr_results[psm] = ocr
                 match = "MATCH" if ocr == answer else "DIFFER"
                 print(f"  OCR psm {psm}: {ocr!r} [{match}]")
+    else:
+        print("INFO: no suitable image for OCR (all too large or missing)")
+except ImportError:
+    print("INFO: pytesseract/Pillow not installed — skipping independent OCR (this is OK)")
 except Exception as e:
     print(f"INFO: could not run independent OCR: {e}")
 
@@ -2057,10 +2072,8 @@ except Exception as e:
 if ocr_results:
     all_variants = set(ocr_results.values()) | {answer}
     if len(all_variants) > 1:
-        print(f"WARN: {len(all_variants)} distinct OCR variants detected — likely ambiguous characters (0/O, 1/l, etc.)")
+        print(f"WARN: {len(all_variants)} distinct OCR variants — likely ambiguous characters (0/O, 1/l, etc.)")
         print("  The agent should use semantic context to choose the correct interpretation.")
-        print("  Common confusions: O↔0, I↔l↔1, S↔5, B↔8, Z↔2")
-        # Check if any OCR result differs from agent answer only in ambiguous chars
         ambiguous_pairs = [("O","0"),("o","0"),("l","1"),("I","1"),("S","5"),("s","5"),("B","8"),("Z","2")]
         for ocr_text in ocr_results.values():
             if ocr_text != answer and len(ocr_text) == len(answer):
@@ -2077,9 +2090,14 @@ print("\\nGCODE TEXT CHECKS PASSED")
 
 **Verdict**:
 - If out.txt is missing or empty → FAIL
-- If independent OCR produces a DIFFERENT result from the agent's answer (differing only in ambiguous characters like O/0) → **WARN** the agent to re-examine using semantic context. Do NOT auto-replace — the evaluator doesn't know which is correct.
+- If independent OCR produces a DIFFERENT result (differing only in ambiguous characters like O/0) → **WARN** the agent to re-examine using semantic context
 - Otherwise → PASS
-- **CRITICAL for fixer**: If the evaluator flags ambiguous characters, the fixer should read the OCR result in context (what word/phrase does it represent?) and pick the interpretation that makes semantic sense. Do NOT re-render from scratch.`,
+
+**CRITICAL — evaluator time budget**: The entire evaluator (all checks + all logos_exec calls) shares the agent's 900s wall clock. Each evaluator logos_exec has a 120s hard timeout. Do NOT run any command that takes > 30s. Specifically:
+- Do NOT run \`apt-get install\` or \`pip install\` — if deps aren't already there, just skip the OCR check
+- Do NOT run the agent's Python scripts (\`parse_gcode.py\`, \`render.py\`, etc.) — they take minutes to parse 100K lines of G-code
+- Do NOT open images > 200M pixels — use the file size heuristic above to skip oversized renders
+- **CRITICAL for fixer**: If the evaluator flags ambiguous characters, re-examine those positions using semantic context. Do NOT re-render from scratch — just adjust the answer in out.txt.`,
   },
   {
     id: "golden-gate-assembly-primers",
