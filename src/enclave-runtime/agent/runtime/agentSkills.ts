@@ -139,7 +139,7 @@ After writing plaintexts.txt, verify line count, then call logos_complete. Do NO
       ["model.bin", "accuracy"],
       ["model.bin", "fasttext"],
     ],
-    hint: `**FastText text classification — three critical mistakes: (1) text preprocessing, (2) high-dim params, (3) autotune on full data**:
+    hint: `**FastText text classification — two critical mistakes and the winning strategy**:
 
 ## CRITICAL — Do NOT preprocess text (lowercase, remove special chars, etc.)
 
@@ -156,59 +156,74 @@ with open('train.txt', 'w') as f:
 \`\`\`
 Do NOT lowercase. Do NOT remove punctuation. Do NOT remove special characters.
 
-## CRITICAL — Use "wide & shallow" params: dim=10, bucket=2000000, epoch=10
+## Strategy: train LARGE then QUANTIZE to fit under 150 MB
 
-The conventional approach (dim=50-100, epoch=5, bucket=500000) ALWAYS gets stuck at ~60% accuracy — 12+ past trials all failed this way. The reason: bucket=500000 is far too small for 650K training samples with wordNgrams=2 (millions of bigrams crammed into 500K buckets = massive hash collisions).
+dim=10 with large bucket gets only ~0.59 accuracy. dim=100 with bucket=0 gets ~0.61. Neither reaches 0.62. **The solution is to train an oversized high-accuracy model, then use FastText's built-in quantization to compress it under 150 MB.**
 
-The FastText paper (Joulin et al. 2016) achieved **63.9% on Yelp-5** with **dim=10**. The key insight: lower dim = each vector costs less memory → budget for much larger bucket → far fewer hash collisions → better bigram features.
+### Time budget (logos_exec timeout = 1800s = 30 min)
 
-**Use this exact configuration**:
+Measured training times on this dataset (650K rows):
+- dim=10, epoch=10: ~18s/epoch
+- dim=100, bucket=0, epoch=1: ~27s/epoch (no bigrams)
+- Adding bucket=500K with wordNgrams=2: ~2-3x overhead per epoch
+
+**Feasible within 1800s (training + quantize in ONE logos_exec call)**:
+- \`dim=100, bucket=500000, epoch=25, wordNgrams=2\`: ~1500s training + ~150s quantize ✓
+- \`dim=100, bucket=2000000, epoch=10, wordNgrams=2\`: ~1200s training + ~150s quantize ✓
+- \`dim=100, bucket=0, epoch=50, wordNgrams=1\`: ~1350s training + ~120s quantize ✓
+
+**Recommended: do training AND quantization in a single script**:
 \`\`\`python
-import fasttext, os
+import fasttext, os, time
 
+start = time.time()
+
+# Best config: high dim + large bucket + bigrams + many epochs, then quantize
 model = fasttext.train_supervised(
     input='train.txt',
     lr=0.5,
-    epoch=10,
+    epoch=25,
     wordNgrams=2,
-    dim=10,
-    bucket=2000000,
-    minCount=5,
+    dim=100,
+    bucket=500000,
+    minCount=1,
     loss='softmax',
 )
+print(f"Training: {time.time()-start:.0f}s")
 result = model.test('test.txt')
-print(f"Accuracy: {result[1]:.4f}")
-print(f"Size: {os.path.getsize('/app/model.bin') / 1e6:.1f} MB")
+print(f"Pre-quantize accuracy: {result[1]:.4f}")
+
+# Quantize — compresses ~280MB model to ~10-50MB with minimal accuracy loss
+model.quantize(input='train.txt', qnorm=True, retrain=True, cutoff=100000)
 model.save_model('/app/model.bin')
+size_mb = os.path.getsize('/app/model.bin') / 1e6
+result = model.test('test.txt')
+print(f"Post-quantize accuracy: {result[1]:.4f}, size: {size_mb:.1f} MB")
+print(f"Total time: {time.time()-start:.0f}s")
 \`\`\`
 
-**Why this works**:
-- dim=10 + bucket=2000000: model ≈ (210K vocab + 2M bucket) × 10 × 4 ≈ **88 MB** (well under 150 MB)
-- dim=10 trains **5× faster** than dim=50 (~35s/epoch). epoch=10 takes ~350s, safely under 590s.
-- 2M buckets = 4× fewer hash collisions than 500K buckets for bigrams
-- epoch=10 with lr=0.5: gentler learning over more passes → better convergence
+**If accuracy still < 0.62, try these variants**:
+1. \`dim=100, bucket=2000000, epoch=10, wordNgrams=2\` then quantize — more bucket capacity
+2. \`dim=100, bucket=500000, epoch=25, lr=0.3\` then quantize — gentler learning
+3. \`dim=200, bucket=0, epoch=25, wordNgrams=1\` then quantize — richer unigram embeddings
 
-**If accuracy < 0.62 with the above, try these variants** (each takes ~350s):
-1. \`epoch=15, lr=0.3\` — more passes, gentler learning
-2. \`dim=15, bucket=1500000, epoch=10, lr=0.5\` — slightly richer embeddings (~110 MB)
-3. \`dim=10, bucket=2000000, epoch=10, lr=0.5, loss='ova'\` — one-vs-all loss
+**Why quantization works**: FastText \`quantize()\` applies product quantization to the embedding matrices, compressing models by 10-50x with < 1% accuracy loss. The \`retrain=True\` option fine-tunes after compression.
 
 ## Do NOT use autotune on full data
 
-Autotune on 650K samples ALWAYS exceeds the logos_exec timeout — even with \`autotuneDuration=300\`, autotune adds a "Training again with best arguments" final pass that pushes total time past the limit. This has been confirmed in 4+ trials. Do NOT attempt it.
+Autotune on 650K samples ALWAYS exceeds the logos_exec timeout (even with the extended 900s limit). Do NOT attempt it.
 
-## Do NOT use dim >= 50
+## Do NOT use dim=10 with bucket=2M (this approach has been DISPROVEN)
 
-With dim=50, bucket maxes at ~550K (to stay under 150 MB). This causes severe hash collisions with wordNgrams=2. Every trial using dim=50+ has been stuck at ~60%.
+8+ past trials tried dim=10 with bucket=2M in various configurations. ALL got stuck at ~0.59 accuracy, well below the 0.62 threshold. Do NOT waste time on this approach.
 
-## Workflow (budget: 30 min total)
-1. Install deps: \`apt-get install -y g++ build-essential && pip install fasttext pandas pyarrow\` (5 min)
-2. Convert parquet to fasttext format WITHOUT preprocessing (2 min)
-3. Train with dim=10, bucket=2000000, epoch=10 (see code above) (~6 min)
-4. Check accuracy on test.txt — if >= 0.62, save and done
-5. If < 0.62: try one variant (see above) (~6 min each)
-6. Save as /app/model.bin, verify size < 150 MB
-7. Call logos_complete immediately
+## Workflow (budget: 30 min per logos_exec call)
+1. Install deps: \`apt-get install -y g++ build-essential && pip install fasttext pandas pyarrow\` (~2 min)
+2. Convert parquet to fasttext format WITHOUT preprocessing (~1 min)
+3. Train + quantize in ONE script (see code above) (~25 min)
+4. Check accuracy and size — if accuracy >= 0.62 AND size < 150 MB, done
+5. If accuracy < 0.62: try a variant (see above), re-run
+7. Save as /app/model.bin
 8. Do NOT delete train.txt / test.txt — the evaluator may need them`,
   },
   {

@@ -104,7 +104,7 @@ const useKernel = !!logosSocket;
 function inferExecTimeout(task: string): number | undefined {
   const t = task.toLowerCase();
   if (t.includes("fasttext") || t.includes("train a") || t.includes("train model"))
-    return 900_000; // 15 min
+    return 1_800_000; // 30 min — fasttext needs time for train-large-then-quantize
   return undefined;
 }
 

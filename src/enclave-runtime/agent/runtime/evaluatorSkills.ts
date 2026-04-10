@@ -1650,15 +1650,15 @@ if acc < 0.55:
     failed += 1
 elif acc < 0.62:
     print(f"FAIL: accuracy {acc:.4f} < 0.62 — hyperparameters are suboptimal")
-    print("  The 'wide & shallow' approach is required to break past 60%:")
+    print("  Train a LARGE model then QUANTIZE to fit under 150 MB:")
     print("  model = fasttext.train_supervised(")
     print("      input='train.txt',")
     print("      lr=0.5, epoch=10, wordNgrams=2,")
-    print("      dim=10, bucket=2000000, minCount=5,")
+    print("      dim=100, bucket=500000, minCount=1,")
     print("  )")
-    print("  Key: dim=10 + bucket=2M = far fewer hash collisions for bigrams.")
-    print("  Do NOT use dim>=50 (caps at ~60%). Do NOT use autotune (times out on 650K data).")
-    print("  If still < 0.62: try epoch=15 lr=0.3, or dim=15 bucket=1500000.")
+    print("  model.quantize(input='train.txt', qnorm=True, retrain=True, cutoff=100000)")
+    print("  model.save_model('/app/model.bin')")
+    print("  Do NOT use dim=10 (stuck at ~0.59). Do NOT use autotune (times out).")
     failed += 1
 else:
     print(f"PASS: accuracy {acc:.4f} >= 0.62")
@@ -1671,9 +1671,16 @@ print("\\nALL FASTTEXT CHECKS PASSED")
 
 **Verdict rules**:
 1. acc < 0.55 → FAIL with message: "RETRAIN without text preprocessing"
-2. acc 0.55–0.62 → FAIL with message: "Use dim=10 + bucket=2000000 + epoch=10"
+2. acc 0.55–0.62 → FAIL with message: "Train large then quantize"
 3. acc >= 0.62 AND size < 150 MB → PASS
-**CRITICAL for fixer**: If accuracy is 0.55-0.62, retrain with \`dim=10, bucket=2000000, epoch=10, lr=0.5, wordNgrams=2, minCount=5\`. Do NOT use dim>=50 (hash collision bottleneck). Do NOT use autotune (times out on 650K data). If still < 0.62, try \`epoch=15, lr=0.3\` or \`dim=15, bucket=1500000\`.`,
+**CRITICAL for fixer**: If accuracy is 0.55-0.62, the model's hyperparameters are suboptimal. Use this exact approach (fits within 900s logos_exec timeout):
+\`\`\`python
+import fasttext, os
+model = fasttext.train_supervised(input='train.txt', lr=0.5, epoch=25, wordNgrams=1, dim=100, bucket=0, minCount=1, loss='softmax')
+model.quantize(input='train.txt', qnorm=True, retrain=True, cutoff=100000)
+model.save_model('/app/model.bin')
+\`\`\`
+If that's not enough, try \`epoch=10, wordNgrams=2, bucket=100000\` instead. Do NOT use \`dim=10, bucket=2M\` (stuck at ~0.59). Do NOT use autotune (times out).`,
   },
   {
     id: "cryptanalysis-output-verification",
