@@ -1848,7 +1848,7 @@ print("\\nALL PIPELINE PARALLEL CHECKS PASSED")
 
 1. **File missing**: Agent timed out before writing the file. Fixer must write the complete implementation to \`/app/pipeline_parallel.py\`. Install torch CPU: \`pip3 install torch --index-url https://download.pytorch.org/whl/cpu --no-cache-dir\` and transformers.
 
-2. **\`lm_head.bwd\` gradient mismatch (constant diff like ~0.0417)**: Loss scaling bug. Each microbatch's loss must be divided by \`num_microbatches\` BEFORE calling \`.backward()\`. If you scale after backward or forget to scale, all gradients are off by a constant factor. Also verify the shift: \`shift_logits = logits[..., :-1, :]\`, \`shift_labels = labels[..., 1:]\`, then \`CrossEntropyLoss()(shift_logits.view(-1, V), shift_labels.view(-1)) / num_microbatches\`.
+2. **\`lm_head.bwd\` gradient mismatch (constant diff like ~0.0417)**: Do NOT use manual \`CrossEntropyLoss\` — it produces a different backward graph than the model's internal loss. Use \`model.loss_function(logits=logits, labels=targets_mb, vocab_size=model.config.vocab_size)\` instead. This matches \`LlamaForCausalLM.forward(labels=...)\` exactly. Then scale by \`/ num_microbatches\` before \`.backward()\`.
 
 3. **\`microbatch count mismatch\` (e.g. at rotary_emb.fwd)**: The implementation processes microbatches incorrectly — likely concatenating them or running them through modules in a non-standard way. Fix: process each microbatch ONE BY ONE through the model's actual module objects. Each microbatch must trigger exactly one forward pass through each module (embed_tokens, each decoder layer, norm, lm_head). Never batch multiple microbatches together.
 

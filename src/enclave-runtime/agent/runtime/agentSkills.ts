@@ -937,19 +937,33 @@ For \`world_size=2\` with \`n\` decoder layers:
 - Each rank runs forward through ONLY its owned modules, then sends the hidden state to the next rank
 
 ### Loss computation (THE critical correctness detail)
-The last stage must compute loss EXACTLY like \`LlamaForCausalLM.forward()\`:
-\`\`\`python
-# After getting logits from lm_head:
-from torch.nn import CrossEntropyLoss
-shift_logits = logits[..., :-1, :].contiguous()
-shift_labels = targets_mb[..., 1:].contiguous()
-loss_fct = CrossEntropyLoss()
-loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-loss = loss / num_microbatches  # scale by microbatch count
-\`\`\`
-**Do NOT** skip the shift — LLM causal loss shifts logits left by 1 position vs labels. This is the most common gradient mismatch source.
 
-**ALSO**: Make sure each microbatch loss is scaled by \`1/num_microbatches\` BEFORE calling \`.backward()\`. The gradients accumulate across microbatches, so each one's contribution must be pre-scaled. If you scale after backward or forget to scale, gradients at \`lm_head\` (and everywhere else) will be off by a constant factor.
+**Do NOT manually implement CrossEntropyLoss** — use the model's own \`loss_function\` property. Manual CE produces a DIFFERENT backward gradient graph than \`LlamaForCausalLM.forward(labels=...)\` due to transformers v5+ internals (\`ForCausalLMLoss\`). 5 past trials all failed with \`lm_head.bwd max diff=0.0417\` because of this.
+
+\`\`\`python
+# On the LAST rank, after getting logits from lm_head:
+hidden_states = model.model.norm(hidden_states)
+logits = model.lm_head(hidden_states)
+
+# Use the model's BUILT-IN loss function (matches reference exactly):
+loss = model.loss_function(
+    logits=logits,
+    labels=targets_mb,
+    vocab_size=model.config.vocab_size,
+)
+loss = loss / num_microbatches
+loss.backward()
+\`\`\`
+
+If \`model.loss_function\` is not available (older transformers), inspect how the model computes loss:
+\`\`\`python
+import inspect
+# Look at model.forward source to find the exact loss computation
+src = inspect.getsource(model.forward)
+# Then replicate EXACTLY — including any ForCausalLMLoss / fixed_cross_entropy calls
+\`\`\`
+
+**ALSO**: Make sure each microbatch loss is scaled by \`1/num_microbatches\` BEFORE calling \`.backward()\`. The gradients accumulate across microbatches, so each one's contribution must be pre-scaled.
 
 ### Forward pass through decoder layers — critical details
 When calling each \`LlamaDecoderLayer\`, you must pass the correct arguments:
