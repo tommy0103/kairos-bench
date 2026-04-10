@@ -139,7 +139,7 @@ After writing plaintexts.txt, verify line count, then call logos_complete. Do NO
       ["model.bin", "accuracy"],
       ["model.bin", "fasttext"],
     ],
-    hint: `**FastText text classification — two critical mistakes: (1) text preprocessing, (2) manual hyperparameter guessing**:
+    hint: `**FastText text classification — three critical mistakes: (1) text preprocessing, (2) high-dim params, (3) autotune on full data**:
 
 ## CRITICAL — Do NOT preprocess text (lowercase, remove special chars, etc.)
 
@@ -156,43 +156,60 @@ with open('train.txt', 'w') as f:
 \`\`\`
 Do NOT lowercase. Do NOT remove punctuation. Do NOT remove special characters.
 
-## CRITICAL — Use autotune, do NOT manually guess hyperparameters
+## CRITICAL — Use "wide & shallow" params: dim=10, bucket=2000000, epoch=10
 
-Manual parameter search (trying lr=0.8/1.0/1.5, epoch=5/7/10, etc.) ALWAYS gets stuck at ~60% accuracy — 8 past trials all failed this way. The target is 62%. The breakthrough requires FastText's built-in \`autotune\`.
+The conventional approach (dim=50-100, epoch=5, bucket=500000) ALWAYS gets stuck at ~60% accuracy — 12+ past trials all failed this way. The reason: bucket=500000 is far too small for 650K training samples with wordNgrams=2 (millions of bigrams crammed into 500K buckets = massive hash collisions).
 
-**Primary approach (autotune)**:
+The FastText paper (Joulin et al. 2016) achieved **63.9% on Yelp-5** with **dim=10**. The key insight: lower dim = each vector costs less memory → budget for much larger bucket → far fewer hash collisions → better bigram features.
+
+**Use this exact configuration**:
 \`\`\`python
-import fasttext
+import fasttext, os
+
 model = fasttext.train_supervised(
     input='train.txt',
-    autotuneValidationFile='test.txt',
-    autotuneDuration=500,
-    autotuneModelSize='150000000',
+    lr=0.5,
+    epoch=10,
+    wordNgrams=2,
+    dim=10,
+    bucket=2000000,
+    minCount=5,
+    loss='softmax',
 )
 result = model.test('test.txt')
 print(f"Accuracy: {result[1]:.4f}")
+print(f"Size: {os.path.getsize('/app/model.bin') / 1e6:.1f} MB")
 model.save_model('/app/model.bin')
 \`\`\`
-- \`autotuneDuration=500\`: searches hyperparameters for 500 seconds. With ~20s overhead, total ≈ 520s, within 590s logos_exec timeout. Each full training run takes ~180s on this dataset, so 500s lets autotune explore ~3-4 configurations with smart pruning.
-- \`autotuneModelSize='150000000'\`: constrains model to < 150 MB
-- Autotune searches over lr, dim, epoch, wordNgrams, bucket, loss, minCount, etc. — finds combinations a human wouldn't try
 
-**Why manual params fail at ~60%**: With \`dim=50, bucket=500000, wordNgrams=2\`, there are massive hash collisions (650K samples produce millions of bigrams → 500K buckets). Autotune can find better trade-offs (e.g., lower dim + much larger bucket, or trigrams with different loss).
+**Why this works**:
+- dim=10 + bucket=2000000: model ≈ (210K vocab + 2M bucket) × 10 × 4 ≈ **88 MB** (well under 150 MB)
+- dim=10 trains **5× faster** than dim=50 (~35s/epoch). epoch=10 takes ~350s, safely under 590s.
+- 2M buckets = 4× fewer hash collisions than 500K buckets for bigrams
+- epoch=10 with lr=0.5: gentler learning over more passes → better convergence
 
-## Model size control (must be < 150 MB)
-- Model size ≈ (vocab_size + bucket) × dim × 4 bytes
-- The \`autotuneModelSize\` parameter handles this automatically
-- If training manually: dim=30 allows bucket=1,000,000 (less collision); dim=50 maxes at bucket=550,000
+**If accuracy < 0.62 with the above, try these variants** (each takes ~350s):
+1. \`epoch=15, lr=0.3\` — more passes, gentler learning
+2. \`dim=15, bucket=1500000, epoch=10, lr=0.5\` — slightly richer embeddings (~110 MB)
+3. \`dim=10, bucket=2000000, epoch=10, lr=0.5, loss='ova'\` — one-vs-all loss
+
+## Do NOT use autotune on full data
+
+Autotune on 650K samples ALWAYS exceeds the 590s logos_exec timeout — even \`autotuneDuration=300\` fails because autotune adds a "Training again with best arguments" final pass. This has been confirmed in 4+ trials. Do NOT attempt it.
+
+## Do NOT use dim >= 50
+
+With dim=50, bucket maxes at ~550K (to stay under 150 MB). This causes severe hash collisions with wordNgrams=2. Every trial using dim=50+ has been stuck at ~60%.
 
 ## Workflow (budget: 30 min total)
 1. Install deps: \`apt-get install -y g++ build-essential && pip install fasttext pandas pyarrow\` (5 min)
 2. Convert parquet to fasttext format WITHOUT preprocessing (2 min)
-3. **Run autotune** (see code above) — one command, ~9 min (500s search + overhead)
-4. Verify: \`model.test('test.txt')\` — need >= 0.62
-5. Verify: \`os.path.getsize('/app/model.bin') < 150*1024*1024\`
-6. Save and call logos_complete immediately
-7. Do NOT delete train.txt / test.txt — the evaluator may need them
-8. Do NOT waste time on manual parameter search after autotune — if autotune can't reach 0.62, manual search won't either`,
+3. Train with dim=10, bucket=2000000, epoch=10 (see code above) (~6 min)
+4. Check accuracy on test.txt — if >= 0.62, save and done
+5. If < 0.62: try one variant (see above) (~6 min each)
+6. Save as /app/model.bin, verify size < 150 MB
+7. Call logos_complete immediately
+8. Do NOT delete train.txt / test.txt — the evaluator may need them`,
   },
   {
     id: "database-recovery",

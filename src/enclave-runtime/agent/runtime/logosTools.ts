@@ -14,7 +14,7 @@ import type { LogosClient } from "./logosClient";
 
 const STDOUT_TAIL_LINES = 200;
 const STDERR_TAIL_LINES = 50;
-const EXEC_TIMEOUT_MS = 590_000;
+const DEFAULT_EXEC_TIMEOUT_MS = 590_000;
 
 /**
  * Keep the last `maxLines` lines of `text`.

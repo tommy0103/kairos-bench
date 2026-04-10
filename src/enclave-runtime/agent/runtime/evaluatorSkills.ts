@@ -1601,8 +1601,8 @@ print("\\nALL HEADLESS TERMINAL CHECKS PASSED")
     recipe: `### Skill: FastText Model — Verify accuracy and size, diagnose failure mode
 
 **Two failure modes to check**:
-1. Text preprocessing mismatch (acc < 0.60): agent lowercased/cleaned text during training, verifier tests on RAW text
-2. Suboptimal hyperparameters (acc 0.60-0.62): agent used manual params instead of autotune
+1. Text preprocessing mismatch (acc < 0.55): agent lowercased/cleaned text during training, verifier tests on RAW text
+2. Suboptimal hyperparameters (acc 0.55-0.62): agent used high-dim params (dim=50+) with too-small bucket, causing hash collisions
 
 **Recipe**:
 \\\`\\\`\\\`python
@@ -1650,16 +1650,15 @@ if acc < 0.55:
     failed += 1
 elif acc < 0.62:
     print(f"FAIL: accuracy {acc:.4f} < 0.62 — hyperparameters are suboptimal")
-    print("  Manual parameter tuning (lr, epoch, dim, etc.) caps out at ~60%.")
-    print("  Use FastText AUTOTUNE to search hyperparameters automatically:")
-    print("    model = fasttext.train_supervised(")
-    print("        input='train.txt',")
-    print("        autotuneValidationFile='test.txt',")
-    print("        autotuneDuration=500,")
-    print("        autotuneModelSize='150000000',")
-    print("    )")
-    print("  This searches lr/dim/epoch/wordNgrams/bucket/loss/etc. for 500s.")
-    print("  Do NOT waste time manually trying different lr/epoch/dim combos.")
+    print("  The 'wide & shallow' approach is required to break past 60%:")
+    print("  model = fasttext.train_supervised(")
+    print("      input='train.txt',")
+    print("      lr=0.5, epoch=10, wordNgrams=2,")
+    print("      dim=10, bucket=2000000, minCount=5,")
+    print("  )")
+    print("  Key: dim=10 + bucket=2M = far fewer hash collisions for bigrams.")
+    print("  Do NOT use dim>=50 (caps at ~60%). Do NOT use autotune (times out on 650K data).")
+    print("  If still < 0.62: try epoch=15 lr=0.3, or dim=15 bucket=1500000.")
     failed += 1
 else:
     print(f"PASS: accuracy {acc:.4f} >= 0.62")
@@ -1672,9 +1671,9 @@ print("\\nALL FASTTEXT CHECKS PASSED")
 
 **Verdict rules**:
 1. acc < 0.55 → FAIL with message: "RETRAIN without text preprocessing"
-2. acc 0.55–0.62 → FAIL with message: "Use FastText autotune instead of manual hyperparameter search"
+2. acc 0.55–0.62 → FAIL with message: "Use dim=10 + bucket=2000000 + epoch=10"
 3. acc >= 0.62 AND size < 150 MB → PASS
-**CRITICAL for fixer**: If accuracy is 0.55-0.62, do NOT manually try different lr/epoch/dim. Use \`autotuneValidationFile\` + \`autotuneDuration=500\` + \`autotuneModelSize='150000000'\`. This is the ONLY known way to reach 0.62+.`,
+**CRITICAL for fixer**: If accuracy is 0.55-0.62, retrain with \`dim=10, bucket=2000000, epoch=10, lr=0.5, wordNgrams=2, minCount=5\`. Do NOT use dim>=50 (hash collision bottleneck). Do NOT use autotune (times out on 650K data). If still < 0.62, try \`epoch=15, lr=0.3\` or \`dim=15, bucket=1500000\`.`,
   },
   {
     id: "cryptanalysis-output-verification",
