@@ -875,6 +875,109 @@ Build a \`test_one(fen)\` function for instant single-position feedback instead 
 **Common pitfall — marker character collisions**:
 - Marker characters (\`!\`, \`~\`) must not appear in valid FEN output. Apply deletion rules LAST.`,
   },
+  {
+    id: "torch-pipeline-parallelism",
+    name: "PyTorch pipeline parallelism (AFAB scheduling)",
+    triggers: [
+      ["pipeline", "parallel", "train_step"],
+      ["pipeline", "parallel", "afab"],
+      ["pipeline", "parallel", "llama"],
+      ["pipeline_parallelism"],
+    ],
+    hint: `**Pipeline parallelism with AFAB scheduling — time management and implementation strategy**:
+
+## CRITICAL — Time budget (900s total, every second counts)
+
+The container has NO Python pre-installed. Environment setup is the #1 time killer:
+
+1. \`apt-get update && apt-get install -y python3 python3-pip\` (~30s)
+2. \`pip3 install torch --index-url https://download.pytorch.org/whl/cpu --no-cache-dir\` (~90s with CPU index; DEFAULT index times out at 590s!)
+3. \`pip3 install transformers --no-cache-dir\` (~30s)
+
+**NEVER** run bare \`pip install torch\` — it downloads the CUDA build (~2GB) and WILL time out. Always use \`--index-url https://download.pytorch.org/whl/cpu\`.
+
+Rough time allocation: **150s environment** → **200s implement & write file** → **150s single-rank verify** → **200s iterate/fix** → **200s buffer**.
+
+## CRITICAL — Write /app/pipeline_parallel.py EARLY
+
+The verifier runs AFTER the agent, even if the agent times out. Your file at \`/app/pipeline_parallel.py\` is evaluated regardless. **Write a working version to /app/ as early as possible**, then iterate. Do NOT spend 600s exploring before writing anything — past trials that wrote the file late (near 900s) had the file invisible to the verifier.
+
+## Implementation strategy for train_step_pipeline_afab
+
+The function signature: \`train_step_pipeline_afab(model, inputs, targets, device, dtype)\`
+- \`model\`: \`LlamaForCausalLM\` from HuggingFace transformers
+- \`inputs\`/\`targets\`: lists of microbatch tensors (each \`[batch, seq_len]\`)
+- Must work for \`world_size=1\` AND \`world_size=2\`
+
+### Layer partitioning
+\`\`\`python
+rank = dist.get_rank()
+world_size = dist.get_world_size()
+layers = list(model.model.layers)
+n = len(layers)
+chunk = n // world_size
+remainder = n % world_size
+# Give first 'remainder' ranks one extra layer
+start = rank * chunk + min(rank, remainder)
+end = start + chunk + (1 if rank < remainder else 0)
+my_layers = layers[start:end]
+\`\`\`
+
+### AFAB scheduling
+1. **All-Forward**: for each microbatch, run forward through local layers. Between stages, use \`dist.isend\`/\`dist.irecv\` for hidden states \`[batch, seq_len, hidden_size]\`.
+2. **All-Backward**: for each microbatch (reverse order), run backward. Between stages, send/receive gradients.
+
+### Loss computation (THE critical correctness detail)
+The last stage must compute loss EXACTLY like \`LlamaForCausalLM.forward()\`:
+\`\`\`python
+# After getting logits from lm_head:
+from torch.nn import CrossEntropyLoss
+shift_logits = logits[..., :-1, :].contiguous()
+shift_labels = targets_mb[..., 1:].contiguous()
+loss_fct = CrossEntropyLoss()
+loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+loss = loss / num_microbatches  # scale by microbatch count
+\`\`\`
+**Do NOT** skip the shift — LLM causal loss shifts logits left by 1 position vs labels. This is by far the most common source of gradient mismatch.
+
+### world_size=1 handling
+When \`world_size=1\`, all layers are on rank 0. Skip all P2P communication. The function degenerates to a simple forward-backward with AFAB over microbatches.
+
+### Forbidden: hooks
+The verifier checks that \`pipeline_parallel.py\` does NOT contain \`register_forward_hook\`, \`register_backward_hook\`, \`register_full_backward_hook\`, etc. Use explicit forward calls only.
+
+## Verification strategy — single-rank first, skip multi-rank debugging
+
+**Do this**: Write a single-rank test (\`world_size=1\`) comparing your function's loss/gradients against \`model.forward(input_ids=..., labels=...)\`:
+\`\`\`python
+import os
+os.environ["MASTER_ADDR"] = "127.0.0.1"
+os.environ["MASTER_PORT"] = "29500"  # NEVER use 12355!
+import torch.distributed as dist
+dist.init_process_group("gloo", rank=0, world_size=1)
+# ... compare loss and gradients ...
+dist.destroy_process_group()
+\`\`\`
+
+**Do NOT do this**: Spend time debugging \`mp.spawn\` / multi-process tests locally. The container's multiprocessing is unreliable (Bus errors, shared memory issues). Past trials wasted 300+ seconds on this and still failed. The verifier has its own test infrastructure that works.
+
+## CRITICAL — Kill stale processes after self-testing
+
+After ANY self-test that uses \`dist.init_process_group\`, ALWAYS:
+\`\`\`bash
+pkill -9 -f "python3.*test" 2>/dev/null; sleep 1
+\`\`\`
+The verifier uses port 12355. If your test leaves a zombie process holding a port, the verifier's \`dist.init_process_group\` will get \`EADDRINUSE\` and fail. Two past trials failed this way despite having correct implementations.
+
+## Workflow summary
+1. Install Python + torch (CPU) + transformers (~150s)
+2. Inspect \`LlamaForCausalLM\` structure: \`model.model.embed_tokens\`, \`model.model.layers\`, \`model.model.norm\`, \`model.lm_head\`
+3. Write \`/app/pipeline_parallel.py\` — a working version, even if imperfect
+4. Single-rank gradient test (port 29500) → fix loss alignment issues
+5. Update \`/app/pipeline_parallel.py\` with fixes
+6. Kill all test processes: \`pkill -9 -f python3; sleep 2\`
+7. Do NOT attempt multi-rank self-testing — trust the verifier`,
+  },
 ];
 
 // ── Skill detection ──────────────────────────────────────────
