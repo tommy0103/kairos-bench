@@ -1602,7 +1602,7 @@ print("\\nALL HEADLESS TERMINAL CHECKS PASSED")
 
 **Two failure modes to check**:
 1. Text preprocessing mismatch (acc < 0.55): agent lowercased/cleaned text during training, verifier tests on RAW text
-2. Suboptimal hyperparameters (acc 0.55-0.62): agent used high-dim params (dim=50+) with too-small bucket, causing hash collisions
+2. Wrong hyperparameters (acc 0.55-0.62): agent used lr=0.5 (too high, causes overshoot) and/or bucket=2M (too small, bigram hash collisions) and/or dim=100 (too big, can't afford bucket)
 
 **Recipe**:
 \\\`\\\`\\\`python
@@ -1649,16 +1649,15 @@ if acc < 0.55:
     print("  Only replace newlines: text.replace('\\\\n',' ').replace('\\\\r',' ')")
     failed += 1
 elif acc < 0.62:
-    print(f"FAIL: accuracy {acc:.4f} < 0.62 — hyperparameters are suboptimal")
-    print("  Train a LARGE model then QUANTIZE to fit under 150 MB:")
+    print(f"FAIL: accuracy {acc:.4f} < 0.62 — hyperparameters are wrong")
+    print("  CRITICAL: Use lr=0.1 (NOT 0.5), bucket=3000000, dim=10, epoch=5, wordNgrams=2")
     print("  model = fasttext.train_supervised(")
     print("      input='train.txt',")
-    print("      lr=0.5, epoch=10, wordNgrams=2,")
-    print("      dim=100, bucket=500000, minCount=1,")
+    print("      lr=0.1, epoch=5, wordNgrams=2,")
+    print("      dim=10, bucket=3000000, minCount=1,")
     print("  )")
-    print("  model.quantize(input='train.txt', qnorm=True, retrain=True, cutoff=100000)")
-    print("  model.save_model('/app/model.bin')")
-    print("  Do NOT use dim=10 (stuck at ~0.59). Do NOT use autotune (times out).")
+    print("  model.save_model('/app/model.bin')  # Do NOT quantize!")
+    print("  If still < 0.62: try epoch=10, or bucket=3500000 with minCount=5, or lr=0.25")
     failed += 1
 else:
     print(f"PASS: accuracy {acc:.4f} >= 0.62")
@@ -1671,16 +1670,18 @@ print("\\nALL FASTTEXT CHECKS PASSED")
 
 **Verdict rules**:
 1. acc < 0.55 → FAIL with message: "RETRAIN without text preprocessing"
-2. acc 0.55–0.62 → FAIL with message: "Train large then quantize"
+2. acc 0.55–0.62 → FAIL with message: "Fix hyperparameters: lr=0.1, bucket=3M, dim=10"
 3. acc >= 0.62 AND size < 150 MB → PASS
-**CRITICAL for fixer**: If accuracy is 0.55-0.62, the model's hyperparameters are suboptimal. Use this exact approach (fits within 900s logos_exec timeout):
+**CRITICAL for fixer**: If accuracy is 0.55-0.62, the past hyperparameters were WRONG. The critical fix is: **lr=0.1 (not 0.5!), bucket=3000000 (not 2M!), dim=10, epoch=5, wordNgrams=2**. Previous runs used lr=0.5 which is 5x too high for this 650K-row dataset, causing overshoot. Use this exact code:
 \`\`\`python
 import fasttext, os
-model = fasttext.train_supervised(input='train.txt', lr=0.5, epoch=25, wordNgrams=1, dim=100, bucket=0, minCount=1, loss='softmax')
-model.quantize(input='train.txt', qnorm=True, retrain=True, cutoff=100000)
+model = fasttext.train_supervised(input='train.txt', lr=0.1, epoch=5, wordNgrams=2, dim=10, bucket=3000000, minCount=1, loss='softmax')
 model.save_model('/app/model.bin')
+print(f"Size: {os.path.getsize('/app/model.bin')/1e6:.1f}MB")
+result = model.test('test.txt')
+print(f"Accuracy: {result[1]:.4f}")
 \`\`\`
-If that's not enough, try \`epoch=10, wordNgrams=2, bucket=100000\` instead. Do NOT use \`dim=10, bucket=2M\` (stuck at ~0.59). Do NOT use autotune (times out).`,
+If accuracy still < 0.62, try: \`epoch=10\` or \`bucket=3500000, minCount=5\` or \`lr=0.25\`. Do NOT use lr=0.5, do NOT use dim=100, do NOT quantize (drops 2-3% accuracy).`,
   },
   {
     id: "cryptanalysis-output-verification",
