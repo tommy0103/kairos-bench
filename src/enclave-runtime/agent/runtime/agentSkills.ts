@@ -1021,13 +1021,17 @@ layer_output = layer(
 hidden_states = layer_output[0]  # layer returns a tuple, first element is hidden states
 \`\`\`
 - **position_ids**: Create once as \`torch.arange(seq_len).unsqueeze(0)\` and reuse. If omitted, the layer will auto-generate them, but they MUST be consistent across ranks.
-- **attention_mask**: For causal LM, you typically don't need to pass it explicitly (the model generates a causal mask internally). But if you do pass it, use \`None\` to let the model handle it.
+- **attention_mask**: Do NOT pass it. Do NOT try to create a causal mask manually. Just omit it or pass \`None\` — the decoder layers handle causal masking internally via SDPA/Flash Attention.
 
 ### world_size=1 handling
 When \`world_size=1\`, all layers are on rank 0. Skip all P2P communication. The function degenerates to a simple forward-backward with AFAB over microbatches. **But you must still process each microbatch individually through embed_tokens → all layers → norm → lm_head → loss → backward.**
 
-### Forbidden: hooks
+### Forbidden: hooks AND internal masking APIs
 The verifier checks that \`pipeline_parallel.py\` does NOT contain \`register_forward_hook\`, \`register_backward_hook\`, \`register_full_backward_hook\`, etc. Use explicit forward calls only.
+
+**FORBIDDEN: Do NOT call \`create_causal_mask\`, \`_update_causal_mask\`, or import from \`transformers.masking_utils\`.** These are internal APIs whose parameter names change across transformers versions (\`input_embeds\` vs \`inputs_embeds\`). The verifier may install a DIFFERENT transformers version than your sandbox — 2 past trials crashed with \`TypeError: create_causal_mask() got an unexpected keyword argument 'inputs_embeds'\`. In practice, \`create_causal_mask\` returns \`None\` for standard causal LM anyway — the decoder layers handle causal masking internally via SDPA. Just pass \`position_ids\` and \`attention_mask=None\` to each decoder layer.
+
+**Also: the function MUST return the loss tensor.** Return the accumulated scalar loss from the last rank (or the single rank). Past trials returned \`None\` by mistake.
 
 ## Verification strategy — single-rank first, skip multi-rank debugging
 

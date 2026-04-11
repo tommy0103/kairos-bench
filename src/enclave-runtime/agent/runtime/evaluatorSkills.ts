@@ -1780,7 +1780,7 @@ if not os.path.exists("/app/pipeline_parallel.py"):
     sys.exit(1)
 print("PASS: file exists")
 
-# Check 2: no hooks
+# Check 2: no hooks and no fragile internal APIs
 with open("/app/pipeline_parallel.py") as f:
     code = f.read()
 forbidden = ["register_forward_hook", "register_backward_hook", "register_full_backward_hook"]
@@ -1788,8 +1788,11 @@ for h in forbidden:
     if h in code:
         print(f"FAIL: forbidden hook '{h}' found in code")
         failed += 1
+if "create_causal_mask" in code:
+    print("WARN: create_causal_mask is used — this WILL crash in the verifier due to transformers version mismatch. Must remove it.")
+    failed += 1
 if failed == 0:
-    print("PASS: no forbidden hooks")
+    print("PASS: no forbidden hooks or fragile APIs")
 
 # Check 3: import succeeds
 try:
@@ -1863,6 +1866,10 @@ print("\\nALL PIPELINE PARALLEL CHECKS PASSED")
 4. **\`model.layers.X.bwd\` gradient mismatch**: Decoder layer forward call is wrong. Make sure to pass \`position_ids=torch.arange(seq_len).unsqueeze(0).to(device)\` and extract the hidden states correctly: \`layer_output = layer(hidden_states, position_ids=position_ids); hidden_states = layer_output[0]\`.
 
 5. **Port 12355 EADDRINUSE in verifier**: Agent left zombie processes. Fixer should: \`pkill -9 -f python3; sleep 2\` before submitting. Ensure the implementation does NOT call \`dist.init_process_group\` at module level.
+
+6. **\`TypeError: create_causal_mask() got an unexpected keyword argument\`**: The implementation calls \`create_causal_mask\` from \`transformers.masking_utils\`, whose parameter names (\`input_embeds\` vs \`inputs_embeds\`) change across versions. The verifier installs a different transformers version than the agent's sandbox. **Fix: remove ALL \`create_causal_mask\` calls and the \`from transformers.masking_utils import ...\` line.** The decoder layers handle causal masking internally — just pass \`position_ids\` and omit \`attention_mask\` (or pass \`None\`). This function returns \`None\` for standard causal LM anyway.
+
+7. **Function returns \`None\` instead of loss tensor**: The function computes loss correctly but forgets to return it. Fix: accumulate loss across microbatches on the last rank (detached for the return value), and \`return total_loss\` at the end.
 
 **Key implementation reference for fixer**:
 - **Module ownership**: rank 0 = embed_tokens + first half of decoder layers; last rank = remaining layers + norm + lm_head
