@@ -76,5 +76,6 @@ jobs/
 state-daemon/
 sandbox/
 bench/
+vfs/
 
 commit_jobs/
