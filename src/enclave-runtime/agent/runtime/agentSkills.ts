@@ -866,7 +866,7 @@ You have ~15 min total (agent + evaluator). Environment setup takes ~3 min. **Do
 - \`model.lm_head\`: Linear (last rank)
 - Each decoder layer accepts \`(hidden_states, position_embeddings=...)\` and returns a tensor
 
-**Write \`/app/pipeline_parallel.py\` immediately after installing dependencies.** Use \`cat > /app/pipeline_parallel.py << 'PYEOF'\` to write the file (logos_write to /app may silently fail). Run ONE single-rank verification test, then call \`logos_complete\`. Do NOT repeat tests or re-read your own code.
+**Write \`/app/pipeline_parallel.py\` immediately after installing dependencies.** Run ONE single-rank verification test, then call \`logos_complete\`. Do NOT repeat tests or re-read your own code.
 
 ## Implementation notes
 

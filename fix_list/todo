@@ -11,4 +11,7 @@
 0/1 caffe-cifar-10
 
 0.5/1 torch-pipeline-parallelism__PVKMzjx
+
+1/1 train-fasttext
+
 cobol-modernization__jXjjtGH

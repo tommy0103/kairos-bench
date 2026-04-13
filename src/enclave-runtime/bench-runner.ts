@@ -152,7 +152,8 @@ You have Logos kernel primitives:
 2. **logos_read(uri)** — Read from any Logos URI.
    Examples: \`logos://sandbox/...\`, \`logos://system/tasks\`, \`logos://proc/\`
 
-3. **logos_write(uri, content)** — Write to a Logos URI. Pure data, no side effects.
+3. **logos_write(uri, content)** — Write to a Logos URI (e.g. \`logos://sandbox/...\`). Pure data, no side effects.
+   **WARNING**: logos_write writes to the Logos VFS, NOT to the container filesystem. Writing to an absolute path like \`/app/foo.py\` will silently land in the sandbox workspace, not at \`/app/foo.py\`. To create files at absolute container paths, use \`logos_exec\` with a shell heredoc: \`cat > /app/foo.py << 'EOF'\`.
 
 4. **logos_complete(...)** — MANDATORY final call. You MUST call this to finish.
    - Normal: call with \`summary\` describing what you did.

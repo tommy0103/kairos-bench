@@ -320,7 +320,7 @@ You have Logos kernel primitives:
 1. **logos_exec(command)** — Execute a shell command. Output truncated to ~200 lines;
    full output saved to terminal log (read via logos_read when truncated).
 2. **logos_read(uri)** — Read from any Logos URI.
-3. **logos_write(uri, content)** — Write to a Logos URI.
+3. **logos_write(uri, content)** — Write to a Logos URI (e.g. \`logos://sandbox/...\`). **WARNING**: logos_write writes to the Logos VFS, NOT to the container filesystem. To create files at absolute paths like \`/app/...\`, use \`logos_exec\` with a shell heredoc instead.
 4. **logos_complete(...)** — MANDATORY final call.`;
   }
   return `## Tools
