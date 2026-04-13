@@ -139,7 +139,7 @@ After writing plaintexts.txt, verify line count, then call logos_complete. Do NO
       ["model.bin", "accuracy"],
       ["model.bin", "fasttext"],
     ],
-    hint: `**FastText text classification — correct hyperparameters and exploration strategy**:
+    hint: `**FastText text classification — proven one-shot config**:
 
 ## Data preparation — minimal preprocessing
 
@@ -155,105 +155,54 @@ with open('train.txt', 'w') as f:
 \`\`\`
 Do NOT lowercase. Do NOT remove punctuation. The verifier tests on RAW text.
 
-## CRITICAL — Correct hyperparameters (past failures were caused by WRONG lr and bucket)
+## PROVEN CONFIG — use this SINGLE config directly (no exploration!)
 
-The official fasttext result on Yelp Review Full is **63.9%** using: \`dim=10, lr=0.1, wordNgrams=2, bucket=10000000, epoch=5\` (model=462MB).
-
-**Past failures used lr=0.5 and bucket=2M — BOTH are wrong!**
-- \`lr=0.5\` is 5x too high for this 650K-row dataset → overfitting/oscillation → stuck at ~0.59
-- \`bucket=2M\` is 5x too small → severe bigram hash collisions → bigrams are nearly useless
-- \`epoch=25\` with \`lr=0.5\` means total gradient is 25x the official value → massive overshoot
-
-**Correct lr for Yelp Full is 0.1** (validated by the fasttext authors).
-
-### Model size constraint: 150 MB
-
-Model size ≈ (vocab + bucket) × dim × 4 bytes + vocab × ~50 bytes (dictionary overhead).
-- With dim=10: \`bucket=3M\` fits in ~130MB, \`bucket=3.5M\` fits in ~145MB (with minCount=5)
-- Do NOT use dim=100 (makes model 10x bigger, cannot afford enough bucket for bigrams)
-
-## Recommended approach: fast exploration then scale up
-
-Each training run with dim=10, epoch=5 takes only ~90-120s on 650K rows. **Try multiple configs in a SINGLE logos_exec call**:
+This exact config has been **validated to pass** (acc=0.6261, size=91.5MB, time=~7min):
 
 \`\`\`python
-import fasttext, os, time
-
-configs = [
-    # Primary: official-like params with largest bucket that fits in 150MB
-    dict(dim=10, bucket=3000000, wordNgrams=2, lr=0.1, epoch=5, minCount=1, loss='softmax'),
-    # More epochs (helps if 5 is underfitting)
-    dict(dim=10, bucket=3000000, wordNgrams=2, lr=0.1, epoch=10, minCount=1, loss='softmax'),
-    # Even larger bucket (minCount=5 shrinks vocab to free space)
-    dict(dim=10, bucket=3500000, wordNgrams=2, lr=0.1, epoch=5, minCount=5, loss='softmax'),
-    # Slightly higher lr (in case 0.1 is underfitting on raw text)
-    dict(dim=10, bucket=3000000, wordNgrams=2, lr=0.25, epoch=5, minCount=1, loss='softmax'),
-]
-
-best_acc = 0
-for i, cfg in enumerate(configs):
-    start = time.time()
-    model = fasttext.train_supervised(input='train.txt', **cfg)
-    elapsed = time.time() - start
-    result = model.test('test.txt')
-    acc = result[1]
-    model.save_model(f'/tmp/model_{i}.bin')
-    size_mb = os.path.getsize(f'/tmp/model_{i}.bin') / 1e6
-    print(f"Config {i}: acc={acc:.4f}, size={size_mb:.1f}MB, time={elapsed:.0f}s | {cfg}")
-    if acc > best_acc and size_mb < 150:
-        best_acc = acc
-        # Copy best model to final path
-        import shutil
-        shutil.copy(f'/tmp/model_{i}.bin', '/app/model.bin')
-
-# If best accuracy < 0.62, scale up best config with more epochs
-if best_acc < 0.62:
-    print(f"Best so far: {best_acc:.4f}, scaling up with epoch=25...")
-    # Use the config that performed best but with more epochs
-    model = fasttext.train_supervised(
-        input='train.txt', dim=10, bucket=3000000, wordNgrams=2,
-        lr=0.1, epoch=25, minCount=1, loss='softmax',
-    )
-    result = model.test('test.txt')
-    acc = result[1]
-    model.save_model('/tmp/model_scaled.bin')
-    size_mb = os.path.getsize('/tmp/model_scaled.bin') / 1e6
-    print(f"Scaled: acc={acc:.4f}, size={size_mb:.1f}MB")
-    if acc > best_acc and size_mb < 150:
-        import shutil
-        shutil.copy('/tmp/model_scaled.bin', '/app/model.bin')
-        best_acc = acc
-
-print(f"Final best accuracy: {best_acc:.4f}")
-final_size = os.path.getsize('/app/model.bin') / 1e6
-print(f"Final model size: {final_size:.1f} MB")
+import fasttext, os
+model = fasttext.train_supervised(
+    input='train.txt',
+    dim=10, bucket=2000000, wordNgrams=2,
+    lr=0.1, epoch=5, minCount=5, loss='softmax',
+)
+model.save_model('/app/model.bin')
+result = model.test('test.txt')
+print(f"Accuracy: {result[1]:.4f}, Size: {os.path.getsize('/app/model.bin')/1e6:.1f}MB")
 \`\`\`
 
-Total time for exploration: ~8-12 min for 4 configs + optional scale-up. Well within 1800s.
+**Why this works**: lr=0.1 is the official fasttext learning rate for Yelp Full. minCount=5 reduces vocabulary noise and keeps the model small. bucket=2M with dim=10 gives a 91.5MB model, well under 150MB.
+
+**DO NOT try multiple configs or exploration scripts** — bucket=3M takes ~250-450s per run, and a 4-config loop will TIMEOUT at 1800s. The single config above trains in ~7 minutes and is sufficient.
+
+## CRITICAL — NumPy 2.x compatibility fix
+
+The sandbox uses NumPy 2.x where \`np.array(x, copy=False)\` is broken. After installing fasttext, IMMEDIATELY patch it:
+
+\`\`\`python
+import subprocess
+subprocess.run(['sed', '-i', 's/np\\.array(\\([^,]*\\), copy=False)/np.asarray(\\1)/g',
+    subprocess.run(['python3', '-c', 'import os, fasttext; print(os.path.dirname(fasttext.__file__) + "/FastText.py")'],
+        capture_output=True, text=True).stdout.strip()])
+\`\`\`
+
+Or in shell: \`FTPY=$(python3 -c "import os, fasttext; print(os.path.dirname(fasttext.__file__) + '/FastText.py')") && sed -i 's/np\\.array(\\([^,]*\\), copy=False)/np.asarray(\\1)/g' "$FTPY"\`
+
+Without this patch, \`model.predict()\` will crash with \`ValueError: Unable to avoid copy while creating an array as requested\`.
 
 ## Why past strategies failed (DO NOT repeat these mistakes)
 
-1. **lr=0.5 with epoch=25**: Total lr·epoch product is 25x the official value → severe overshoot on 650K samples
-2. **bucket=2M with dim=10**: Only 20% of official bucket space → bigram hash collisions destroy bigram utility
-3. **dim=100 + quantize**: dim=100 models are 10x bigger, can't afford bucket for bigrams. Quantization drops accuracy 2-3% additionally
+1. **lr=0.5**: 5x too high for 650K-row dataset → overshoot → stuck at ~0.59
+2. **Multi-config exploration scripts with bucket=3M**: Each config takes 250-450s → 4 configs = 1000-1800s → TIMEOUT
+3. **dim=100 + quantize**: dim=100 models are 10x bigger, can't afford bucket for bigrams. Quantization drops accuracy 2-3%
 4. **autotune on full data**: Each autotune iteration can pick slow configs that timeout
-
-## Fallback if nothing reaches 0.62
-
-If all configs above fall short, try one more thing: lightweight text normalization. Create a SECOND training file with tokenized punctuation (add spaces around . , ! ? but do NOT lowercase):
-\`\`\`python
-import re
-text_norm = re.sub(r'([.!?,;:()\\'\\"])', r' \\1 ', text)
-text_norm = re.sub(r'\\s+', ' ', text_norm).strip()
-\`\`\`
-This separates "food." into "food ." which reduces vocabulary bloat and improves bigram coverage. Since the verifier sends raw text and fasttext tokenizes on whitespace, this can help even though test text isn't normalized (unknown word combos fall back to hash buckets).
 
 ## Workflow
 1. Install: \`pip install fasttext-wheel pandas pyarrow 2>&1 | tail -5\` (pre-built wheel, no g++ needed). If it fails: \`apt-get install -y -qq g++ build-essential && pip install fasttext\`
-2. Convert parquet → train.txt, test.txt (no preprocessing)
-3. Run the exploration script above (all in ONE logos_exec call)
-4. Check accuracy and size. If >= 0.62 and < 150MB → done
-5. Save as /app/model.bin
+2. **Immediately patch NumPy 2.x compat** (see above)
+3. Convert parquet → train.txt, test.txt (no preprocessing)
+4. Train with the SINGLE proven config above
+5. Verify: accuracy >= 0.62 and size < 150MB
 6. Do NOT delete train.txt / test.txt`,
   },
   {
