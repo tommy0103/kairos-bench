@@ -981,16 +981,18 @@ For \`world_size=2\` with \`n\` decoder layers:
 - \`embed_tokens\` is ALWAYS on the first rank; \`norm\` and \`lm_head\` are ALWAYS on the last rank
 - Each rank runs forward through ONLY its owned modules, then sends the hidden state to the next rank
 
-### Loss computation (THE critical correctness detail)
+### Loss computation (THE critical correctness detail — 7+ trials failed here)
 
-**Do NOT manually implement CrossEntropyLoss** — use the model's own \`loss_function\` property. Manual CE produces a DIFFERENT backward gradient graph than \`LlamaForCausalLM.forward(labels=...)\` due to transformers v5+ internals (\`ForCausalLMLoss\`). 5 past trials all failed with \`lm_head.bwd max diff=0.0417\` because of this.
+**NEVER use \`F.cross_entropy\`, \`nn.CrossEntropyLoss\`, or ANY manual loss computation.** Use the model's \`loss_function\` property ONLY.
+
+**Why manual CE is WRONG**: \`ForCausalLMLoss\` internally **shifts logits and labels by 1 position** before computing CE. It predicts token[i+1] from position[i]. If you call \`F.cross_entropy(logits.view(-1, V), targets.view(-1))\`, you predict token[i] from position[i] — DIFFERENT! This produces the exact gradient mismatch of \`lm_head.bwd max diff=0.04167\` that failed 7+ past trials.
 
 \`\`\`python
 # On the LAST rank, after getting logits from lm_head:
 hidden_states = model.model.norm(hidden_states)
 logits = model.lm_head(hidden_states)
 
-# Use the model's BUILT-IN loss function (matches reference exactly):
+# CORRECT — use model.loss_function (handles label shifting internally):
 loss = model.loss_function(
     logits=logits,
     labels=targets_mb,
@@ -998,15 +1000,12 @@ loss = model.loss_function(
 )
 loss = loss / num_microbatches
 loss.backward()
+
+# WRONG — DO NOT DO THIS (no label shifting, produces diff=0.04167):
+# loss = F.cross_entropy(logits.view(-1, vocab_size), targets_mb.view(-1))
 \`\`\`
 
-If \`model.loss_function\` is not available (older transformers), inspect how the model computes loss:
-\`\`\`python
-import inspect
-# Look at model.forward source to find the exact loss computation
-src = inspect.getsource(model.forward)
-# Then replicate EXACTLY — including any ForCausalLMLoss / fixed_cross_entropy calls
-\`\`\`
+**Do NOT import \`torch.nn.functional as F\` or \`torch.nn as nn\` for loss computation.** If you see \`F.cross_entropy\` or \`nn.CrossEntropyLoss\` in your code, it is WRONG.
 
 **ALSO**: Make sure each microbatch loss is scaled by \`1/num_microbatches\` BEFORE calling \`.backward()\`. The gradients accumulate across microbatches, so each one's contribution must be pre-scaled.
 
@@ -1033,18 +1032,59 @@ The verifier checks that \`pipeline_parallel.py\` does NOT contain \`register_fo
 
 **Also: the function MUST return the loss tensor.** Return the accumulated scalar loss from the last rank (or the single rank). Past trials returned \`None\` by mistake.
 
-## Verification strategy — single-rank first, skip multi-rank debugging
+## Verification strategy — THE self-test that catches all bugs
 
-**Do this**: Write a single-rank test (\`world_size=1\`) comparing your function's loss/gradients against \`model.forward(input_ids=..., labels=...)\`:
+**CRITICAL: 7 past trials had agent self-tests pass but verifier fail with \`lm_head.bwd max diff=0.04167\`.** The root cause: agents compute the reference loss manually (e.g. \`F.cross_entropy(logits, targets)\`) instead of through \`model.forward(labels=...)\`. This passes the self-test (both sides use wrong loss) but fails the verifier (verifier uses \`model.forward(labels=...)\`).
+
+**\`ForCausalLMLoss\` shifts labels by 1 position internally**: \`logits[:-1]\` predicts \`labels[1:]\`. If you call \`F.cross_entropy(logits.view(-1, V), targets.view(-1))\` directly, you compute loss over ALL positions (including position 0), while the model computes over positions 1..seq_len-1. This gives gradient diff ≈ 0.04167 at lm_head.
+
+**Use this EXACT self-test** (copy-paste, don't modify):
 \`\`\`python
-import os
+import os, copy
 os.environ["MASTER_ADDR"] = "127.0.0.1"
-os.environ["MASTER_PORT"] = "29500"  # NEVER use 12355!
-import torch.distributed as dist
+os.environ["MASTER_PORT"] = "29500"
+import torch, torch.distributed as dist
 dist.init_process_group("gloo", rank=0, world_size=1)
-# ... compare loss and gradients ...
+from transformers import LlamaForCausalLM, LlamaConfig
+from pipeline_parallel import train_step_pipeline_afab
+
+config = LlamaConfig(hidden_size=64, intermediate_size=128, num_hidden_layers=4, num_attention_heads=4, vocab_size=100, max_position_embeddings=32)
+torch.manual_seed(42)
+model = LlamaForCausalLM(config).float()
+ref_model = copy.deepcopy(model)
+
+B, S = 2, 8
+torch.manual_seed(0)
+inputs = [torch.randint(0, 100, (1, S)) for _ in range(B)]
+targets = [torch.randint(0, 100, (1, S)) for _ in range(B)]
+
+# Reference: use model.forward(labels=...) — this is what the verifier does
+ref_model.zero_grad()
+for inp, tgt in zip(inputs, targets):
+    out = ref_model(input_ids=inp, labels=tgt)
+    (out.loss / B).backward()
+
+# Pipeline
+model.zero_grad()
+pipeline_loss = train_step_pipeline_afab(model, inputs, targets, torch.device("cpu"), torch.float32)
+
+# Compare
+max_diff = 0
+for (n1, p1), (n2, p2) in zip(ref_model.named_parameters(), model.named_parameters()):
+    if p1.grad is not None and p2.grad is not None:
+        d = (p1.grad - p2.grad).abs().max().item()
+        if d > max_diff:
+            max_diff = d
+            worst = n1
+print(f"Max gradient diff: {max_diff:.10f} at {worst}")
+assert max_diff < 1e-5, f"GRADIENT MISMATCH: {max_diff} at {worst}"
+print("PASS")
 dist.destroy_process_group()
 \`\`\`
+
+**If this test shows diff ≈ 0.04167 at lm_head**, your loss computation is WRONG. You're using manual CE without label shifting. Fix: call \`model.loss_function(logits=logits, labels=targets_mb, vocab_size=model.config.vocab_size)\` which handles shifting internally.
+
+**Do NOT manually implement CE even if the task description says "compute cross_entropy loss"** — the task means use the model's built-in loss function, not \`F.cross_entropy\`.
 
 **Do NOT do this**: Spend time debugging \`mp.spawn\` / multi-process tests locally. The container's multiprocessing is unreliable (Bus errors, shared memory issues). Past trials wasted 300+ seconds on this and still failed. The verifier has its own test infrastructure that works.
 

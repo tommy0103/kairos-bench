@@ -1791,6 +1791,9 @@ for h in forbidden:
 if "create_causal_mask" in code:
     print("WARN: create_causal_mask is used — this WILL crash in the verifier due to transformers version mismatch. Must remove it.")
     failed += 1
+if "F.cross_entropy" in code or "nn.CrossEntropyLoss" in code or "cross_entropy(logits" in code:
+    print("WARN: Manual cross-entropy detected — ForCausalLMLoss shifts labels internally, manual CE does NOT. This WILL cause lm_head.bwd diff=0.0417 in verifier. Must use model.loss_function instead.")
+    failed += 1
 if failed == 0:
     print("PASS: no forbidden hooks or fragile APIs")
 
@@ -1859,7 +1862,7 @@ print("\\nALL PIPELINE PARALLEL CHECKS PASSED")
 
 1. **File missing**: Agent timed out before writing the file. Fixer must write the complete implementation to \`/app/pipeline_parallel.py\`. Install torch CPU: \`pip3 install torch --index-url https://download.pytorch.org/whl/cpu --no-cache-dir\` and transformers.
 
-2. **\`lm_head.bwd\` gradient mismatch (constant diff like ~0.0417)**: Do NOT use manual \`CrossEntropyLoss\` — it produces a different backward graph than the model's internal loss. Use \`model.loss_function(logits=logits, labels=targets_mb, vocab_size=model.config.vocab_size)\` instead. This matches \`LlamaForCausalLM.forward(labels=...)\` exactly. Then scale by \`/ num_microbatches\` before \`.backward()\`.
+2. **\`lm_head.bwd\` gradient mismatch (constant diff ~0.0417)**: The code uses \`F.cross_entropy(logits, targets)\` or \`nn.CrossEntropyLoss\` instead of \`model.loss_function\`. \`ForCausalLMLoss\` internally shifts labels by 1 position (\`logits[:-1]\` predicts \`labels[1:]\`), while manual CE does not shift → gradient diff ≈ 0.0417. **Fix**: replace ALL manual loss code with \`model.loss_function(logits=logits, labels=targets_mb, vocab_size=model.config.vocab_size)\`. Also remove any \`import torch.nn.functional as F\` used for loss. Also: check the self-test code — if it computes reference as \`F.cross_entropy(model(input_ids).logits, targets)\`, that's WRONG. Reference MUST be \`model(input_ids=inp, labels=tgt).loss\`.
 
 3. **\`microbatch count mismatch\` (e.g. at rotary_emb.fwd)**: The implementation processes microbatches incorrectly — likely concatenating them or running them through modules in a non-standard way. Fix: process each microbatch ONE BY ONE through the model's actual module objects. Each microbatch must trigger exactly one forward pass through each module (embed_tokens, each decoder layer, norm, lm_head). Never batch multiple microbatches together.
 
