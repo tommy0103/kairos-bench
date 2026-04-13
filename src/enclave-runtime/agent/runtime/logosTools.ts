@@ -243,10 +243,15 @@ export function createLogosCallTool(client: LogosClient): AgentTool {
       const toolParams = params.params
         ? JSON.parse(params.params)
         : {};
-      const result = await client.call(params.tool, toolParams);
-      const text =
-        typeof result === "string" ? result : JSON.stringify(result, null, 2);
-      return { content: [{ type: "text", text }] };
+      try {
+        const result = await client.call(params.tool, toolParams);
+        const text =
+          typeof result === "string" ? result : JSON.stringify(result, null, 2);
+        return { content: [{ type: "text", text }] };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: "text", text: `[error] ${msg}` }] };
+      }
     },
   };
 }

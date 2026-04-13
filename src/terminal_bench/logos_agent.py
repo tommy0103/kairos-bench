@@ -220,6 +220,7 @@ class LogosAgent(BaseInstalledAgent):
                 f"mkdir -p {state_dir}/sandbox {state_dir}/entities {state_dir}/memory "
                 f"  {state_dir}/proc-store {state_dir}/svc-store && "
                 f"rm -f {logos_sock} && "
+                f"unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY && "
                 f"VFS_SANDBOX_ROOT={state_dir}/sandbox "
                 f"VFS_SYSTEM_DB={state_dir}/system.db "
                 f"VFS_USERS_ROOT={state_dir}/entities "
