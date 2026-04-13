@@ -147,7 +147,7 @@ This task involves cloning, building, and training in sequence. Plan mode wastes
 
 ## Build order (do not deviate)
 
-1. Install dependencies: \`apt-get install -y libprotobuf-dev protobuf-compiler libopencv-dev libhdf5-serial-dev libboost-all-dev libgflags-dev libgoogle-glog-dev libleveldb-dev liblmdb-dev libsnappy-dev libatlas-base-dev python3-dev python3-numpy\`
+1. Install dependencies: \`apt-get install -y libprotobuf-dev protobuf-compiler libopencv-dev libhdf5-serial-dev libboost-all-dev libgflags-dev libgoogle-glog-dev libleveldb-dev liblmdb-dev libsnappy-dev libatlas-base-dev python3-dev python3-numpy g++ build-essential\`
 2. Clone: \`git clone --branch 1.0 --depth 1 https://github.com/BVLC/caffe.git /app/caffe\`
 3. Configure: copy \`Makefile.config.example\` to \`Makefile.config\`, set \`CPU_ONLY := 1\`
 4. Build: \`make all -j$(nproc)\` — this takes several minutes, do NOT interrupt it
