@@ -856,9 +856,17 @@ The container has no Python. Setup is the #1 time killer:
 2. **CRITICAL**: \`pip3 install torch --index-url https://download.pytorch.org/whl/cpu --no-cache-dir --break-system-packages\` (~90s). **NEVER** run bare \`pip install torch\` — it downloads the CUDA build (~2GB) and WILL time out.
 3. \`pip3 install transformers --no-cache-dir --break-system-packages\` (~30s)
 
-## Write /app/pipeline_parallel.py EARLY
+## Time budget is TIGHT — skip exploration, write code directly
 
-The verifier runs AFTER the agent. Your file at \`/app/pipeline_parallel.py\` is evaluated regardless. **Write a working version as early as possible**, then iterate.
+You have ~15 min total (agent + evaluator). Environment setup takes ~3 min. **Do NOT spend time exploring the model structure** — the LlamaForCausalLM layout is well-known:
+- \`model.model.embed_tokens\`: Embedding layer (rank 0)
+- \`model.model.layers\`: ModuleList of LlamaDecoderLayer (partition across ranks)
+- \`model.model.norm\`: LlamaRMSNorm (last rank)
+- \`model.model.rotary_emb\`: LlamaRotaryEmbedding — call with \`(hidden_states, position_ids)\` to get \`(cos, sin)\` tuple, pass as \`position_embeddings=(cos, sin)\` to each decoder layer
+- \`model.lm_head\`: Linear (last rank)
+- Each decoder layer accepts \`(hidden_states, position_embeddings=...)\` and returns a tensor
+
+**Write \`/app/pipeline_parallel.py\` immediately after installing dependencies.** Use \`cat > /app/pipeline_parallel.py << 'PYEOF'\` to write the file (logos_write to /app may silently fail). Run ONE single-rank verification test, then call \`logos_complete\`. Do NOT repeat tests or re-read your own code.
 
 ## Implementation notes
 

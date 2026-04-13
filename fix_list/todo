@@ -10,5 +10,5 @@
 1/1 gcode-to-text
 0/1 caffe-cifar-10
 
-torch-pipeline-parallelism__PVKMzjx	1.0
+0.5/1 torch-pipeline-parallelism__PVKMzjx
 cobol-modernization__jXjjtGH
