@@ -147,9 +147,13 @@ Building Caffe from source takes 25-40 min, training CIFAR-10 on CPU another 25-
 
 ## Strategy: avoid building from source
 
-- Caffe 1.0 was packaged in Ubuntu 20.04 (Focal) as \`caffe-tools-cpu\`. The package provides \`/usr/bin/caffe\` and all conversion tools pre-built. Even on newer Ubuntu, try adding the Focal universe repo as a package source and installing from there — this takes ~30 seconds vs 30+ minutes of compilation.
-- If apt install fails due to dependency conflicts, THEN fall back to source build. When building from source, be aware that Caffe 1.0 predates OpenCV 4 — you will need to fix pkg-config names and missing constants.
-- You still need to clone the BVLC/caffe repo for the config files, data scripts, and prototxt — but you can skip the \`make\` step if you have the binary from apt. Make sure the training scripts can find the \`caffe\` binary (symlink into the expected build path if needed).
+Try these approaches IN ORDER — stop as soon as one works:
+
+1. **conda/mamba** (fastest, ~2 min): \`curl -sL https://micro.mamba.pm/api/micromamba/linux-64/latest | tar xj -C /usr/local bin/micromamba && micromamba create -n caffe -c conda-forge caffe-cpu -y && eval "$(micromamba shell hook -s bash)" && micromamba activate caffe && which caffe\`. conda-forge provides pre-built Caffe with all dependencies bundled.
+2. **Focal apt package** (~30s if it works): add \`deb http://archive.ubuntu.com/ubuntu focal universe\` repo, try \`apt-get install -y caffe-tools-cpu\`. If dependency conflicts arise (e.g. libboost version mismatch), remove the repo and move to option 3.
+3. **Source build** (last resort, 10-30 min): install build deps, clone, configure, \`make all -j$(nproc)\`. Be aware of OpenCV 4 incompatibilities on Ubuntu 22.04+.
+
+You still need to clone the BVLC/caffe repo (for config files, data scripts, prototxt) regardless of which approach you use. If using conda/system caffe, symlink the binary into the expected build path.
 
 ## Training pitfalls
 
