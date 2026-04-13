@@ -2360,6 +2360,57 @@ print("\\nALL GOLDEN GATE PRIMER CHECKS PASSED")
 6. **Do NOT verify by reconstructing the assembled product** from raw primers — enzymatic digestion removes the BsaI sites.
 7. If all checks pass -> report PASS. Do NOT write additional tests.`,
   },
+  {
+    id: "caffe-cifar-training",
+    name: "Caffe CIFAR-10 Training Verification",
+    triggers: [
+      ["caffe", "cifar"],
+      ["caffe", "train", "accuracy"],
+      ["caffemodel", "cifar"],
+      ["caffe", "training_output"],
+      ["caffe", "cifar", "accuracy"],
+    ],
+    recipe: `### Skill: Caffe CIFAR-10 Training — Lightweight Verification
+
+## CRITICAL — This task is time-constrained. The evaluator MUST finish in < 10 seconds.
+
+Do NOT re-run training, install packages, or do any heavy work. Only check files that already exist.
+
+## Recipe
+
+\\\`\\\`\\\`bash
+#!/bin/bash
+FAIL=0
+
+# Check 1: training_output.txt exists and has content
+if [ ! -s /app/caffe/training_output.txt ]; then
+  echo "FAIL: /app/caffe/training_output.txt missing or empty"; FAIL=1
+else
+  echo "PASS: training_output.txt exists"
+fi
+
+# Check 2: caffemodel exists
+MODELS=$(ls /app/caffe/examples/cifar10/cifar10_quick_iter_*.caffemodel 2>/dev/null)
+if [ -z "$MODELS" ]; then
+  echo "FAIL: no caffemodel found"; FAIL=1
+else
+  echo "PASS: $(echo "$MODELS" | xargs -n1 basename)"
+fi
+
+# Check 3: grep for test accuracy > 0.45
+ACC=$(grep -oP 'Test net output #\\d+: accuracy = \\K[\\d.]+' /app/caffe/training_output.txt 2>/dev/null | tail -1)
+if [ -z "$ACC" ]; then
+  echo "FAIL: no test accuracy in log"; FAIL=1
+else
+  echo "Last test accuracy: $ACC"
+  python3 -c "import sys; sys.exit(0 if float('$ACC')>=0.45 else 1)" && echo "PASS: accuracy >= 0.45" || { echo "FAIL: accuracy < 0.45"; FAIL=1; }
+fi
+
+[ $FAIL -eq 0 ] && echo "PASS" || exit 1
+\\\`\\\`\\\`
+
+**Verdict**: If any check fails → FAIL. Otherwise → PASS immediately. Do NOT run additional tests.`,
+  },
 ];
 
 // ── Skill detection ──────────────────────────────────────────

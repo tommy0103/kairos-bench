@@ -2,9 +2,7 @@
 1/1 dna-insert
 1/1 mailman
 1/1 qemu-alpine-ssh qemu-startup
-1/1 filter-js-from-html
-1/1 regex-chess
-0.8/1? perhaps 1/1 feal-linear-cryptanalysis
+
 1/1 headless-terminal
 1/1 gcode-to-text
 
@@ -13,5 +11,9 @@
 1/1 dna-assembly
 
 0/1 caffe-cifar-10
+0/1 cobol-modernization__jXjjtGH
 
-cobol-modernization__jXjjtGH
+# Full(needed modification)
+1/1 filter-js-from-html
+1/1 regex-chess
+0.8/1? perhaps 1/1 feal-linear-cryptanalysis
