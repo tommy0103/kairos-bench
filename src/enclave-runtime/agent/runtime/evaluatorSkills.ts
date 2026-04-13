@@ -1602,7 +1602,7 @@ print("\\nALL HEADLESS TERMINAL CHECKS PASSED")
 
 **Three failure modes to check**:
 1. Text preprocessing mismatch (acc < 0.55): agent lowercased/cleaned text during training, verifier tests on RAW text
-2. Wrong hyperparameters (acc 0.55-0.62): agent used lr=0.5 (too high) and/or dim=100 (too big)
+2. Wrong hyperparameters (acc 0.55-0.62): learning rate too high and/or dimensions too large
 3. NumPy 2.x crash: fasttext's predict() crashes with "Unable to avoid copy" on NumPy >= 2.0
 
 **Recipe**:
@@ -1657,14 +1657,11 @@ if acc < 0.55:
     print("  Only replace newlines: text.replace('\\\\n',' ').replace('\\\\r',' ')")
     failed += 1
 elif acc < 0.62:
-    print(f"FAIL: accuracy {acc:.4f} < 0.62 — hyperparameters are wrong")
-    print("  CRITICAL: Use lr=0.1 (NOT 0.5), dim=10, bucket=2000000, epoch=5, wordNgrams=2, minCount=5")
-    print("  model = fasttext.train_supervised(")
-    print("      input='train.txt',")
-    print("      lr=0.1, epoch=5, wordNgrams=2,")
-    print("      dim=10, bucket=2000000, minCount=5, loss='softmax',")
-    print("  )")
-    print("  model.save_model('/app/model.bin')  # Do NOT quantize!")
+    print(f"FAIL: accuracy {acc:.4f} < 0.62 — hyperparameters need tuning")
+    print("  Check the official fasttext benchmark parameters for Yelp Full.")
+    print("  The default learning rate is likely too high for this dataset size.")
+    print("  Use small dim (e.g. 10) to keep model compact and allow sufficient bucket space.")
+    print("  Do NOT quantize — it drops accuracy.")
     failed += 1
 else:
     print(f"PASS: accuracy {acc:.4f} >= 0.62")
@@ -1678,18 +1675,9 @@ print("\\nALL FASTTEXT CHECKS PASSED")
 **Verdict rules**:
 1. NumPy crash → patch fasttext first (see above), then re-test
 2. acc < 0.55 → FAIL with message: "RETRAIN without text preprocessing"
-3. acc 0.55–0.62 → FAIL with message: "Fix hyperparameters: lr=0.1, bucket=2M, dim=10, minCount=5"
+3. acc 0.55–0.62 → FAIL with message: "Hyperparameters need tuning — consult official fasttext benchmarks"
 4. acc >= 0.62 AND size < 150 MB → PASS
-**CRITICAL for fixer**: The PROVEN passing config is: **lr=0.1, dim=10, bucket=2000000, epoch=5, wordNgrams=2, minCount=5** (gives acc=0.6261, size=91.5MB). Use this exact code:
-\`\`\`python
-import fasttext, os
-model = fasttext.train_supervised(input='train.txt', lr=0.1, epoch=5, wordNgrams=2, dim=10, bucket=2000000, minCount=5, loss='softmax')
-model.save_model('/app/model.bin')
-print(f"Size: {os.path.getsize('/app/model.bin')/1e6:.1f}MB")
-result = model.test('test.txt')
-print(f"Accuracy: {result[1]:.4f}")
-\`\`\`
-Do NOT use lr=0.5 (causes overshoot), do NOT use dim=100 (model too big), do NOT quantize (drops 2-3% accuracy), do NOT try multi-config exploration scripts (will TIMEOUT). Also **always patch NumPy 2.x compat first**: \`sed -i 's/np.array(\\([^,]*\\), copy=False)/np.asarray(\\1)/g' $(python3 -c "import os, fasttext; print(os.path.dirname(fasttext.__file__) + '/FastText.py')")\``,
+**For fixer**: If accuracy is in the 0.55–0.62 range, the learning rate is almost certainly too high. Consult the official fasttext paper/repo for Yelp Full benchmark parameters — the published lr is much lower than the default. Use dim=10 to keep the model small, and avoid quantization. Also **always patch NumPy 2.x compat first**: \`sed -i 's/np.array(\\([^,]*\\), copy=False)/np.asarray(\\1)/g' $(python3 -c "import os, fasttext; print(os.path.dirname(fasttext.__file__) + '/FastText.py')")\``,
   },
   {
     id: "cryptanalysis-output-verification",

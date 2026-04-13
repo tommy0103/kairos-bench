@@ -139,70 +139,39 @@ After writing plaintexts.txt, verify line count, then call logos_complete. Do NO
       ["model.bin", "accuracy"],
       ["model.bin", "fasttext"],
     ],
-    hint: `**FastText text classification — proven one-shot config**:
+    hint: `**FastText text classification — key pitfalls to avoid**:
 
 ## Data preparation — minimal preprocessing
 
-Convert parquet to fasttext format with ONLY newline replacement:
-\`\`\`python
-import pandas as pd
-df = pd.read_parquet('data/train-00000-of-00001.parquet')
-with open('train.txt', 'w') as f:
-    for _, row in df.iterrows():
-        text = str(row['text']).replace('\\n', ' ').replace('\\r', ' ')
-        f.write(f'__label__{row["label"]} {text}\\n')
-# Same for test parquet → test.txt
-\`\`\`
-Do NOT lowercase. Do NOT remove punctuation. The verifier tests on RAW text.
+Convert parquet to fasttext format with ONLY newline replacement. Do NOT lowercase, do NOT remove punctuation — the verifier tests on RAW text, so any training-time normalization will cause a mismatch.
 
-## PROVEN CONFIG — use this SINGLE config directly (no exploration!)
+## Hyperparameter selection
 
-This exact config has been **validated to pass** (acc=0.6261, size=91.5MB, time=~7min):
+The official fasttext paper/repo publishes benchmark results for Yelp Review Full. **Consult those official parameters** — the fasttext defaults (especially \`lr\`) are often NOT suitable for large datasets (500K+ rows). Using the default learning rate on such data tends to cause overshoot and underperformance.
 
-\`\`\`python
-import fasttext, os
-model = fasttext.train_supervised(
-    input='train.txt',
-    dim=10, bucket=2000000, wordNgrams=2,
-    lr=0.1, epoch=5, minCount=5, loss='softmax',
-)
-model.save_model('/app/model.bin')
-result = model.test('test.txt')
-print(f"Accuracy: {result[1]:.4f}, Size: {os.path.getsize('/app/model.bin')/1e6:.1f}MB")
-\`\`\`
+Key considerations:
+- **dim**: For text classification under a tight size budget, small dimensions (e.g. 10) work well and keep the model compact. Large dimensions (e.g. 100) make the model 10× bigger, leaving no room for sufficient bucket space.
+- **bucket + model size**: Model size ≈ (vocab + bucket) × dim × 4 bytes + dictionary overhead. Choose bucket size so the final model fits under the size limit. Use \`minCount\` to control vocabulary size.
+- **wordNgrams**: Bigrams (\`wordNgrams=2\`) are important for sentiment tasks — they capture "not good", "very bad" etc.
+- **Quantization**: Generally drops accuracy noticeably and is not recommended if you can fit within the size limit without it.
+- **autotune**: Risky on large datasets as each iteration may pick slow configs that timeout.
 
-**Why this works**: lr=0.1 is the official fasttext learning rate for Yelp Full. minCount=5 reduces vocabulary noise and keeps the model small. bucket=2M with dim=10 gives a 91.5MB model, well under 150MB.
+Keep training simple — one well-chosen config is better than trying many configs when time is limited.
 
-**DO NOT try multiple configs or exploration scripts** — bucket=3M takes ~250-450s per run, and a 4-config loop will TIMEOUT at 1800s. The single config above trains in ~7 minutes and is sufficient.
+## NumPy 2.x compatibility
 
-## CRITICAL — NumPy 2.x compatibility fix
+The sandbox may use NumPy 2.x where \`np.array(x, copy=False)\` in the fasttext source is broken. After installing fasttext, patch it:
 
-The sandbox uses NumPy 2.x where \`np.array(x, copy=False)\` is broken. After installing fasttext, IMMEDIATELY patch it:
+\`FTPY=$(python3 -c "import os, fasttext; print(os.path.dirname(fasttext.__file__) + '/FastText.py')") && sed -i 's/np\\.array(\\([^,]*\\), copy=False)/np.asarray(\\1)/g' "$FTPY"\`
 
-\`\`\`python
-import subprocess
-subprocess.run(['sed', '-i', 's/np\\.array(\\([^,]*\\), copy=False)/np.asarray(\\1)/g',
-    subprocess.run(['python3', '-c', 'import os, fasttext; print(os.path.dirname(fasttext.__file__) + "/FastText.py")'],
-        capture_output=True, text=True).stdout.strip()])
-\`\`\`
-
-Or in shell: \`FTPY=$(python3 -c "import os, fasttext; print(os.path.dirname(fasttext.__file__) + '/FastText.py')") && sed -i 's/np\\.array(\\([^,]*\\), copy=False)/np.asarray(\\1)/g' "$FTPY"\`
-
-Without this patch, \`model.predict()\` will crash with \`ValueError: Unable to avoid copy while creating an array as requested\`.
-
-## Why past strategies failed (DO NOT repeat these mistakes)
-
-1. **lr=0.5**: 5x too high for 650K-row dataset → overshoot → stuck at ~0.59
-2. **Multi-config exploration scripts with bucket=3M**: Each config takes 250-450s → 4 configs = 1000-1800s → TIMEOUT
-3. **dim=100 + quantize**: dim=100 models are 10x bigger, can't afford bucket for bigrams. Quantization drops accuracy 2-3%
-4. **autotune on full data**: Each autotune iteration can pick slow configs that timeout
+Without this, \`model.predict()\` will crash with \`ValueError: Unable to avoid copy while creating an array as requested\`.
 
 ## Workflow
-1. Install: \`pip install fasttext-wheel pandas pyarrow 2>&1 | tail -5\` (pre-built wheel, no g++ needed). If it fails: \`apt-get install -y -qq g++ build-essential && pip install fasttext\`
-2. **Immediately patch NumPy 2.x compat** (see above)
-3. Convert parquet → train.txt, test.txt (no preprocessing)
-4. Train with the SINGLE proven config above
-5. Verify: accuracy >= 0.62 and size < 150MB
+1. Install: \`pip install fasttext-wheel pandas pyarrow 2>&1 | tail -5\` (pre-built wheel). If it fails: \`apt-get install -y -qq g++ build-essential && pip install fasttext\`
+2. Patch NumPy 2.x compat (see above)
+3. Convert parquet → train.txt, test.txt (no preprocessing beyond newline replacement)
+4. Train with parameters informed by official fasttext benchmarks
+5. Verify accuracy and model size
 6. Do NOT delete train.txt / test.txt`,
   },
   {
