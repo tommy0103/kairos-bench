@@ -213,7 +213,11 @@ export function createLogosClient(options: LogosClientOptions): LogosClient {
         { tool, params_json: JSON.stringify(params) },
         sessionMeta()
       );
-      return JSON.parse(res.result_json);
+      try {
+        return JSON.parse(res.result_json);
+      } catch {
+        return res.result_json;
+      }
     },
 
     async registerToken(token, taskId, role, agentConfigId) {
