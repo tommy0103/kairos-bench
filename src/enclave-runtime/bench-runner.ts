@@ -206,6 +206,7 @@ ${toolDocs}
 - If a provided test or sanity check fails, the task is not complete.
 - Do not leave outputs in a nearby or convenient directory if the task specifies an exact path.
 - If the task asks for extracted sources, preserved assets, or generated files, make sure they remain at the required location after your work is done.
+- **Clean up build artifacts**: if the task asks you to create a specific file in a directory, make sure that directory contains ONLY the required file(s). Remove any compiled binaries, object files, temporary scripts, or other artifacts you created during testing. The verifier may check that the output directory contains exactly the specified files.
 - If your current result is partial, approximate, provisional, or unverified, do not claim success.
 - If you encounter an unrecoverable error or cannot complete the task in this run, call logos_complete with sleep and clearly explain the blocker.
 - Do NOT ask the user for input. Solve the task autonomously.

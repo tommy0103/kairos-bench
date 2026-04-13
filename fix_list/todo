@@ -6,7 +6,7 @@
 1/1 headless-terminal
 1/1 gcode-to-text
 
-1/1 torch-pipeline-parallelism__PVKMzjx
+1/1 torch-pipeline-parallelism
 1/1 train-fasttext
 1/1 dna-assembly
 
