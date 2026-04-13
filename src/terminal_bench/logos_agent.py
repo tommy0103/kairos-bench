@@ -120,7 +120,7 @@ class LogosAgent(BaseInstalledAgent):
                 "sed -i 's|http://security.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true && "
                 "for i in 1 2 3; do "
                 "  apt-get update -qq && "
-                "  apt-get install -y -qq --fix-missing curl unzip git ca-certificates && break; "
+                "  apt-get install -y -qq --fix-missing curl unzip git ca-certificates poppler-utils lynx && break; "
                 "  echo \"apt retry $i/3...\"; sleep 5; "
                 "done && "
                 "("

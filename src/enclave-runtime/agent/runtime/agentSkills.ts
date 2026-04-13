@@ -437,7 +437,7 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
   - **binding region**: the part that anneals to the template for PCR amplification.
 - **Overhang design**: Overhangs must be derived from the desired assembled sequence at the exact junction points. They must be unique and non-palindromic.
 - **Tm balancing**: Use \`oligotm\` (from primer3) to compute melting temperatures. Keep ΔTm between primer pairs small. The annealing portion is only the part that base-pairs with the template.
-- **Binding region**: Make sure the binding region does not overlap with the overhang bases on the template, or you'll get sequence duplication in the assembly.
+- **Binding region**: The binding must anneal to the template AFTER the overhang position, not overlapping with it. For example, if the overhang is the first 4 bases of a gene (e.g. \`atga\` = gene[0:4]), then the binding must start at gene[4], NOT gene[0]. If binding starts at gene[0], the overhang bases get duplicated in the assembled product.
 
 ## Time management
 

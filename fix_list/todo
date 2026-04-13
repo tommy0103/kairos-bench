@@ -5,12 +5,13 @@
 1/1 filter-js-from-html
 1/1 regex-chess
 0.8/1? perhaps 1/1 feal-linear-cryptanalysis
-1/1? dna-assembly
 1/1 headless-terminal
 1/1 gcode-to-text
-0/1 caffe-cifar-10
 
 1/1 torch-pipeline-parallelism__PVKMzjx
 1/1 train-fasttext
+
+0.5/1? dna-assembly
+0/1 caffe-cifar-10
 
 cobol-modernization__jXjjtGH
