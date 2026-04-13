@@ -15,6 +15,7 @@ import type { LogosClient } from "./logosClient";
 const STDOUT_TAIL_LINES = 200;
 const STDERR_TAIL_LINES = 50;
 const DEFAULT_EXEC_TIMEOUT_MS = 590_000;
+const MAX_TOOL_OUTPUT_CHARS = 400_000; // ~100K tokens
 
 /**
  * Keep the last `maxLines` lines of `text`.
@@ -42,16 +43,32 @@ export function createLogosReadTool(client: LogosClient): AgentTool {
     label: "Read",
     description:
       "Read content from a Logos URI. Works across all namespaces " +
-      "(memory/, sandbox/, system/, proc/, services/, etc.).",
+      "(memory/, sandbox/, system/, proc/, services/, etc.). " +
+      "Supports optional offset (byte offset) and limit (max bytes) for large content.",
     parameters: Type.Object({
       uri: Type.String({
         description:
           'Logos URI to read, e.g. "logos://memory/messages" or "logos://system/tasks".',
       }),
+      offset: Type.Optional(
+        Type.Number({ description: "Byte offset to start reading from (default: 0)." }),
+      ),
+      limit: Type.Optional(
+        Type.Number({ description: "Max bytes to return (default: no limit, but capped at ~400K chars)." }),
+      ),
     }),
     execute: async (_id, params) => {
       const content = await client.read(params.uri);
-      return { content: [{ type: "text", text: content }] };
+      const offset = params.offset ?? 0;
+      const limit = params.limit ?? MAX_TOOL_OUTPUT_CHARS;
+      const sliced = content.slice(offset, offset + limit);
+      const truncated = sliced.length < content.length - offset;
+      const totalLen = content.length;
+      let text = sliced;
+      if (truncated) {
+        text += `\n\n[... truncated — showing bytes ${offset}..${offset + sliced.length} of ${totalLen}. Use offset/limit to read more. ...]`;
+      }
+      return { content: [{ type: "text", text }] };
     },
   };
 }
@@ -161,22 +178,39 @@ export function createLogosExecTool(
         client.write(`${logBase}.stderr`, result.stderr).catch(() => {});
       }
 
+      let stdout = tailLines(
+        result.stdout,
+        STDOUT_TAIL_LINES,
+        `read ${logBase}.stdout for full output`,
+      ) || "(empty)";
+      let stderr = tailLines(
+        result.stderr,
+        STDERR_TAIL_LINES,
+        `read ${logBase}.stderr for full output`,
+      ) || "(empty)";
+
+      const combined = stdout.length + stderr.length;
+      if (combined > MAX_TOOL_OUTPUT_CHARS) {
+        const stderrBudget = Math.min(stderr.length, Math.floor(MAX_TOOL_OUTPUT_CHARS * 0.2));
+        const stdoutBudget = MAX_TOOL_OUTPUT_CHARS - stderrBudget;
+        if (stdout.length > stdoutBudget) {
+          stdout = stdout.slice(0, stdoutBudget) +
+            `\n[... stdout truncated at ${stdoutBudget} chars — read ${logBase}.stdout for full output ...]`;
+        }
+        if (stderr.length > stderrBudget) {
+          stderr = stderr.slice(0, stderrBudget) +
+            `\n[... stderr truncated at ${stderrBudget} chars — read ${logBase}.stderr for full output ...]`;
+        }
+      }
+
       const text = [
         `exit_code: ${result.exit_code}`,
         "",
         "stdout:",
-        tailLines(
-          result.stdout,
-          STDOUT_TAIL_LINES,
-          `read ${logBase}.stdout for full output`,
-        ) || "(empty)",
+        stdout,
         "",
         "stderr:",
-        tailLines(
-          result.stderr,
-          STDERR_TAIL_LINES,
-          `read ${logBase}.stderr for full output`,
-        ) || "(empty)",
+        stderr,
       ].join("\n");
       return {
         content: [{ type: "text", text }],

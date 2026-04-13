@@ -58,7 +58,8 @@ _load_env_file()
 KAIROS_DIR = "/opt/kairos"
 LOGOS_BIN_DIR = "/opt/logos"
 LOGOS_RELEASE_URL = (
-    "https://github.com/tommy0103/kairos-bench/releases/download/v0.1.2/logos-linux-x64.tar.gz"
+    "https://github.com/tommy0103/kairos-bench/releases/download/v0.1.3/logos-linux-x64-web.tar.gz"
+    # https://github.com/tommy0103/kairos-bench/releases/tag/v0.1.3
 )
 
 

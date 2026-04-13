@@ -149,13 +149,20 @@ You have Logos kernel primitives:
    terminal log; the truncation notice includes the exact URI you can pass
    to logos_read to retrieve it.
 
-2. **logos_read(uri)** — Read from any Logos URI.
+2. **logos_read(uri, offset?, limit?)** — Read from any Logos URI.
    Examples: \`logos://sandbox/...\`, \`logos://system/tasks\`, \`logos://proc/\`
+   For large content, use \`offset\` (byte offset) and \`limit\` (max bytes) to paginate. Output is capped at ~400K chars.
 
 3. **logos_write(uri, content)** — Write to a Logos URI (e.g. \`logos://sandbox/...\`). Pure data, no side effects.
    **WARNING**: logos_write writes to the Logos VFS, NOT to the container filesystem. Writing to an absolute path like \`/app/foo.py\` will silently land in the sandbox workspace, not at \`/app/foo.py\`. To create files at absolute container paths, use \`logos_exec\` with a shell heredoc: \`cat > /app/foo.py << 'EOF'\`.
 
-4. **logos_complete(...)** — MANDATORY final call. You MUST call this to finish.
+4. **logos_call(tool, params)** — Invoke a proc tool by name.
+   Discover available tools with \`logos_read("logos://proc/")\`. Built-in tools include:
+   - \`web_search\`: search the web (DuckDuckGo + Wikipedia + StackOverflow). Params: \`{"query": "...", "max_results": 3}\`
+   - \`browse\`: browser control (navigate, click, type). Params: \`{"url": "...", "action": "snap"}\` (requires pinchtab)
+   Note: \`memory.search\` and \`memory.range_fetch\` exist but are not useful for this task (they search chat history, not task data).
+
+5. **logos_complete(...)** — MANDATORY final call. You MUST call this to finish.
    - Normal: call with \`summary\` describing what you did.
    - Plan mode: for complex multi-step tasks, call with \`plan: ["step 1", "step 2", ...]\`.
      Each step will be executed by a fresh agent, and the plan is reviewed after every step.
@@ -202,6 +209,7 @@ ${toolDocs}
 - If you encounter an unrecoverable error or cannot complete the task in this run, call logos_complete with sleep and clearly explain the blocker.
 - Do NOT ask the user for input. Solve the task autonomously.
 - Be efficient — minimize unnecessary commands, but never skip validation of hard requirements.${kernelMode ? "\n- When logos_exec output is truncated, use logos_read to retrieve the full terminal log if you need to inspect earlier output." : ""}
+- **Research before coding**: if the task mentions unfamiliar concepts, libraries, file formats, protocols, or domain-specific terms, use \`logos_call("web_search", {"query": "..."})\` to look them up BEFORE writing code. Do not guess or make assumptions about things you are unsure of — incorrect assumptions waste time and lead to wrong solutions.
 - **Container environment**: You are running inside a Docker container with no init system. When starting services (nginx, postgres, redis, apache, etc.), NEVER run them in the foreground — logos_exec will block forever. Always start services in background mode, e.g. \`nginx -g "daemon on;"\`, \`postgres &\`, \`redis-server --daemonize yes\`, or append \`&\` to the command. Verify the service started with a follow-up check (e.g. \`curl -s localhost\` or \`pgrep nginx\`).
 - **Context continuity**: before starting work, check \`logos_read("logos://sandbox/plan/initial.log")\`. If it exists, a previous agent already made partial progress — review its log so you do not duplicate work.
 - **Context pressure**: if the system warns that your context window is nearly full, immediately enter plan mode by calling logos_complete with \`task_log\` (detailed record of everything done so far) and \`plan\` (remaining steps). Do not ignore context pressure warnings.

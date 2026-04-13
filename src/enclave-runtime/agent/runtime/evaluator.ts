@@ -319,9 +319,10 @@ You have Logos kernel primitives:
 
 1. **logos_exec(command)** — Execute a shell command. Output truncated to ~200 lines;
    full output saved to terminal log (read via logos_read when truncated).
-2. **logos_read(uri)** — Read from any Logos URI.
+2. **logos_read(uri, offset?, limit?)** — Read from any Logos URI. Supports \`offset\`/\`limit\` for pagination.
 3. **logos_write(uri, content)** — Write to a Logos URI (e.g. \`logos://sandbox/...\`). **WARNING**: logos_write writes to the Logos VFS, NOT to the container filesystem. To create files at absolute paths like \`/app/...\`, use \`logos_exec\` with a shell heredoc instead.
-4. **logos_complete(...)** — MANDATORY final call.`;
+4. **logos_call(tool, params)** — Invoke a proc tool by name. Discover tools with \`logos_read("logos://proc/")\`. Built-in: \`web_search\`, \`browse\`. (memory tools exist but are not relevant here.)
+5. **logos_complete(...)** — MANDATORY final call.`;
   }
   return `## Tools
 
@@ -378,6 +379,7 @@ ${skillsBlock}
 - Clean up any temporary test files you create when done.
 - Your default working directory is /app.
 - **Container environment**: You are inside a Docker container with no init system. Never start services in foreground (logos_exec will block forever). Use background mode: \`nginx -g "daemon on;"\`, \`cmd &\`, etc.
+- **Research before acting**: if the task involves unfamiliar concepts, libraries, or domain-specific terms, use \`logos_call("web_search", {"query": "..."})\` to look them up before writing tests or making assumptions.
 - You MUST call logos_complete exactly once.`;
 }
 
@@ -414,6 +416,7 @@ ${agentSkills ? `\n${agentSkills}\n\n**IMPORTANT**: The guidance above reflects 
 - If you see multiple possible fix strategies and are unsure which will work, use \`explore: ["fix A", "fix B"]\` to try them in parallel (each runs in an isolated workspace copy).
 - Your default working directory is /app.
 - **Container environment**: You are inside a Docker container with no init system. Never start services in foreground (logos_exec will block forever). Use background mode: \`nginx -g "daemon on;"\`, \`cmd &\`, etc.
+- **Research before acting**: if the fix involves unfamiliar APIs, libraries, or domain-specific concepts, use \`logos_call("web_search", {"query": "..."})\` to look them up before guessing.
 - You MUST call logos_complete exactly once.
 - **Context pressure**: if warned, enter plan mode immediately.`;
 }
