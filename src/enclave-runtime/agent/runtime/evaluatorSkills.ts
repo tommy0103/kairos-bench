@@ -1658,8 +1658,8 @@ if acc < 0.55:
     failed += 1
 elif acc < 0.62:
     print(f"FAIL: accuracy {acc:.4f} < 0.62 — hyperparameters need tuning")
-    print("  The default lr (0.5-1.0) is FAR too high for 650K rows — it overshoots and plateaus at ~0.58-0.60.")
-    print("  Official benchmarks for large text classification use lr roughly 5-10x lower (0.05-0.25 range).")
+    print("  If you used lr=0.5 or lr=1.0, that is NOT the fasttext default — those are tuned values for other datasets.")
+    print("  High lr causes overshoot on 650K rows and plateaus at ~0.58-0.60. Use the actual fasttext default lr.")
     print("  Use dim=10, wordNgrams=2. Do NOT quantize.")
     failed += 1
 else:
@@ -1676,7 +1676,7 @@ print("\\nALL FASTTEXT CHECKS PASSED")
 2. acc < 0.55 → FAIL with message: "RETRAIN without text preprocessing"
 3. acc 0.55–0.62 → FAIL with message: "Hyperparameters need tuning — consult official fasttext benchmarks"
 4. acc >= 0.62 AND size < 150 MB → PASS
-**For fixer**: If accuracy is in the 0.55–0.62 range, the learning rate is almost certainly too high. The default lr (0.5-1.0) causes overshoot on 650K rows and plateaus around 0.58-0.60 — no amount of extra epochs or bucket tuning will fix this. The official fasttext benchmarks for large text classification datasets use lr roughly 5-10x lower than the default (in the 0.05-0.25 range). Use dim=10, wordNgrams=2. Do NOT quantize. Also **always patch NumPy 2.x compat first**: \`sed -i 's/np.array(\\([^,]*\\), copy=False)/np.asarray(\\1)/g' $(python3 -c "import os, fasttext; print(os.path.dirname(fasttext.__file__) + '/FastText.py')")\``,
+**For fixer**: If accuracy is in the 0.55–0.62 range, the learning rate is almost certainly too high. Many tutorials show \`lr=0.5\` or \`lr=1.0\` but those are tuned for specific small datasets — they are NOT the fasttext default. High lr causes overshoot on 650K rows and plateaus around 0.58-0.60. **Use the actual fasttext default lr** — do not increase it. Use dim=10, wordNgrams=2. Do NOT quantize. Also **always patch NumPy 2.x compat first**: \`sed -i 's/np.array(\\([^,]*\\), copy=False)/np.asarray(\\1)/g' $(python3 -c "import os, fasttext; print(os.path.dirname(fasttext.__file__) + '/FastText.py')")\``,
   },
   {
     id: "cryptanalysis-output-verification",
@@ -1862,7 +1862,9 @@ print("\\nALL PIPELINE PARALLEL CHECKS PASSED")
 
 5. **Port 12355 EADDRINUSE**: Kill stale processes: \`pkill -9 -f python3; sleep 2\`
 
-6. **Function returns \`None\`**: Must return the loss tensor.`,
+6. **Function returns \`None\`**: Must return the loss tensor.
+
+7. **Variable-shape microbatch hang/crash**: If shape metadata (seq_len, hidden_size) is only sent/received for \`mb_idx == 0\` and reused for subsequent microbatches, varying microbatch shapes cause \`dist.recv\` buffer size mismatches → gloo enforce failure or deadlock. Fix: send shape info for every microbatch, or dynamically compute recv buffer size from the incoming tensor.`,
   },
   {
     id: "cobol-modernization-test",

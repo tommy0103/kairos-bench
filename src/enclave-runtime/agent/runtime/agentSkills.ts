@@ -147,10 +147,8 @@ Convert parquet to fasttext format with ONLY newline replacement. Do NOT lowerca
 
 ## Hyperparameter selection
 
-The official fasttext paper/repo publishes benchmark results for Yelp Review Full. **Consult those official parameters** — the fasttext defaults are NOT suitable for large datasets (500K+ rows).
-
 Key considerations:
-- **lr**: The default lr (0.5-1.0) is FAR too high for 650K-row datasets — it causes gradient overshoot and plateaus around 0.58-0.60 accuracy no matter how many epochs you train. The official benchmarks for large text classification datasets use lr roughly an **order of magnitude lower** (in the 0.05-0.25 range). This is the single most important hyperparameter to get right.
+- **lr**: Many fasttext tutorials and benchmark pages show \`lr=0.5\` or \`lr=1.0\` — those are tuned for **specific small datasets** and do NOT generalize. On 650K-row datasets like Yelp Full, high lr causes gradient overshoot and plateaus around 0.58-0.60. **Start with the fasttext default lr and do NOT increase it.** This is the single most important thing to get right.
 - **dim**: For text classification under a tight size budget, small dimensions (e.g. 10) work well and keep the model compact. Large dimensions (e.g. 100) make the model 10× bigger, leaving no room for sufficient bucket space.
 - **bucket + model size**: Model size ≈ (vocab + bucket) × dim × 4 bytes + dictionary overhead. Choose bucket size so the final model fits under the size limit. Use \`minCount\` to control vocabulary size.
 - **wordNgrams**: Bigrams (\`wordNgrams=2\`) are important for sentiment tasks — they capture "not good", "very bad" etc.
@@ -869,6 +867,7 @@ The verifier runs AFTER the agent. Your file at \`/app/pipeline_parallel.py\` is
 - Omit \`attention_mask\` (or pass \`None\`) — decoder layers handle causal masking internally. Do NOT call \`create_causal_mask\` or \`_update_causal_mask\` — these are internal APIs that break across transformers versions.
 - Do NOT use hooks (\`register_forward_hook\` etc.) — the verifier checks for this.
 - The function MUST return the loss tensor.
+- **Variable-shape microbatches**: When communicating hidden states between ranks via \`dist.send\`/\`dist.recv\`, send shape metadata (seq_len, hidden_size) for EVERY microbatch, not just the first. Microbatch sizes may differ (e.g. different sequence lengths). If you cache the shape from \`mb_idx == 0\` and reuse it, \`dist.recv\` will allocate the wrong buffer size → size mismatch error or deadlock.
 
 ## Kill stale processes after self-testing
 
