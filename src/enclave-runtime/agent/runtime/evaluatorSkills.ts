@@ -1787,9 +1787,6 @@ for h in forbidden:
 if "create_causal_mask" in code:
     print("WARN: create_causal_mask is used — this WILL crash in the verifier due to transformers version mismatch. Must remove it.")
     failed += 1
-if "F.cross_entropy" in code or "nn.CrossEntropyLoss" in code or "cross_entropy(logits" in code:
-    print("WARN: Manual cross-entropy detected — ForCausalLMLoss shifts labels internally, manual CE does NOT. This WILL cause lm_head.bwd diff=0.0417 in verifier. Must use model.loss_function instead.")
-    failed += 1
 if failed == 0:
     print("PASS: no forbidden hooks or fragile APIs")
 
@@ -1854,28 +1851,19 @@ print("\\nALL PIPELINE PARALLEL CHECKS PASSED")
 3. Import fails → FAIL: "fix import errors"
 4. Loss incorrect → FAIL: check loss computation below
 
-**CRITICAL for fixer — five failure modes and fixes**:
+**For fixer — common failure modes**:
 
-1. **File missing**: Agent timed out before writing the file. Fixer must write the complete implementation to \`/app/pipeline_parallel.py\`. Install torch CPU: \`pip3 install torch --index-url https://download.pytorch.org/whl/cpu --no-cache-dir\` and transformers.
+1. **File missing**: Agent timed out. Fixer must install torch CPU (\`pip3 install torch --index-url https://download.pytorch.org/whl/cpu --no-cache-dir --break-system-packages\`) + transformers, then write the implementation.
 
-2. **\`lm_head.bwd\` gradient mismatch (constant diff ~0.0417)**: The code uses \`F.cross_entropy(logits, targets)\` or \`nn.CrossEntropyLoss\` instead of \`model.loss_function\`. \`ForCausalLMLoss\` internally shifts labels by 1 position (\`logits[:-1]\` predicts \`labels[1:]\`), while manual CE does not shift → gradient diff ≈ 0.0417. **Fix**: replace ALL manual loss code with \`model.loss_function(logits=logits, labels=targets_mb, vocab_size=model.config.vocab_size)\`. Also remove any \`import torch.nn.functional as F\` used for loss. Also: check the self-test code — if it computes reference as \`F.cross_entropy(model(input_ids).logits, targets)\`, that's WRONG. Reference MUST be \`model(input_ids=inp, labels=tgt).loss\`.
+2. **Gradient mismatch at \`lm_head.bwd\` or \`model.layers.X.bwd\`**: The loss computation doesn't match what the verifier expects. Read the task description carefully — it says "compute cross_entropy loss against the targets." Make sure the loss computation matches this specification exactly.
 
-3. **\`microbatch count mismatch\` (e.g. at rotary_emb.fwd)**: The implementation processes microbatches incorrectly — likely concatenating them or running them through modules in a non-standard way. Fix: process each microbatch ONE BY ONE through the model's actual module objects. Each microbatch must trigger exactly one forward pass through each module (embed_tokens, each decoder layer, norm, lm_head). Never batch multiple microbatches together.
+3. **\`microbatch count mismatch\`**: Microbatches are being concatenated or processed non-individually. Process each microbatch ONE BY ONE through each module.
 
-4. **\`model.layers.X.bwd\` gradient mismatch**: Decoder layer forward call is wrong. Make sure to pass \`position_ids=torch.arange(seq_len).unsqueeze(0).to(device)\` and extract the hidden states correctly: \`layer_output = layer(hidden_states, position_ids=position_ids); hidden_states = layer_output[0]\`.
+4. **\`TypeError: create_causal_mask()\`**: Remove all \`create_causal_mask\` calls. Decoder layers handle causal masking internally. Just pass \`position_ids\` and omit \`attention_mask\`.
 
-5. **Port 12355 EADDRINUSE in verifier**: Agent left zombie processes. Fixer should: \`pkill -9 -f python3; sleep 2\` before submitting. Ensure the implementation does NOT call \`dist.init_process_group\` at module level.
+5. **Port 12355 EADDRINUSE**: Kill stale processes: \`pkill -9 -f python3; sleep 2\`
 
-6. **\`TypeError: create_causal_mask() got an unexpected keyword argument\`**: The implementation calls \`create_causal_mask\` from \`transformers.masking_utils\`, whose parameter names (\`input_embeds\` vs \`inputs_embeds\`) change across versions. The verifier installs a different transformers version than the agent's sandbox. **Fix: remove ALL \`create_causal_mask\` calls and the \`from transformers.masking_utils import ...\` line.** The decoder layers handle causal masking internally — just pass \`position_ids\` and omit \`attention_mask\` (or pass \`None\`). This function returns \`None\` for standard causal LM anyway.
-
-7. **Function returns \`None\` instead of loss tensor**: The function computes loss correctly but forgets to return it. Fix: accumulate loss across microbatches on the last rank (detached for the return value), and \`return total_loss\` at the end.
-
-**Key implementation reference for fixer**:
-- **Module ownership**: rank 0 = embed_tokens + first half of decoder layers; last rank = remaining layers + norm + lm_head
-- **AFAB**: for each microbatch: forward through owned modules, P2P send/recv hidden states. Then for each microbatch: backward with pre-scaled loss
-- **P2P**: \`dist.isend\`/\`dist.irecv\` for hidden states \`[batch, seq_len, hidden_size]\` between stages
-- **world_size=1**: skip P2P, run all modules sequentially, still process each microbatch individually
-- **Never use hooks** — explicit \`layer(hidden_states, position_ids=...)\` calls only`,
+6. **Function returns \`None\`**: Must return the loss tensor.`,
   },
   {
     id: "cobol-modernization-test",

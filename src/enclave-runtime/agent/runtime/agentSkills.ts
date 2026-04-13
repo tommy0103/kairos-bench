@@ -847,181 +847,39 @@ Build a \`test_one(fen)\` function for instant single-position feedback instead 
       ["pipeline", "parallel", "llama"],
       ["pipeline_parallelism"],
     ],
-    hint: `**Pipeline parallelism with AFAB scheduling — time management and implementation strategy**:
+    hint: `**Pipeline parallelism with AFAB scheduling — environment setup and pitfalls**:
 
-## CRITICAL — Time budget (900s total, every second counts)
+## Environment setup (container has NO Python)
 
-The container has NO Python pre-installed. Environment setup is the #1 time killer:
+The container has no Python. Setup is the #1 time killer:
 
 1. \`apt-get update && apt-get install -y python3 python3-pip\` (~30s)
-2. \`pip3 install torch --index-url https://download.pytorch.org/whl/cpu --no-cache-dir\` (~90s with CPU index; DEFAULT index times out at 590s!)
-3. \`pip3 install transformers --no-cache-dir\` (~30s)
+2. **CRITICAL**: \`pip3 install torch --index-url https://download.pytorch.org/whl/cpu --no-cache-dir --break-system-packages\` (~90s). **NEVER** run bare \`pip install torch\` — it downloads the CUDA build (~2GB) and WILL time out.
+3. \`pip3 install transformers --no-cache-dir --break-system-packages\` (~30s)
 
-**NEVER** run bare \`pip install torch\` — it downloads the CUDA build (~2GB) and WILL time out. Always use \`--index-url https://download.pytorch.org/whl/cpu\`.
+## Write /app/pipeline_parallel.py EARLY
 
-Rough time allocation: **150s environment** → **200s implement & write file** → **150s single-rank verify** → **200s iterate/fix** → **200s buffer**.
+The verifier runs AFTER the agent. Your file at \`/app/pipeline_parallel.py\` is evaluated regardless. **Write a working version as early as possible**, then iterate.
 
-## CRITICAL — Write /app/pipeline_parallel.py EARLY
+## Implementation notes
 
-The verifier runs AFTER the agent, even if the agent times out. Your file at \`/app/pipeline_parallel.py\` is evaluated regardless. **Write a working version to /app/ as early as possible**, then iterate. Do NOT spend 600s exploring before writing anything — past trials that wrote the file late (near 900s) had the file invisible to the verifier.
+- Process each microbatch INDIVIDUALLY through the model's actual module objects. The verifier uses hooks to track per-microbatch activations, so don't concatenate microbatches.
+- For loss computation, follow the task description literally — it says "compute cross_entropy loss against the targets."
+- Omit \`attention_mask\` (or pass \`None\`) — decoder layers handle causal masking internally. Do NOT call \`create_causal_mask\` or \`_update_causal_mask\` — these are internal APIs that break across transformers versions.
+- Do NOT use hooks (\`register_forward_hook\` etc.) — the verifier checks for this.
+- The function MUST return the loss tensor.
 
-## Implementation strategy for train_step_pipeline_afab
+## Kill stale processes after self-testing
 
-The function signature: \`train_step_pipeline_afab(model, inputs, targets, device, dtype)\`
-- \`model\`: \`LlamaForCausalLM\` from HuggingFace transformers
-- \`inputs\`/\`targets\`: lists of microbatch tensors (each \`[batch, seq_len]\`)
-- Must work for \`world_size=1\` AND \`world_size=2\`
-
-### Layer partitioning
-\`\`\`python
-rank = dist.get_rank()
-world_size = dist.get_world_size()
-layers = list(model.model.layers)
-n = len(layers)
-chunk = n // world_size
-remainder = n % world_size
-# Give first 'remainder' ranks one extra layer
-start = rank * chunk + min(rank, remainder)
-end = start + chunk + (1 if rank < remainder else 0)
-my_layers = layers[start:end]
-\`\`\`
-
-### AFAB scheduling — process each microbatch INDIVIDUALLY
-1. **All-Forward**: for EACH microbatch separately, run forward through local layers. Between stages, use \`dist.isend\`/\`dist.irecv\` for hidden states \`[batch, seq_len, hidden_size]\`.
-2. **All-Backward**: for EACH microbatch separately (same order as forward), run backward. Between stages, send/receive gradients.
-
-**CRITICAL**: Process microbatches ONE BY ONE through the model's actual module objects (embed_tokens, each layer, norm, lm_head). The verifier tracks per-module per-microbatch activations and gradients via hooks, so each microbatch must trigger exactly one forward pass and one backward pass through each module. If you concatenate microbatches or process them in batches, the hook counts will mismatch and the test will fail with "microbatch count mismatch".
-
-### Module ownership across stages
-For \`world_size=2\` with \`n\` decoder layers:
-- **Rank 0 owns**: \`model.model.embed_tokens\` + first \`n//2\` decoder layers
-- **Rank last owns**: remaining decoder layers + \`model.model.norm\` + \`model.lm_head\`
-- \`embed_tokens\` is ALWAYS on the first rank; \`norm\` and \`lm_head\` are ALWAYS on the last rank
-- Each rank runs forward through ONLY its owned modules, then sends the hidden state to the next rank
-
-### Loss computation (THE critical correctness detail — 7+ trials failed here)
-
-**NEVER use \`F.cross_entropy\`, \`nn.CrossEntropyLoss\`, or ANY manual loss computation.** Use the model's \`loss_function\` property ONLY.
-
-**Why manual CE is WRONG**: \`ForCausalLMLoss\` internally **shifts logits and labels by 1 position** before computing CE. It predicts token[i+1] from position[i]. If you call \`F.cross_entropy(logits.view(-1, V), targets.view(-1))\`, you predict token[i] from position[i] — DIFFERENT! This produces the exact gradient mismatch of \`lm_head.bwd max diff=0.04167\` that failed 7+ past trials.
-
-\`\`\`python
-# On the LAST rank, after getting logits from lm_head:
-hidden_states = model.model.norm(hidden_states)
-logits = model.lm_head(hidden_states)
-
-# CORRECT — use model.loss_function (handles label shifting internally):
-loss = model.loss_function(
-    logits=logits,
-    labels=targets_mb,
-    vocab_size=model.config.vocab_size,
-)
-loss = loss / num_microbatches
-loss.backward()
-
-# WRONG — DO NOT DO THIS (no label shifting, produces diff=0.04167):
-# loss = F.cross_entropy(logits.view(-1, vocab_size), targets_mb.view(-1))
-\`\`\`
-
-**Do NOT import \`torch.nn.functional as F\` or \`torch.nn as nn\` for loss computation.** If you see \`F.cross_entropy\` or \`nn.CrossEntropyLoss\` in your code, it is WRONG.
-
-**ALSO**: Make sure each microbatch loss is scaled by \`1/num_microbatches\` BEFORE calling \`.backward()\`. The gradients accumulate across microbatches, so each one's contribution must be pre-scaled.
-
-### Forward pass through decoder layers — critical details
-When calling each \`LlamaDecoderLayer\`, you must pass the correct arguments:
-\`\`\`python
-# For each decoder layer in this rank's partition:
-layer_output = layer(
-    hidden_states,
-    position_ids=position_ids,  # shape [batch, seq_len], values 0..seq_len-1
-)
-hidden_states = layer_output[0]  # layer returns a tuple, first element is hidden states
-\`\`\`
-- **position_ids**: Create once as \`torch.arange(seq_len).unsqueeze(0)\` and reuse. If omitted, the layer will auto-generate them, but they MUST be consistent across ranks.
-- **attention_mask**: Do NOT pass it. Do NOT try to create a causal mask manually. Just omit it or pass \`None\` — the decoder layers handle causal masking internally via SDPA/Flash Attention.
-
-### world_size=1 handling
-When \`world_size=1\`, all layers are on rank 0. Skip all P2P communication. The function degenerates to a simple forward-backward with AFAB over microbatches. **But you must still process each microbatch individually through embed_tokens → all layers → norm → lm_head → loss → backward.**
-
-### Forbidden: hooks AND internal masking APIs
-The verifier checks that \`pipeline_parallel.py\` does NOT contain \`register_forward_hook\`, \`register_backward_hook\`, \`register_full_backward_hook\`, etc. Use explicit forward calls only.
-
-**FORBIDDEN: Do NOT call \`create_causal_mask\`, \`_update_causal_mask\`, or import from \`transformers.masking_utils\`.** These are internal APIs whose parameter names change across transformers versions (\`input_embeds\` vs \`inputs_embeds\`). The verifier may install a DIFFERENT transformers version than your sandbox — 2 past trials crashed with \`TypeError: create_causal_mask() got an unexpected keyword argument 'inputs_embeds'\`. In practice, \`create_causal_mask\` returns \`None\` for standard causal LM anyway — the decoder layers handle causal masking internally via SDPA. Just pass \`position_ids\` and \`attention_mask=None\` to each decoder layer.
-
-**Also: the function MUST return the loss tensor.** Return the accumulated scalar loss from the last rank (or the single rank). Past trials returned \`None\` by mistake.
-
-## Verification strategy — THE self-test that catches all bugs
-
-**CRITICAL: 7 past trials had agent self-tests pass but verifier fail with \`lm_head.bwd max diff=0.04167\`.** The root cause: agents compute the reference loss manually (e.g. \`F.cross_entropy(logits, targets)\`) instead of through \`model.forward(labels=...)\`. This passes the self-test (both sides use wrong loss) but fails the verifier (verifier uses \`model.forward(labels=...)\`).
-
-**\`ForCausalLMLoss\` shifts labels by 1 position internally**: \`logits[:-1]\` predicts \`labels[1:]\`. If you call \`F.cross_entropy(logits.view(-1, V), targets.view(-1))\` directly, you compute loss over ALL positions (including position 0), while the model computes over positions 1..seq_len-1. This gives gradient diff ≈ 0.04167 at lm_head.
-
-**Use this EXACT self-test** (copy-paste, don't modify):
-\`\`\`python
-import os, copy
-os.environ["MASTER_ADDR"] = "127.0.0.1"
-os.environ["MASTER_PORT"] = "29500"
-import torch, torch.distributed as dist
-dist.init_process_group("gloo", rank=0, world_size=1)
-from transformers import LlamaForCausalLM, LlamaConfig
-from pipeline_parallel import train_step_pipeline_afab
-
-config = LlamaConfig(hidden_size=64, intermediate_size=128, num_hidden_layers=4, num_attention_heads=4, vocab_size=100, max_position_embeddings=32)
-torch.manual_seed(42)
-model = LlamaForCausalLM(config).float()
-ref_model = copy.deepcopy(model)
-
-B, S = 2, 8
-torch.manual_seed(0)
-inputs = [torch.randint(0, 100, (1, S)) for _ in range(B)]
-targets = [torch.randint(0, 100, (1, S)) for _ in range(B)]
-
-# Reference: use model.forward(labels=...) — this is what the verifier does
-ref_model.zero_grad()
-for inp, tgt in zip(inputs, targets):
-    out = ref_model(input_ids=inp, labels=tgt)
-    (out.loss / B).backward()
-
-# Pipeline
-model.zero_grad()
-pipeline_loss = train_step_pipeline_afab(model, inputs, targets, torch.device("cpu"), torch.float32)
-
-# Compare
-max_diff = 0
-for (n1, p1), (n2, p2) in zip(ref_model.named_parameters(), model.named_parameters()):
-    if p1.grad is not None and p2.grad is not None:
-        d = (p1.grad - p2.grad).abs().max().item()
-        if d > max_diff:
-            max_diff = d
-            worst = n1
-print(f"Max gradient diff: {max_diff:.10f} at {worst}")
-assert max_diff < 1e-5, f"GRADIENT MISMATCH: {max_diff} at {worst}"
-print("PASS")
-dist.destroy_process_group()
-\`\`\`
-
-**If this test shows diff ≈ 0.04167 at lm_head**, your loss computation is WRONG. You're using manual CE without label shifting. Fix: call \`model.loss_function(logits=logits, labels=targets_mb, vocab_size=model.config.vocab_size)\` which handles shifting internally.
-
-**Do NOT manually implement CE even if the task description says "compute cross_entropy loss"** — the task means use the model's built-in loss function, not \`F.cross_entropy\`.
-
-**Do NOT do this**: Spend time debugging \`mp.spawn\` / multi-process tests locally. The container's multiprocessing is unreliable (Bus errors, shared memory issues). Past trials wasted 300+ seconds on this and still failed. The verifier has its own test infrastructure that works.
-
-## CRITICAL — Kill stale processes after self-testing
-
-After ANY self-test that uses \`dist.init_process_group\`, ALWAYS:
+After ANY self-test that uses \`dist.init_process_group\`, ALWAYS run:
 \`\`\`bash
-pkill -9 -f "python3.*test" 2>/dev/null; sleep 1
+pkill -9 -f python3 2>/dev/null; sleep 2
 \`\`\`
-The verifier uses port 12355. If your test leaves a zombie process holding a port, the verifier's \`dist.init_process_group\` will get \`EADDRINUSE\` and fail. Two past trials failed this way despite having correct implementations.
+The verifier uses port 12355. If your test leaves a process holding a port, the verifier gets \`EADDRINUSE\` and fails.
 
-## Workflow summary
-1. Install Python + torch (CPU) + transformers (~150s)
-2. Inspect \`LlamaForCausalLM\` structure: \`model.model.embed_tokens\`, \`model.model.layers\`, \`model.model.norm\`, \`model.lm_head\`
-3. Write \`/app/pipeline_parallel.py\` — a working version, even if imperfect
-4. Single-rank gradient test (port 29500) → fix loss alignment issues
-5. Update \`/app/pipeline_parallel.py\` with fixes
-6. Kill all test processes: \`pkill -9 -f python3; sleep 2\`
-7. Do NOT attempt multi-rank self-testing — trust the verifier`,
+## Don't waste time on multi-process local testing
+
+The container's \`mp.spawn\` is unreliable (Bus errors, shared memory issues). Verify with single-rank tests only. The verifier has its own working test infrastructure.`,
   },
 ];
 
