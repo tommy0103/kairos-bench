@@ -379,84 +379,26 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
       ["primers.fasta", "golden"],
       ["primers.fasta", "bsai"],
     ],
-    hint: `**Golden Gate assembly primer design — BsaI site encoding**:
+    hint: `**Golden Gate assembly primer design**:
 
-## CRITICAL — ALL primers must contain literal \`ggtctc\`, NEVER \`gagacc\`
+## Key concepts — research these with web_search if unfamiliar
 
-The verifier's \`parse_bsai_primer()\` searches for the exact substring \`ggtctc\` in EVERY primer — **both forward AND reverse**. If a reverse primer uses \`gagacc\` (the conventional Type IIS complement-strand encoding), the verifier FAILS with "BsaI site ggtctc not found in primer". This was the #1 failure mode: 3/4 trials failed for this exact reason.
+- Golden Gate assembly uses Type IIS restriction enzymes (e.g. BsaI) that cut outside their recognition site, generating 4-nt overhangs for scarless assembly.
+- Use \`logos_call("web_search", {"query": "Golden Gate assembly BsaI primer design"})\` to understand the primer structure and overhang design principles before writing code.
+- Use \`logos_call("web_search", {"query": "BsaI recognition site GGTCTC cut position"})\` to understand where BsaI cuts relative to its recognition sequence.
 
-**Primer structure for BOTH forward and reverse** (5'->3'):
-\`[clamp][ggtctc][N][4-nt overhang][binding region]\`
+## Common pitfalls
 
-- **clamp**: AT LEAST 1 nt (ideally \`tt\`) BEFORE the BsaI site. The verifier checks \`i >= 1\` where \`i = primer.find("ggtctc")\`. Starting directly with \`ggtctc\` FAILS.
-- **ggtctc**: the BsaI recognition site — use this EXACT sequence on ALL primers.
-- **N**: a single spacer nucleotide (typically \`a\`).
-- **4-nt overhang**: For **fwd**, the left junction overhang (sense). For **rev**, the **reverse complement** of the right junction overhang.
-- **binding region**: For **fwd**, matching template (sense strand). For **rev**, the **reverse complement** of template right end. See length/Tm rules below.
+- **Primer structure**: Both forward and reverse primers need the BsaI recognition site, a spacer, the 4-nt overhang, and a binding region. Look up the standard primer layout for Golden Gate.
+- **Overhang design**: Overhangs must be derived from the desired assembled sequence at the exact junction points. They must be unique and non-palindromic.
+- **Tm balancing**: Use \`oligotm\` (from primer3) to compute melting temperatures. Keep ΔTm between primer pairs small. The annealing portion is only the part that base-pairs with the template.
+- **Binding region**: Make sure the binding region does not overlap with the overhang bases on the template, or you'll get sequence duplication in the assembly.
 
-**Why this works**: BsaI recognizes GGTCTC on EITHER strand of dsDNA. In the fwd primer, GGTCTC is on the top strand (left end of PCR product). In the rev primer, GGTCTC is on the bottom strand (right end). Both ends get cut.
+## Time management
 
-## CRITICAL — Fwd binding must NOT overlap with the overhang on the template
-
-The verifier's \`make_fragment()\` computes the internal fragment starting from the binding position on the template. If the fwd binding starts at the junction point (position K, where the overhang is), the internal will include \`template[K:K+4]\` = the overhang bases, causing **4-nt DUPLICATION at every junction** → \`Assembled sequence does not match expected output\`.
-
-**Rule**: If \`overhang = template[K:K+4]\`, the fwd binding MUST start at \`template[K+4]\`, NOT at \`template[K]\`.
-
-**CORRECT** (egfp example): overhang = \`atga\` = egfp[0:4], binding = \`gcaagggcgaggagc\` (starts at egfp[4])
-**WRONG** (trial iheMoVo bug): overhang = \`atga\` = egfp[0:4], binding = \`atgagcaagggcgagga\` (starts at egfp[0] → binding[0:4] = overhang → DUPLICATED!)
-
-**Quick self-check**: For each fwd primer, verify \`binding[0:4] != overhang\`. If they match, the binding is wrong.
-
-## CRITICAL — Verifier extends annealing ASYMMETRICALLY (fwd usually +4, rev usually +0)
-
-The verifier computes "effective annealing" by extending the binding into the overhang region IF those bases match the template. **This extension is NOT symmetric between fwd and rev.**
-
-**Verifier's exact algorithm**:
-- **Fwd extension**: checks if \`template[s-k:s] == overhang[-k:]\` for k=4,3,2,1. The overhang is the junction sequence at the INSERT START, so it almost always matches → **fwd typically gets +4 nt extension**.
-- **Rev extension**: checks if \`template[pos_right:pos_right+k] == rc(overhang[-k:])\` for k=4,3,2,1. This checks the template AFTER the rev binding endpoint. For most inserts, the template AFTER the binding is a stop codon or unrelated sequence → **rev typically gets +0 nt extension**.
-
-**Example of past failure (EGFP, ΔTm = 6.23°C)**:
-- egfp_fwd: overhang \`atga\` matches EGFP template start → +4 → 21 nt → Tm=68.5°C
-- egfp_rev: \`rc(tacc)\`=\`ggta\` does NOT match \`taa\` (stop codon after binding) → +0 → 20 nt → Tm=62.3°C
-- ΔTm = 6.2°C > 5 → FAIL
-
-## CRITICAL — ΔTm computation workflow (THIS IS WHERE MOST FAILURES HAPPEN)
-
-**For EVERY primer pair, compute the ACTUAL extension (not assumed +4) BEFORE writing primers.fasta**:
-
-1. For **fwd primer**: check how many of the overhang's last k nt (k=4,3,2,1) match the template BEFORE the binding start. Let kf = matched count. Extended fwd = template[s-kf : s+len(binding)]. Compute \`fwd_ext_tm = oligotm(extended_fwd)\`.
-
-2. For **rev primer**: check how many nt of \`rc(overhang[-k:])\` match the template AFTER the rev binding endpoint. Let kr = matched count. Extended rev = template[e : pos_right+kr]. Compute \`rev_ext_tm = oligotm(rc(extended_rev))\` (since the rev binds the antisense strand, take rc for Tm).
-
-3. **In practice**: fwd almost always gets kf=4, rev almost always gets kr=0. So:
-   - \`fwd_ext_tm ≈ oligotm(overhang + fwd_binding)\` (overhang + binding, ~4 + N nt)
-   - \`rev_ext_tm ≈ oligotm(rev_binding)\` (binding only, no extension)
-
-4. Check: \`abs(fwd_ext_tm - rev_ext_tm) <= 3\` (use 3°C margin, verifier limit is 5).
-
-5. **If ΔTm > 3°C** (which is common due to fwd+4/rev+0 asymmetry): **shorten fwd binding** (so fwd extended = overhang(4) + short binding ≈ rev binding Tm) or **lengthen rev binding**. Iterate until delta <= 3°C.
-
-**Concrete strategy**: Since fwd gets +4 and rev gets +0, make fwd binding ~4 nt SHORTER than rev binding to compensate. E.g., fwd binding 13-16 nt (ext=17-20 nt), rev binding 17-22 nt (ext=17-22 nt), targeting both ext Tm around 62-65°C.
-
-## Overhang / junction design (1 of 4 failures was wrong topology)
-
-**How to derive correct overhangs**: The verifier reconstructs the assembled product by concatenating \`[overhang][internal_sequence]\` for each fragment in order. This assembled product must match the \`output\` sequence (circular). So overhangs MUST be derived from the output sequence at the exact junction points.
-- **Step 1**: Map each insert (egfp, flag, snap) to its position in the output sequence.
-- **Step 2**: At each junction, the 4-nt overhang = the 4 bases in the output at that splice point.
-- **Step 3**: All 4-nt overhangs must be unique and non-palindromic.
-- **Step 4**: Circular assembly: the overhang at position 0 of the output = the overhang that closes the circle (backbone right = backbone left).
-- **ANTI-PATTERN**: Do NOT pick overhangs from arbitrary sliding windows or arbitrary context. They MUST match the output sequence at the exact junction coordinates, or the final assembly check will fail.
-
-## CRITICAL — Binding length limits (max 41 nt for ALL primers)
-- The verifier checks \`15 <= len(extended_annealing) <= 45\`. Since fwd gets +4 extension, fwd binding max = 41. For safety, keep ALL bindings <= 41 nt.
-- If you need higher Tm, use GC-rich binding regions, NOT longer binding. Binding of 15-35 nt should always give Tm 58-72°C.
-- **NEVER fix binding length by trimming from the 5' end of the written binding** — this shifts the PCR amplicon boundary and breaks the assembly assertion (\`Assembled sequence does not match expected output\`). If binding must be shortened, trim from the **3' end** of the written primer (= the inner end of the amplicon on the template). But it is better to design with correct lengths from the start.
-
-## Time management (1800s agent timeout)
 - Write \`primers.fasta\` EARLY — a correct file before timeout gets scored; perfect analysis with no output gets 0.
-- After writing primers, verify extended Tm for ALL pairs (see ΔTm workflow above), then call \`logos_complete\` immediately.
-- Check templates for internal GGTCTC/GAGACC sites before designing primers.
-- Do NOT spend time on elaborate verification scripts — the verifier handles correctness.`,
+- Check templates for internal BsaI sites before designing primers.
+- Verify Tm constraints after writing primers, then call \`logos_complete\` immediately.`,
   },
   {
     id: "gcode-text-reading",
