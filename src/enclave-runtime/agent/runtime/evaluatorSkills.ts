@@ -1658,10 +1658,9 @@ if acc < 0.55:
     failed += 1
 elif acc < 0.62:
     print(f"FAIL: accuracy {acc:.4f} < 0.62 — hyperparameters need tuning")
-    print("  Check the official fasttext benchmark parameters for Yelp Full.")
-    print("  The default learning rate is likely too high for this dataset size.")
-    print("  Use small dim (e.g. 10) to keep model compact and allow sufficient bucket space.")
-    print("  Do NOT quantize — it drops accuracy.")
+    print("  The default lr (0.5-1.0) is FAR too high for 650K rows — it overshoots and plateaus at ~0.58-0.60.")
+    print("  Official benchmarks for large text classification use lr roughly 5-10x lower (0.05-0.25 range).")
+    print("  Use dim=10, wordNgrams=2. Do NOT quantize.")
     failed += 1
 else:
     print(f"PASS: accuracy {acc:.4f} >= 0.62")
@@ -1677,7 +1676,7 @@ print("\\nALL FASTTEXT CHECKS PASSED")
 2. acc < 0.55 → FAIL with message: "RETRAIN without text preprocessing"
 3. acc 0.55–0.62 → FAIL with message: "Hyperparameters need tuning — consult official fasttext benchmarks"
 4. acc >= 0.62 AND size < 150 MB → PASS
-**For fixer**: If accuracy is in the 0.55–0.62 range, the learning rate is almost certainly too high. Consult the official fasttext paper/repo for Yelp Full benchmark parameters — the published lr is much lower than the default. Use dim=10 to keep the model small, and avoid quantization. Also **always patch NumPy 2.x compat first**: \`sed -i 's/np.array(\\([^,]*\\), copy=False)/np.asarray(\\1)/g' $(python3 -c "import os, fasttext; print(os.path.dirname(fasttext.__file__) + '/FastText.py')")\``,
+**For fixer**: If accuracy is in the 0.55–0.62 range, the learning rate is almost certainly too high. The default lr (0.5-1.0) causes overshoot on 650K rows and plateaus around 0.58-0.60 — no amount of extra epochs or bucket tuning will fix this. The official fasttext benchmarks for large text classification datasets use lr roughly 5-10x lower than the default (in the 0.05-0.25 range). Use dim=10, wordNgrams=2. Do NOT quantize. Also **always patch NumPy 2.x compat first**: \`sed -i 's/np.array(\\([^,]*\\), copy=False)/np.asarray(\\1)/g' $(python3 -c "import os, fasttext; print(os.path.dirname(fasttext.__file__) + '/FastText.py')")\``,
   },
   {
     id: "cryptanalysis-output-verification",

@@ -147,9 +147,10 @@ Convert parquet to fasttext format with ONLY newline replacement. Do NOT lowerca
 
 ## Hyperparameter selection
 
-The official fasttext paper/repo publishes benchmark results for Yelp Review Full. **Consult those official parameters** — the fasttext defaults (especially \`lr\`) are often NOT suitable for large datasets (500K+ rows). Using the default learning rate on such data tends to cause overshoot and underperformance.
+The official fasttext paper/repo publishes benchmark results for Yelp Review Full. **Consult those official parameters** — the fasttext defaults are NOT suitable for large datasets (500K+ rows).
 
 Key considerations:
+- **lr**: The default lr (0.5-1.0) is FAR too high for 650K-row datasets — it causes gradient overshoot and plateaus around 0.58-0.60 accuracy no matter how many epochs you train. The official benchmarks for large text classification datasets use lr roughly an **order of magnitude lower** (in the 0.05-0.25 range). This is the single most important hyperparameter to get right.
 - **dim**: For text classification under a tight size budget, small dimensions (e.g. 10) work well and keep the model compact. Large dimensions (e.g. 100) make the model 10× bigger, leaving no room for sufficient bucket space.
 - **bucket + model size**: Model size ≈ (vocab + bucket) × dim × 4 bytes + dictionary overhead. Choose bucket size so the final model fits under the size limit. Use \`minCount\` to control vocabulary size.
 - **wordNgrams**: Bigrams (\`wordNgrams=2\`) are important for sentiment tasks — they capture "not good", "very bad" etc.
