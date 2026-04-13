@@ -389,7 +389,12 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
 
 ## Common pitfalls
 
-- **Primer structure**: Both forward and reverse primers need the BsaI recognition site, a spacer, the 4-nt overhang, and a binding region. Look up the standard primer layout for Golden Gate.
+- **Primer structure** (5'→3'): \`[clamp][GGTCTC][spacer][4-nt overhang][binding region]\`
+  - **clamp**: at least 1-4 nt before the BsaI site (e.g. \`tttt\`). Without it, BsaI cannot bind and cut.
+  - **GGTCTC**: the BsaI recognition sequence. Use this exact sequence on ALL primers (both fwd and rev).
+  - **spacer**: a single nucleotide (e.g. \`a\`). Must be a real base (a/t/g/c), NOT \`n\`.
+  - **4-nt overhang**: the sticky end that determines assembly order. Derived from the desired output sequence at junction points.
+  - **binding region**: the part that anneals to the template for PCR amplification.
 - **Overhang design**: Overhangs must be derived from the desired assembled sequence at the exact junction points. They must be unique and non-palindromic.
 - **Tm balancing**: Use \`oligotm\` (from primer3) to compute melting temperatures. Keep ΔTm between primer pairs small. The annealing portion is only the part that base-pairs with the template.
 - **Binding region**: Make sure the binding region does not overlap with the overhang bases on the template, or you'll get sequence duplication in the assembly.

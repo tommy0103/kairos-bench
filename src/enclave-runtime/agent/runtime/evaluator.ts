@@ -321,7 +321,7 @@ You have Logos kernel primitives:
    full output saved to terminal log (read via logos_read when truncated).
 2. **logos_read(uri, offset?, limit?)** — Read from any Logos URI. Supports \`offset\`/\`limit\` for pagination.
 3. **logos_write(uri, content)** — Write to a Logos URI (e.g. \`logos://sandbox/...\`). **WARNING**: logos_write writes to the Logos VFS, NOT to the container filesystem. To create files at absolute paths like \`/app/...\`, use \`logos_exec\` with a shell heredoc instead.
-4. **logos_call(tool, params)** — Invoke a proc tool by name. Discover tools with \`logos_read("logos://proc/")\`. Built-in: \`web_search\`, \`browse\`. (memory tools exist but are not relevant here.)
+4. **logos_call(tool, params)** — Invoke a proc tool by name. Discover tools with \`logos_read("logos://proc/")\`. Built-in: \`web_search\`, \`fetch_url\`, \`browse\`. (memory tools exist but are not relevant here.)
 5. **logos_complete(...)** — MANDATORY final call.`;
   }
   return `## Tools

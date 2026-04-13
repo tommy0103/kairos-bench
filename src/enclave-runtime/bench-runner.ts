@@ -159,6 +159,7 @@ You have Logos kernel primitives:
 4. **logos_call(tool, params)** — Invoke a proc tool by name.
    Discover available tools with \`logos_read("logos://proc/")\`. Built-in tools include:
    - \`web_search\`: search the web (DuckDuckGo + Wikipedia + StackOverflow). Params: \`{"query": "...", "max_results": 3}\`
+   - \`fetch_url\`: fetch a URL and return its content as plain text (HTML stripped). Params: \`{"url": "https://..."}\`. Use this to read documentation, API references, or any web page found via web_search.
    - \`browse\`: browser control (navigate, click, type). Params: \`{"url": "...", "action": "snap"}\` (requires pinchtab)
    Note: \`memory.search\` and \`memory.range_fetch\` exist but are not useful for this task (they search chat history, not task data).
 
