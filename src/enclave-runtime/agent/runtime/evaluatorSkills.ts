@@ -1756,6 +1756,8 @@ pkill -9 -f python3 2>/dev/null; sleep 2
 \\\`\\\`\\\`
 4. **Don't test dtype edge cases** — \`float32\` correctness is sufficient.
 5. **Evaluator time budget is 120s per command** — do NOT install torch/transformers from scratch. If not already installed, skip the heavy checks and just verify the file exists and has correct structure.
+6. **DO NOT write multi-process distributed tests (world_size > 1)** — \`mp.spawn\` in this container is unreliable (Bus errors, shared memory issues) and will TIMEOUT at 120s, wasting the entire evaluator budget. The official verifier has its own robust multi-process test infrastructure. Only test with **single-rank (world_size=1)** using the recipe below.
+7. **After the recipe passes, call logos_complete immediately** — do NOT add additional adversarial tests. The recipe covers all critical failure modes. Extra tests waste time and risk false negatives from container limitations.
 
 **Recipe**:
 \\\`\\\`\\\`python
