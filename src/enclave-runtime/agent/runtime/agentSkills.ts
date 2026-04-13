@@ -426,6 +426,7 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
 - Golden Gate assembly uses Type IIS restriction enzymes (e.g. BsaI) that cut outside their recognition site, generating 4-nt overhangs for scarless assembly.
 - Use \`logos_call("web_search", {"query": "Golden Gate assembly BsaI primer design"})\` to understand the primer structure and overhang design principles before writing code.
 - Use \`logos_call("web_search", {"query": "BsaI recognition site GGTCTC cut position"})\` to understand where BsaI cuts relative to its recognition sequence.
+- After finding relevant URLs from web_search, use \`logos_call("fetch_url", {"url": "..."})\` to read the full page content — especially NEB's documentation on BsaI cut positions (GGTCTC(1/5)).
 
 ## Common pitfalls
 
