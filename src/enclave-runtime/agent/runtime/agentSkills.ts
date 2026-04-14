@@ -311,7 +311,9 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
   2. UniProt canonical sequence: search by protein name, gives the unmodified sequence.
   3. PDB SEQRES records in the mmCIF/PDB file: \`https://files.rcsb.org/download/{PDB_ID}.cif\` → \`_entity_poly.pdbx_seq_one_letter_code_can\`.
 - **General rule**: ANY \`X\` in a PDB FASTA should be investigated. It could also represent selenomethionine (→ \`M\`), pyroglutamate (→ \`Q\`/\`E\`), or other modifications. Always cross-reference with the entity sequence API.
-- After assembling the protein sequence, verify its length matches what you expect (sum of all subprotein lengths minus removed Met residues plus linkers).`,
+- After assembling the protein sequence, verify its length matches what you expect (sum of all subprotein lengths minus removed Met residues plus linkers).
+
+**Do NOT use plan mode for this task.** Plan mode creates sub-agents with startup overhead (~2 min each), fragmenting context and wasting 5-10 minutes. The total time budget is tight (~15 min). Stay in a single session — gather all sequences, assemble the gBlock, and call logos_complete directly.`,
   },
   {
     id: "qemu-general",
