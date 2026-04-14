@@ -302,7 +302,8 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
     hint: `**PDB FASTA sequences — beware of modified residues**:
 - PDB FASTA sequences may contain \`X\` characters representing post-translational modifications (e.g. chromophore formation in fluorescent proteins). An \`X\` does NOT represent a single unknown amino acid — it often replaces multiple residues that were modified.
 - Do NOT simply skip or replace \`X\` with a single residue. This will change the protein length and cause sequence mismatches.
-- To get the correct unmodified sequence, use the PDB canonical sequence API instead of the FASTA endpoint: \`https://data.rcsb.org/rest/v1/core/polymer_entity/{PDB_ID}/1\` → the \`entity_poly.pdbx_seq_one_letter_code_can\` field gives the full pre-modification sequence with no \`X\`.
+- To get the correct unmodified sequence, use the PDB canonical sequence API: \`https://data.rcsb.org/rest/v1/core/polymer_entity/{PDB_ID}/1\`. **IMPORTANT**: use the \`entity_poly.pdbx_seq_one_letter_code_can\` field (note the \`_can\` suffix). The field WITHOUT \`_can\` (\`pdbx_seq_one_letter_code\`) still contains modification codes like \`(CR2)\` in parentheses and is NOT what you want.
+- The \`_can\` field gives a plain single-letter amino acid sequence with the original unmodified residues — no \`X\`, no parenthesized codes. This is the sequence you should use.
 - Always compare the length of your assembled sequence against what you expect. If there's a mismatch, an \`X\` substitution is likely the cause.
 
 **Do NOT use plan mode for this task.** Plan mode creates sub-agents with startup overhead (~2 min each), fragmenting context and wasting 5-10 minutes. The total time budget is tight (~15 min). Stay in a single session — gather all sequences, assemble the gBlock, and call logos_complete directly.`,

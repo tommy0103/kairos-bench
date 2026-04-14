@@ -1,6 +1,6 @@
 # Task Status Overview
 # Source: jobs/2026-04-13__11-00-00 (baseline) + fix_list/todo (latest results)
-# 62 PASS / 27 FAIL or TIMEOUT in baseline
+# 70 PASS / 19 FAIL or TIMEOUT in baseline
 
 ## Already fixed (confirmed in todo)
 # 1/1 torch-pipeline-parallelism  (was TIMEOUT, now PASS)
@@ -16,10 +16,11 @@
 # 1/1 count-dataset-tokens        (was FAIL, now PASS)
 # 1/1 polyglot-rust-c             (was FAIL, now PASS)
 # 1/1 configure-git-webserver     (was FAIL, now PASS)
-
+# 1/1 torch-tensor-parallelism    (was TIMEOUT, now PASS)
+# 1/1 cobol-modernization         (was FAIL, now PASS)
 ## Still failing — need investigation
 0/1 TIMEOUT  caffe-cifar-10               # build too slow for 900s timeout
-0/1 FAIL     cobol-modernization          # unknown cause
+
 
 0/1 TIMEOUT  adaptive-rejection-sampler
 0/1 TIMEOUT  compile-compcert
@@ -36,7 +37,7 @@
 0/1 TIMEOUT  raman-fitting
 0/1 FAIL     sam-cell-seg
 0/1 TIMEOUT  schemelike-metacircular-eval
-0/1 TIMEOUT  torch-tensor-parallelism
+
 0/1 TIMEOUT  tune-mjcf
 0/1 TIMEOUT  write-compressor
 
