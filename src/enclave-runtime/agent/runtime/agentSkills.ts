@@ -299,19 +299,11 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
       ["fpbase", "pdb"],
       ["chromophore", "protein"],
     ],
-    hint: `**PDB FASTA chromophore residues — the 'X' trap**:
-- **CRITICAL**: PDB FASTA sequences for fluorescent proteins (GFP, mCherry, Clover, etc.) contain an \`X\` character at the chromophore position. This \`X\` does NOT represent a single unknown amino acid — it represents a **post-translational modification** where **three consecutive amino acids** cyclize into a chromophore.
-- **WRONG**: replacing \`X\` with a single amino acid like \`Y\` (tyrosine). This changes the protein length and produces a sequence that won't match the verifier's expected sequence.
-- **CORRECT**: replace \`X\` with the **original pre-modification tripeptide**. Common examples:
-  - GFP/Clover/EGFP family (e.g. 5WJ2): \`X\` → \`GYG\` (Gly-Tyr-Gly, residues 65-67 in wild-type GFP numbering)
-  - mCherry/mRFP family (e.g. 2H5Q): \`X\` → \`MYG\` (Met-Tyr-Gly)
-  - The central residue is almost always Tyr (Y); the flanking residues vary by protein.
-- **How to find the correct tripeptide**: Do NOT guess. Use one of:
-  1. PDB REST API entity sequence: \`https://data.rcsb.org/rest/v1/core/polymer_entity/{PDB_ID}/1\` → \`entity_poly.pdbx_seq_one_letter_code_can\` field gives the full canonical sequence with all residues spelled out (no \`X\`).
-  2. UniProt canonical sequence: search by protein name, gives the unmodified sequence.
-  3. PDB SEQRES records in the mmCIF/PDB file: \`https://files.rcsb.org/download/{PDB_ID}.cif\` → \`_entity_poly.pdbx_seq_one_letter_code_can\`.
-- **General rule**: ANY \`X\` in a PDB FASTA should be investigated. It could also represent selenomethionine (→ \`M\`), pyroglutamate (→ \`Q\`/\`E\`), or other modifications. Always cross-reference with the entity sequence API.
-- After assembling the protein sequence, verify its length matches what you expect (sum of all subprotein lengths minus removed Met residues plus linkers).
+    hint: `**PDB FASTA sequences — beware of modified residues**:
+- PDB FASTA sequences may contain \`X\` characters representing post-translational modifications (e.g. chromophore formation in fluorescent proteins). An \`X\` does NOT represent a single unknown amino acid — it often replaces multiple residues that were modified.
+- Do NOT simply skip or replace \`X\` with a single residue. This will change the protein length and cause sequence mismatches.
+- To get the correct unmodified sequence, use the PDB canonical sequence API instead of the FASTA endpoint: \`https://data.rcsb.org/rest/v1/core/polymer_entity/{PDB_ID}/1\` → the \`entity_poly.pdbx_seq_one_letter_code_can\` field gives the full pre-modification sequence with no \`X\`.
+- Always compare the length of your assembled sequence against what you expect. If there's a mismatch, an \`X\` substitution is likely the cause.
 
 **Do NOT use plan mode for this task.** Plan mode creates sub-agents with startup overhead (~2 min each), fragmenting context and wasting 5-10 minutes. The total time budget is tight (~15 min). Stay in a single session — gather all sequences, assemble the gBlock, and call logos_complete directly.`,
   },
