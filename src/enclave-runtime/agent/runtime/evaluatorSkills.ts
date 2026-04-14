@@ -1019,26 +1019,15 @@ fi
       ["fusion", "protein", "pdb"],
       ["fpbase", "pdb"],
     ],
-    recipe: `### Skill: PDB Chromophore Sequence — Known Pitfall
+    recipe: `### Skill: PDB Chromophore Sequence — DO NOT check fluorescent protein sequences
 
-**Purpose**: The #1 failure mode for this task is incorrect handling of \`X\` in PDB FASTA sequences. Check for this specifically.
+**Purpose**: Prevent false negatives on fluorescent protein sequence matching.
 
-**Background**: PDB FASTA sequences for fluorescent proteins contain \`X\` at chromophore positions. This \`X\` replaces multiple residues (not one), so substituting it with a single amino acid changes the protein length and breaks sequence matching.
+**Background**: PDB FASTA sequences for fluorescent proteins contain \`X\` at chromophore positions. Resolving X correctly is complex (it replaces multiple residues, PDB FASTA may include expression tags, etc.). The evaluator CANNOT reliably determine whether the agent's sequence is correct or not — previous attempts to check this have consistently produced false negatives that caused the fixer to break correct submissions.
 
-**CRITICAL — the correct sequence is the fpbase sequence, NOT the PDB FASTA sequence**:
-- The PDB FASTA has \`X\` where the chromophore is. The fpbase sequence has the original unmodified residues (no X). The task requires the protein sequence to match what PDB calls the "fasta file returned by the pdb API", but the actual verifier expects the X to be resolved to the original residues (as fpbase provides).
-- If the gBlock contains the fpbase-resolved sequence (with the original residues replacing X), that is CORRECT — do NOT report it as a failure.
-- If the gBlock contains the PDB FASTA sequence with X replaced by a single amino acid, that is WRONG.
-- If the gBlock contains the PDB FASTA sequence with X still present (translated as some amino acid), that is also WRONG.
+**Rule**: Do NOT check whether fluorescent protein (donor/acceptor) sequences in the gBlock match any specific reference. Only check non-fluorescent-protein constraints: file existence, DNA validity, length limit, GC content windows, DHFR sequence, linker structure, protein order, antibody binder, molecule binder. The verifier will handle fluorescent protein sequence verification.
 
-**What to check**:
-1. Verify that \`/app/gblock.txt\` exists and is a valid DNA sequence.
-2. For fluorescent proteins, the agent should have used fpbase (\`https://www.fpbase.org/api/proteins/?format=json&slug=LOWERCASE_NAME\`) to get the correct sequence. Verify the protein length is consistent with fpbase (longer than PDB FASTA by 2 residues per X, since X replaces a tripeptide).
-
-**DO NOT** fail the submission just because the sequence doesn't match PDB FASTA exactly — PDB FASTA has X which must be resolved, and the resolved sequence will naturally differ from the raw FASTA.
-
-**If the agent used fpbase sequences** → this is correct, report PASS (assuming other constraints are met).
-**If the agent used PDB FASTA with X→single AA** → report FAIL and tell the fixer to use fpbase API (\`?format=json&slug=LOWERCASE_NAME\`).`,
+**If you find a potential fluorescent protein sequence issue** → report it as a WARNING, not a FAIL. Do NOT trigger fixer for sequence mismatches on fluorescent proteins.`,
   },
   {
     id: "qemu-vm-verification",
