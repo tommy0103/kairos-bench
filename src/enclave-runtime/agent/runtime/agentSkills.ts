@@ -907,9 +907,10 @@ The container's \`mp.spawn\` is unreliable (Bus errors, shared memory issues). V
     ],
     hint: `**Metacircular evaluator — do NOT self-test**:
 - Self-interpretation (eval.scm interpreting eval.scm) is extremely slow (~5 minutes per test). Running it during the generator phase will consume the entire time budget and cause timeout.
-- Write the evaluator, verify it works on the basic test programs with direct interpretation (\`python3 interp.py eval.scm\` reading a test file), then call logos_complete immediately.
+- Write the evaluator, verify it works on 2-3 basic test programs with direct interpretation (\`printf 'test/calculator.scm\\n(+ 7 8)\\n' | python3 interp.py eval.scm\`), then call logos_complete immediately. Use \`printf\` with \`\\n\` for newlines — do NOT use \`echo -e\` (not portable in this environment's default shell).
 - Do NOT run nested self-interpretation tests (eval.scm interpreting eval.scm interpreting a test). Let the evaluator/verifier handle that.
-- Do NOT use \`timeout 590\` or similar long timeouts — a single hung command will eat your entire budget.`,
+- Do NOT use \`timeout 590\` or similar long timeouts — a single hung command will eat your entire budget.
+- The main cause of recursion-limit errors is excessive intermediate function calls in the evaluator (e.g. converting between pairs and lists, unnecessary wrapper functions). Keep the evaluator simple and minimize call depth.`,
   },
 ];
 
