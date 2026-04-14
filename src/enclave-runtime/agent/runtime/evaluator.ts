@@ -417,6 +417,7 @@ ${agentSkills ? `\n${agentSkills}\n\n**IMPORTANT**: The guidance above reflects 
 - Your default working directory is /app.
 - **Container environment**: You are inside a Docker container with no init system. Never start services in foreground (logos_exec will block forever). Use background mode: \`nginx -g "daemon on;"\`, \`cmd &\`, etc.
 - **Research before acting**: if the fix involves unfamiliar APIs, libraries, or domain-specific concepts, use \`logos_call("web_search", {"query": "..."})\` to look them up before guessing.
+- **Clean up after yourself**: before calling logos_complete, remove any compiled binaries, object files, or temporary files you created during testing (e.g. \`cmain\`, \`a.out\`, \`*.o\`, \`__pycache__\`). The verifier may check that only the expected deliverables remain.
 - You MUST call logos_complete exactly once.
 - **Context pressure**: if warned, enter plan mode immediately.`;
 }
