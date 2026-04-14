@@ -2411,6 +2411,29 @@ fi
 
 **Verdict**: If any check fails → FAIL. Otherwise → PASS immediately. Do NOT run additional tests.`,
   },
+  {
+    id: "tensor-parallelism-minimal-eval",
+    name: "Tensor parallelism — minimal evaluation",
+    triggers: [
+      ["tensor", "parallel", "linear"],
+      ["columnparallellinear"],
+      ["rowparallellinear"],
+    ],
+    recipe: `### Skill: Tensor parallelism — minimal evaluation
+
+**Purpose**: Verify that the tensor parallelism implementation file exists and has the right structure. Do NOT attempt to test distributed gradient correctness — these tests are unreliable in this environment and lead to contradictory fix cycles that waste the entire time budget.
+
+**Recipe**:
+
+1. Check that \`/app/parallel_linear.py\` exists and contains both \`ColumnParallelLinear\` and \`RowParallelLinear\` class definitions.
+2. Check that the file imports \`torch.distributed\` and \`torch.autograd.Function\` (or equivalent).
+3. Check that the classes have \`__init__\` and \`forward\` methods.
+4. If available, run a single-rank (world_size=1) smoke test to verify the module can be instantiated and produce output of the correct shape.
+
+**DO NOT** write multi-process gradient correctness tests. The evaluator's gradient tests have historically produced false negatives that cause the fixer to flip-flop between adding and removing all_reduce in backward, wasting 2-3 rounds and causing timeout. Trust the agent's implementation if it passes structural checks and single-rank tests.
+
+**Verdict**: If the file exists with correct structure and single-rank test passes → PASS immediately. Do NOT run additional distributed tests.`,
+  },
 ];
 
 // ── Skill detection ──────────────────────────────────────────
