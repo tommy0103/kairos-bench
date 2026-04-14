@@ -149,7 +149,7 @@ Building Caffe from source takes 25-40 min, training CIFAR-10 on CPU another 25-
 
 Try these approaches IN ORDER — stop as soon as one works:
 
-1. **conda/mamba** (fastest, ~2 min): \`curl -sL https://micro.mamba.pm/api/micromamba/linux-64/latest | tar xj -C /usr/local bin/micromamba && export MAMBA_ROOT_PREFIX=/opt/micromamba && /usr/local/bin/micromamba create -n caffe -c conda-forge caffe -y\`. Run caffe commands via \`/usr/local/bin/micromamba run -n caffe caffe ...\`.
+1. **conda/mamba** (fastest, ~2 min): \`curl -sL https://micro.mamba.pm/api/micromamba/linux-64/latest | tar xj -C /usr/local bin/micromamba && export MAMBA_ROOT_PREFIX=/opt/micromamba && /usr/local/bin/micromamba create -n caffe -c conda-forge caffe -y\`. Run caffe commands via \`/usr/local/bin/micromamba run -n caffe caffe ...\`. Note: the conda caffe binary may be linked against a different OpenCV soname than what's installed — if you get "libopencv_*.so.X.Y not found" errors, create symlinks from the available version to the expected version in the conda env's lib directory.
 2. **Focal apt package** (~30s if it works): add \`deb http://archive.ubuntu.com/ubuntu focal universe\` repo, try \`apt-get install -y caffe-tools-cpu\`. If dependency conflicts arise (e.g. libboost version mismatch), remove the repo and move to option 3.
 3. **Source build** (last resort, 10-30 min): install build deps, clone, configure, \`make all -j$(nproc)\`. Be aware of OpenCV 4 incompatibilities on Ubuntu 22.04+.
 
