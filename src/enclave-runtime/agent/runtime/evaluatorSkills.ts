@@ -2434,6 +2434,36 @@ fi
 
 **Verdict**: If the file exists with correct structure and single-rank test passes → PASS immediately. Do NOT run additional distributed tests.`,
   },
+  {
+    id: "metacircular-evaluator-eval",
+    name: "Metacircular evaluator — minimal evaluation",
+    triggers: [
+      ["metacircular", "eval"],
+      ["eval.scm", "interp.py"],
+      ["eval.scm", "interpret", "itself"],
+    ],
+    recipe: `### Skill: Metacircular evaluator — minimal evaluation
+
+**Purpose**: Verify eval.scm works for direct interpretation only. Do NOT test self-interpretation.
+
+**CRITICAL — time constraints**:
+- Self-interpretation (eval.scm interpreting eval.scm) takes ~5 minutes per test. Running even one such test will consume most of the evaluator's time budget.
+- The verifier will test self-interpretation with appropriate timeouts. You do not need to.
+
+**Recipe**:
+1. Check that \`/app/eval.scm\` exists and is non-empty.
+2. Test direct interpretation on 2-3 test files:
+\\\`\\\`\\\`bash
+cd /app
+echo -e 'test/calculator.scm\\n(+ 7 8)' | timeout 30 python3 interp.py eval.scm
+echo -e 'test/01-factorial.scm' | timeout 60 python3 interp.py eval.scm
+\\\`\\\`\\\`
+3. Verify the outputs match running the test files directly (\`python3 interp.py test/calculator.scm\`).
+
+**DO NOT** run nested self-interpretation tests (\`eval.scm\` interpreting \`eval.scm\` interpreting a test). These are too slow for the evaluator budget and produce false timeout-based failures that waste fixer rounds.
+
+**Verdict**: If eval.scm exists and direct interpretation produces correct output for the tested programs → PASS. Do NOT test self-interpretation.`,
+  },
 ];
 
 // ── Skill detection ──────────────────────────────────────────

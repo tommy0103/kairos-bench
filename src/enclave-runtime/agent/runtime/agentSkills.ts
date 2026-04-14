@@ -897,6 +897,20 @@ The container's \`mp.spawn\` is unreliable (Bus errors, shared memory issues). V
 - Similarly, prefer \`dist.all_gather\` (with a list of pre-allocated tensors) over \`dist.all_gather_into_tensor\`.
 - Test your implementation with \`world_size > 1\` before submitting — world_size=1 bypasses most distributed ops and can hide compatibility issues.`,
   },
+  {
+    id: "metacircular-evaluator",
+    name: "Metacircular evaluator — no self-test",
+    triggers: [
+      ["metacircular", "eval"],
+      ["eval.scm", "interp.py"],
+      ["eval.scm", "interpret", "itself"],
+    ],
+    hint: `**Metacircular evaluator — do NOT self-test**:
+- Self-interpretation (eval.scm interpreting eval.scm) is extremely slow (~5 minutes per test). Running it during the generator phase will consume the entire time budget and cause timeout.
+- Write the evaluator, verify it works on the basic test programs with direct interpretation (\`python3 interp.py eval.scm\` reading a test file), then call logos_complete immediately.
+- Do NOT run nested self-interpretation tests (eval.scm interpreting eval.scm interpreting a test). Let the evaluator/verifier handle that.
+- Do NOT use \`timeout 590\` or similar long timeouts — a single hung command will eat your entire budget.`,
+  },
 ];
 
 // ── Skill detection ──────────────────────────────────────────
