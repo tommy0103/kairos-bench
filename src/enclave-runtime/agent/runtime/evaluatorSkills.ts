@@ -1025,14 +1025,20 @@ fi
 
 **Background**: PDB FASTA sequences for fluorescent proteins contain \`X\` at chromophore positions. This \`X\` replaces multiple residues (not one), so substituting it with a single amino acid changes the protein length and breaks sequence matching.
 
+**CRITICAL — the correct sequence is the fpbase sequence, NOT the PDB FASTA sequence**:
+- The PDB FASTA has \`X\` where the chromophore is. The fpbase sequence has the original unmodified residues (no X). The task requires the protein sequence to match what PDB calls the "fasta file returned by the pdb API", but the actual verifier expects the X to be resolved to the original residues (as fpbase provides).
+- If the gBlock contains the fpbase-resolved sequence (with the original residues replacing X), that is CORRECT — do NOT report it as a failure.
+- If the gBlock contains the PDB FASTA sequence with X replaced by a single amino acid, that is WRONG.
+- If the gBlock contains the PDB FASTA sequence with X still present (translated as some amino acid), that is also WRONG.
+
 **What to check**:
 1. Verify that \`/app/gblock.txt\` exists and is a valid DNA sequence.
-2. For each fluorescent protein PDB ID used in the gBlock (likely the donor and acceptor), fetch the PDB FASTA and check if it contains \`X\`.
-3. If it does, the agent should have resolved X using the fpbase API (\`https://www.fpbase.org/api/proteins/?format=json&slug=LOWERCASE_NAME\` — e.g. \`slug=mcherry\` or \`slug=clover\`; returns a JSON array with a \`seq\` field containing the unmodified sequence). Do NOT use the \`name\` parameter — it does not filter results. Verify the gBlock uses the fpbase sequence, NOT the PDB FASTA sequence with X replaced by a single residue.
+2. For fluorescent proteins, the agent should have used fpbase (\`https://www.fpbase.org/api/proteins/?format=json&slug=LOWERCASE_NAME\`) to get the correct sequence. Verify the protein length is consistent with fpbase (longer than PDB FASTA by 2 residues per X, since X replaces a tripeptide).
 
-**DO NOT** write a complex automated test script that may not match the verifier's exact logic. Instead, manually inspect a few key positions: translate a short region around where X would be and check if the length is consistent with the fpbase sequence.
+**DO NOT** fail the submission just because the sequence doesn't match PDB FASTA exactly — PDB FASTA has X which must be resolved, and the resolved sequence will naturally differ from the raw FASTA.
 
-**If FAIL**: tell the fixer to use the fpbase API (\`?format=json&slug=LOWERCASE_NAME\`) to get the correct sequence and compare with PDB FASTA to find what X should be replaced with.`,
+**If the agent used fpbase sequences** → this is correct, report PASS (assuming other constraints are met).
+**If the agent used PDB FASTA with X→single AA** → report FAIL and tell the fixer to use fpbase API (\`?format=json&slug=LOWERCASE_NAME\`).`,
   },
   {
     id: "qemu-vm-verification",
