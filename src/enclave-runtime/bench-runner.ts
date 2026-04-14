@@ -103,7 +103,11 @@ const useKernel = !!logosSocket;
  */
 function inferExecTimeout(task: string): number | undefined {
   const t = task.toLowerCase();
-  if (t.includes("fasttext") || t.includes("train a") || t.includes("train model"))
+  if (
+    t.includes("fasttext") ||
+    t.includes("train a") ||
+    t.includes("train model")
+  )
     return 1_800_000; // 30 min — fasttext needs time for train-large-then-quantize
   return undefined;
 }
@@ -178,13 +182,7 @@ You have Logos kernel primitives:
    - Blocked: call with \`sleep: { reason, retry }\` to pause.
    - \`task_log\`: detailed execution record (what you did, key outputs, errors). Required when using \`plan\` or \`explore\`.
      Previous steps' logs are at \`logos://sandbox/plan/step-N.log\` (read with logos_read).`
-    : `## Tools
-
-- **logos_exec(command)** — Execute a shell command. Output is truncated to the last ~200 lines.
-- **logos_complete(...)** — MANDATORY: call this when the task is done or you need to stop.
-  You may also call it with \`plan: ["step 1", "step 2", ...]\` to decompose a complex task,
-  or \`explore: ["approach A", "approach B", ...]\` to try alternative strategies in parallel (each in an isolated workspace copy).
-  When using plan or explore, include \`task_log\` describing your reasoning.`;
+    : `## Tools`;
 
   return `You are an autonomous terminal agent solving a benchmark task inside a sandbox.
 
@@ -210,12 +208,18 @@ ${toolDocs}
 - If your current result is partial, approximate, provisional, or unverified, do not claim success.
 - If you encounter an unrecoverable error or cannot complete the task in this run, call logos_complete with sleep and clearly explain the blocker.
 - Do NOT ask the user for input. Solve the task autonomously.
-- Be efficient — minimize unnecessary commands, but never skip validation of hard requirements.${kernelMode ? "\n- When logos_exec output is truncated, use logos_read to retrieve the full terminal log if you need to inspect earlier output." : ""}
+- Be efficient — minimize unnecessary commands, but never skip validation of hard requirements.${
+    kernelMode
+      ? "\n- When logos_exec output is truncated, use logos_read to retrieve the full terminal log if you need to inspect earlier output."
+      : ""
+  }
 - **Research before coding**: if the task mentions unfamiliar concepts, libraries, file formats, protocols, or domain-specific terms, use \`logos_call("web_search", {"query": "..."})\` to look them up BEFORE writing code. Do not guess or make assumptions about things you are unsure of — incorrect assumptions waste time and lead to wrong solutions.
 - **Container environment**: You are running inside a Docker container with no init system. When starting services (nginx, postgres, redis, apache, etc.), NEVER run them in the foreground — logos_exec will block forever. Always start services in background mode, e.g. \`nginx -g "daemon on;"\`, \`postgres &\`, \`redis-server --daemonize yes\`, or append \`&\` to the command. Verify the service started with a follow-up check (e.g. \`curl -s localhost\` or \`pgrep nginx\`).
 - **Context continuity**: before starting work, check \`logos_read("logos://sandbox/plan/initial.log")\`. If it exists, a previous agent already made partial progress — review its log so you do not duplicate work.
 - **Context pressure**: if the system warns that your context window is nearly full, immediately enter plan mode by calling logos_complete with \`task_log\` (detailed record of everything done so far) and \`plan\` (remaining steps). Do not ignore context pressure warnings.
-- **Never give up directly**: if you feel stuck or believe the task is too complex to complete in one pass, do NOT call logos_complete with just a summary to end the task. Instead, use plan mode — decompose the remaining work into smaller subtasks via \`plan: [...]\` so that fresh agents can tackle each piece independently. Only use \`sleep\` if there is a genuine external blocker (e.g. missing credentials, unavailable service).${buildAgentSkillsSection(taskDescription)}`;
+- **Never give up directly**: if you feel stuck or believe the task is too complex to complete in one pass, do NOT call logos_complete with just a summary to end the task. Instead, use plan mode — decompose the remaining work into smaller subtasks via \`plan: [...]\` so that fresh agents can tackle each piece independently. Only use \`sleep\` if there is a genuine external blocker (e.g. missing credentials, unavailable service).${buildAgentSkillsSection(
+    taskDescription
+  )}`;
 }
 
 // ── Main ─────────────────────────────────────────────────────
@@ -223,13 +227,15 @@ ${toolDocs}
 async function main(): Promise<void> {
   console.log(`[bench-runner] task: ${taskDescription}`);
   console.log(
-    `[bench-runner] model: ${model} | provider: ${provider} | kernel: ${useKernel ? logosSocket : "standalone"}`,
+    `[bench-runner] model: ${model} | provider: ${provider} | kernel: ${
+      useKernel ? logosSocket : "standalone"
+    }`
   );
 
   const execTimeoutMs = inferExecTimeout(taskDescription);
   if (execTimeoutMs !== undefined) {
     console.log(
-      `[bench-runner] custom logos_exec timeout: ${execTimeoutMs / 1000}s`,
+      `[bench-runner] custom logos_exec timeout: ${execTimeoutMs / 1000}s`
     );
   }
 
@@ -271,7 +277,8 @@ async function main(): Promise<void> {
   if (evalModel) {
     const eKey = evalApiKey ?? apiKey;
     const eProv = evalProvider ?? provider;
-    const eBase = evalBaseURL ?? (eProv === provider ? explicitBaseURL : undefined);
+    const eBase =
+      evalBaseURL ?? (eProv === provider ? explicitBaseURL : undefined);
     const eDefaultBase =
       eProv === "anthropic" ? undefined : "https://api.deepseek.com/v1";
 
@@ -295,7 +302,7 @@ async function main(): Promise<void> {
           : createOpenAIChatClient(eOpenai);
     }
     console.log(
-      `[bench-runner] cross-validation: generator=${model} (${provider}), evaluator=${evalModel} (${eProv})`,
+      `[bench-runner] cross-validation: generator=${model} (${provider}), evaluator=${evalModel} (${eProv})`
     );
   }
 
@@ -337,7 +344,7 @@ async function main(): Promise<void> {
           if (event.toolName !== "logos_complete") {
             const text =
               typeof event.result === "object" && event.result !== null
-                ? ((event.result as any)?.content?.[0]?.text ?? "")
+                ? (event.result as any)?.content?.[0]?.text ?? ""
                 : String(event.result ?? "");
             const preview =
               text.length > 300 ? text.slice(0, 300) + "..." : text;
@@ -347,12 +354,15 @@ async function main(): Promise<void> {
         case "logos_complete":
           completeParams = event.params;
           console.log(`[logos_complete] summary: ${event.params.summary}`);
-          if (event.params.reply)
-            console.log(`[reply] ${event.params.reply}`);
+          if (event.params.reply) console.log(`[reply] ${event.params.reply}`);
           break;
         case "context_pressure":
           console.log(
-            `[bench-runner] context pressure: ~${event.estimatedTokens}/${event.limit} tokens (${Math.round((event.estimatedTokens / event.limit) * 100)}%)`,
+            `[bench-runner] context pressure: ~${event.estimatedTokens}/${
+              event.limit
+            } tokens (${Math.round(
+              (event.estimatedTokens / event.limit) * 100
+            )}%)`
           );
           break;
         case "max_turns_reached":
@@ -364,7 +374,7 @@ async function main(): Promise<void> {
     if (completeParams) {
       const outcome = await session.handleComplete(
         session.taskId,
-        completeParams,
+        completeParams
       );
 
       if (outcome.type === "sleep") {
@@ -384,7 +394,7 @@ async function main(): Promise<void> {
       if (outcome.type === "plan") {
         console.log(
           `[bench-runner] entering plan mode ` +
-            `(${outcome.subtasks.length} subtasks)`,
+            `(${outcome.subtasks.length} subtasks)`
         );
 
         if (completeParams.task_log) {
@@ -393,7 +403,7 @@ async function main(): Promise<void> {
             "logos://sandbox/plan/initial.log",
             completeParams.task_log,
             "initial task_log",
-            true, // append
+            true // append
           );
         }
 
@@ -415,7 +425,7 @@ async function main(): Promise<void> {
       if (outcome.type === "explore") {
         console.log(
           `[bench-runner] entering explore mode ` +
-            `(${outcome.approaches.length} approaches)`,
+            `(${outcome.approaches.length} approaches)`
         );
 
         if (completeParams.task_log) {
@@ -424,7 +434,7 @@ async function main(): Promise<void> {
             "logos://sandbox/plan/initial.log",
             completeParams.task_log,
             "initial task_log (explore)",
-            true, // append
+            true // append
           );
         }
 
@@ -453,7 +463,7 @@ async function main(): Promise<void> {
 
   if (success && evalRetries > 0) {
     console.log(
-      `[bench-runner] running evaluator (up to ${evalRetries} fix attempts)`,
+      `[bench-runner] running evaluator (up to ${evalRetries} fix attempts)`
     );
     success = await evaluateAndRetry({
       client: chatClient,
@@ -481,7 +491,7 @@ async function persistLog(
   uri: string,
   content: string,
   label: string,
-  append = false,
+  append = false
 ): Promise<void> {
   const timestamp = new Date().toISOString();
   const block = `\n--- ${label} [${timestamp}] ---\n${content}\n`;
@@ -498,7 +508,7 @@ async function persistLog(
           const res = await readTool.execute("persist-log-read", { uri });
           existing =
             typeof res === "object" && res !== null
-              ? ((res as any)?.content?.[0]?.text ?? "")
+              ? (res as any)?.content?.[0]?.text ?? ""
               : String(res ?? "");
         } catch {
           // file doesn't exist yet — that's fine
@@ -521,7 +531,7 @@ async function persistLog(
           command: `mkdir -p "$(dirname '${uri}')" && cat >> '${uri}' << 'LOGOS_EOF'\n${escaped}\nLOGOS_EOF`,
         });
         console.log(
-          `[bench-runner] appended ${label} → ${uri} (via exec fallback)`,
+          `[bench-runner] appended ${label} → ${uri} (via exec fallback)`
         );
       } catch (e) {
         console.warn(`[bench-runner] failed to append ${label}:`, e);
@@ -548,7 +558,9 @@ async function persistLog(
       await execTool.execute("persist-log", {
         command: `mkdir -p "$(dirname '${uri}')" && cat > '${uri}' << 'LOGOS_EOF'\n${escaped}\nLOGOS_EOF`,
       });
-      console.log(`[bench-runner] persisted ${label} → ${uri} (via exec fallback)`);
+      console.log(
+        `[bench-runner] persisted ${label} → ${uri} (via exec fallback)`
+      );
     } catch (e) {
       console.warn(`[bench-runner] failed to persist ${label}:`, e);
     }
