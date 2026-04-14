@@ -523,12 +523,14 @@ OCR CANNOT reliably distinguish visually similar characters: \`0\`/\`O\`, \`1\`/
 - **NEVER** do: \`curl https://some-leaderboard.hf.space/\` — it won't work.
 - **DO NOT use \`mteb.load_results()\`** — it downloads the ENTIRE results repo (GB of data), will timeout or OOM.
 - **DO NOT clone or sparse-checkout the entire \`mteb/results\` dataset** — it's too large and too slow.
+- **DO NOT use the Gradio client API** (\`gradio_client.Client("mteb/leaderboard")\`) — the queue is frequently stopped or full, and API calls hang or timeout. Every past run that tried Gradio wasted 10+ minutes and got nothing. Skip it entirely.
 
-**For MTEB or similar benchmark leaderboard queries**:
-- The \`mteb\` Python package can query benchmark task lists (e.g. which tasks belong to a specific benchmark subset).
-- The \`huggingface_hub\` package can download individual result files per model without cloning entire repos.
+**Benchmark leaderboard queries**:
+- The \`mteb\` Python package and \`huggingface_hub\` package are available and useful. Explore their APIs.
 - Avoid downloading data for all models — first identify candidate models, then only fetch results for the top candidates.
-- Keep total data transfer under a few MB. If any single operation takes > 60 seconds, it's downloading too much.`,
+- Keep total data transfer under a few MB. If any single operation takes > 60 seconds, it's downloading too much.
+- **Time-sensitive queries ("as of DATE")**: benchmark datasets may contain results submitted at any time. If the task specifies a date, filter by when results were submitted — check model creation dates or commit timestamps.
+- **Model type matters**: leaderboards may distinguish between embedding models and general-purpose LLMs. Pay attention to what the task is actually asking for.`,
   },
   {
     id: "html-js-sanitization",
@@ -910,7 +912,7 @@ The container's \`mp.spawn\` is unreliable (Bus errors, shared memory issues). V
 - Write the evaluator, verify it works on 2-3 basic test programs with direct interpretation (\`printf 'test/calculator.scm\\n(+ 7 8)\\n' | python3 interp.py eval.scm\`), then call logos_complete immediately. Use \`printf\` with \`\\n\` for newlines — do NOT use \`echo -e\` (not portable in this environment's default shell).
 - Do NOT run nested self-interpretation tests (eval.scm interpreting eval.scm interpreting a test). Let the evaluator/verifier handle that.
 - Do NOT use \`timeout 590\` or similar long timeouts — a single hung command will eat your entire budget.
-- The main cause of recursion-limit errors is excessive intermediate function calls in the evaluator (e.g. converting between pairs and lists, unnecessary wrapper functions). Keep the evaluator simple and minimize call depth.`,
+- The main cause of recursion-limit errors is excessive call depth in the evaluator's dispatch logic. In this language, each nested \`if\` adds multiple levels of Python recursion in the host interpreter. Use \`cond\` instead of deeply nested \`if\` chains for the main expression dispatch — \`cond\` is flat and adds only one level of depth regardless of how many branches there are.`,
   },
 ];
 
