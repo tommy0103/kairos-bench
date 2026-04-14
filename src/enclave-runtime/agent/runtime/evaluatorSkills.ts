@@ -1019,161 +1019,20 @@ fi
       ["fusion", "protein", "pdb"],
       ["fpbase", "pdb"],
     ],
-    recipe: `### Skill: PDB Chromophore Sequence — Verify X→Tripeptide Replacement
+    recipe: `### Skill: PDB Chromophore Sequence — Known Pitfall
 
-**Purpose**: Verify that the agent correctly replaced PDB FASTA 'X' (chromophore) residues with the original tripeptide, NOT a single amino acid. This is the #1 failure mode for tasks involving fluorescent protein sequences from PDB.
+**Purpose**: The #1 failure mode for this task is incorrect handling of \`X\` in PDB FASTA sequences. Check for this specifically.
 
-**Why this matters**: PDB FASTA returns 'X' for chromophore positions in fluorescent proteins. The verifier checks the exact protein sequence. Replacing X with a single amino acid (e.g. Y) changes the protein length and fails the exact-match check.
+**Background**: PDB FASTA sequences for fluorescent proteins contain \`X\` at chromophore positions. This \`X\` replaces multiple residues (not one), so substituting it with a single amino acid changes the protein length and breaks sequence matching.
 
-**Recipe** — after the agent produces the output file, run this check:
+**What to check**:
+1. Verify that \`/app/gblock.txt\` exists and is a valid DNA sequence.
+2. For each fluorescent protein PDB ID used in the gBlock (likely the donor and acceptor), fetch the PDB FASTA and check if it contains \`X\`.
+3. If it does, the agent should have resolved X using the fpbase API (\`https://www.fpbase.org/api/proteins/?format=json&name=PROTEIN_NAME\` — returns a JSON array with a \`seq\` field containing the unmodified sequence). Verify the gBlock uses the fpbase sequence, NOT the PDB FASTA sequence with X replaced by a single residue.
 
-\\\`\\\`\\\`python
-#!/usr/bin/env python3
-"""Skill test: Verify fluorescent protein sequences have correct chromophore tripeptides."""
-import requests, sys, re, os
+**DO NOT** write a complex automated test script that may not match the verifier's exact logic. Instead, manually inspect a few key positions: translate a short region around where X would be and check if the length is consistent with the fpbase sequence.
 
-# ===== ADAPT THIS to match the output file =====
-OUTPUT_FILE = "/app/gblock.txt"
-PDB_IDS_FILE = "/app/pdb_ids.txt"
-# ================================================
-
-def get_canonical_seq(pdb_id):
-    """Fetch canonical sequence from PDB REST API. NOTE: _can field may still contain X for chromophore proteins."""
-    url = f"https://data.rcsb.org/rest/v1/core/polymer_entity/{pdb_id}/1"
-    try:
-        r = requests.get(url, timeout=15)
-        r.raise_for_status()
-        data = r.json()
-        seq = data.get("entity_poly", {}).get("pdbx_seq_one_letter_code_can", "")
-        return seq.replace("\\n", "").strip()
-    except Exception as e:
-        print(f"  WARNING: cannot fetch canonical seq for {pdb_id}: {e}")
-        return None
-
-def get_fpbase_seq(name):
-    """Fetch sequence from fpbase API (has original residues, no X)."""
-    url = f"https://www.fpbase.org/api/proteins/?format=json&name={name}"
-    try:
-        r = requests.get(url, timeout=15)
-        r.raise_for_status()
-        data = r.json()
-        if isinstance(data, list) and len(data) > 0:
-            return data[0].get("seq", "")
-    except Exception:
-        pass
-    return None
-
-def get_fasta_seq(pdb_id):
-    """Fetch FASTA sequence from PDB (may contain X for chromophore)."""
-    url = f"https://www.rcsb.org/fasta/entry/{pdb_id}"
-    try:
-        r = requests.get(url, timeout=15)
-        r.raise_for_status()
-        lines = r.text.strip().split("\\n")
-        seq_lines = [l for l in lines if not l.startswith(">")]
-        return "".join(seq_lines).strip()
-    except Exception as e:
-        print(f"  WARNING: cannot fetch FASTA for {pdb_id}: {e}")
-        return None
-
-# Read PDB IDs
-pdb_ids = [line.strip() for line in open(PDB_IDS_FILE) if line.strip()]
-print(f"PDB IDs: {pdb_ids}")
-
-# Check which PDB IDs have chromophore (X in FASTA)
-chromophore_proteins = []
-for pid in pdb_ids:
-    fasta = get_fasta_seq(pid)
-    if fasta and "X" in fasta.upper():
-        # Try to get the protein name from PDB for fpbase lookup
-        try:
-            r = requests.get(f"https://data.rcsb.org/rest/v1/core/polymer_entity/{pid}/1", timeout=15)
-            desc = r.json().get("rcsb_polymer_entity", {}).get("pdbx_description", "")
-        except Exception:
-            desc = ""
-        chromophore_proteins.append({
-            "pdb_id": pid,
-            "fasta": fasta,
-            "description": desc,
-        })
-        print(f"  {pid}: has X in FASTA (description: {desc})")
-
-if not chromophore_proteins:
-    print("No chromophore proteins found in PDB IDs — skipping check")
-    sys.exit(0)
-
-# Read the output file
-if not os.path.exists(OUTPUT_FILE):
-    print(f"FAIL: {OUTPUT_FILE} not found")
-    sys.exit(1)
-
-output = open(OUTPUT_FILE).read().strip()
-
-# For DNA gblocks, translate to protein first
-if re.fullmatch(r"[ATCGatcg]+", output):
-    from Bio.Seq import Seq
-    protein = str(Seq(output).translate()).rstrip("*")
-    print(f"Translated gblock: {len(output)} nt -> {len(protein)} aa")
-else:
-    protein = output
-    print(f"Output appears to be protein sequence: {len(protein)} aa")
-
-protein_upper = protein.upper()
-
-# Check each chromophore protein
-failed = False
-for cp in chromophore_proteins:
-    pid = cp["pdb_id"]
-    fasta = cp["fasta"]
-    desc = cp["description"]
-
-    # Try to find the correct sequence from fpbase (has original residues, no X)
-    # Try common fluorescent protein names based on PDB description
-    fpbase_seq = None
-    if desc:
-        # Extract likely protein name from description
-        for candidate in desc.split(",")[0].split():
-            fpbase_seq = get_fpbase_seq(candidate)
-            if fpbase_seq:
-                print(f"  {pid}: found fpbase sequence via name '{candidate}' (len={len(fpbase_seq)})")
-                break
-
-    # Remove initial M (task usually says to remove N-terminal Met)
-    fasta_no_met = fasta[1:] if fasta.startswith("M") else fasta
-
-    if fpbase_seq:
-        fpbase_no_met = fpbase_seq[1:] if fpbase_seq.startswith("M") else fpbase_seq
-        if fpbase_no_met.upper() in protein_upper:
-            print(f"  PASS {pid}: fpbase sequence found in output (correct X replacement)")
-            continue
-
-    # Check: does it contain the FASTA sequence with X still present or replaced by single AA?
-    for single_aa in ["X", "Y", "G", "A", "S", "F"]:
-        fasta_replaced = fasta_no_met.upper().replace("X", single_aa)
-        if fasta_replaced in protein_upper:
-            if single_aa == "X":
-                print(f"  FAIL {pid}: FASTA sequence with X still present (not replaced)")
-            else:
-                print(f"  FAIL {pid}: FASTA sequence with X->'{single_aa}' (single amino acid). "
-                      f"X represents a chromophore formed from multiple residues. "
-                      f"Use the fpbase API to get the correct sequence: "
-                      f"https://www.fpbase.org/api/proteins/?format=json&name=PROTEIN_NAME "
-                      f"(returns JSON array with 'seq' field containing unmodified sequence)")
-            failed = True
-            break
-    else:
-        print(f"  WARNING {pid}: sequence not found in output (may not be included or differently truncated)")
-
-if failed:
-    sys.exit(1)
-print("\\nPASS: All chromophore proteins use correct sequences")
-\\\`\\\`\\\`
-
-**How to use**:
-1. Install biopython if needed: \`pip install biopython requests\`
-2. Adapt OUTPUT_FILE and PDB_IDS_FILE paths.
-3. Run: \`python3 /tmp/_skill_chromophore_check.py\`
-4. If FAIL: the agent used single-AA replacement for the chromophore X or didn't replace it at all. The fixer should use the fpbase API (\`https://www.fpbase.org/api/proteins/?format=json&name=PROTEIN_NAME\`) to get the correct unmodified sequence — the API returns a JSON array of objects with a \`seq\` field. Compare with the PDB FASTA to identify what X should be replaced with.`,
+**If FAIL**: tell the fixer to use the fpbase API to get the correct sequence and compare with PDB FASTA to find what X should be replaced with.`,
   },
   {
     id: "qemu-vm-verification",
