@@ -1038,7 +1038,7 @@ PDB_IDS_FILE = "/app/pdb_ids.txt"
 # ================================================
 
 def get_canonical_seq(pdb_id):
-    """Fetch canonical sequence from PDB REST API (has full tripeptide, no X)."""
+    """Fetch canonical sequence from PDB REST API. NOTE: _can field may still contain X for chromophore proteins."""
     url = f"https://data.rcsb.org/rest/v1/core/polymer_entity/{pdb_id}/1"
     try:
         r = requests.get(url, timeout=15)
@@ -1049,6 +1049,19 @@ def get_canonical_seq(pdb_id):
     except Exception as e:
         print(f"  WARNING: cannot fetch canonical seq for {pdb_id}: {e}")
         return None
+
+def get_fpbase_seq(name):
+    """Fetch sequence from fpbase API (has original residues, no X)."""
+    url = f"https://www.fpbase.org/api/proteins/?format=json&name={name}"
+    try:
+        r = requests.get(url, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+        if isinstance(data, list) and len(data) > 0:
+            return data[0].get("seq", "")
+    except Exception:
+        pass
+    return None
 
 def get_fasta_seq(pdb_id):
     """Fetch FASTA sequence from PDB (may contain X for chromophore)."""
@@ -1067,27 +1080,23 @@ def get_fasta_seq(pdb_id):
 pdb_ids = [line.strip() for line in open(PDB_IDS_FILE) if line.strip()]
 print(f"PDB IDs: {pdb_ids}")
 
-# Check which PDB IDs have chromophore (X in FASTA but not in canonical)
+# Check which PDB IDs have chromophore (X in FASTA)
 chromophore_proteins = []
 for pid in pdb_ids:
     fasta = get_fasta_seq(pid)
     if fasta and "X" in fasta.upper():
-        canonical = get_canonical_seq(pid)
-        if canonical and "X" not in canonical.upper():
-            # Find the tripeptide that replaces X
-            fasta_upper = fasta.upper()
-            x_pos = fasta_upper.index("X")
-            # The canonical sequence has 2 extra AAs where X was (3 AAs replace 1 X)
-            tripeptide = canonical[x_pos:x_pos+3] if x_pos + 3 <= len(canonical) else "???"
-            chromophore_proteins.append({
-                "pdb_id": pid,
-                "x_position": x_pos,
-                "tripeptide": tripeptide,
-                "fasta_len": len(fasta),
-                "canonical_len": len(canonical),
-            })
-            print(f"  {pid}: X at pos {x_pos} -> tripeptide '{tripeptide}' "
-                  f"(FASTA len={len(fasta)}, canonical len={len(canonical)})")
+        # Try to get the protein name from PDB for fpbase lookup
+        try:
+            r = requests.get(f"https://data.rcsb.org/rest/v1/core/polymer_entity/{pid}/1", timeout=15)
+            desc = r.json().get("rcsb_polymer_entity", {}).get("pdbx_description", "")
+        except Exception:
+            desc = ""
+        chromophore_proteins.append({
+            "pdb_id": pid,
+            "fasta": fasta,
+            "description": desc,
+        })
+        print(f"  {pid}: has X in FASTA (description: {desc})")
 
 if not chromophore_proteins:
     print("No chromophore proteins found in PDB IDs — skipping check")
@@ -1115,48 +1124,56 @@ protein_upper = protein.upper()
 failed = False
 for cp in chromophore_proteins:
     pid = cp["pdb_id"]
-    tripeptide = cp["tripeptide"]
-    canonical = get_canonical_seq(pid)
-    fasta = get_fasta_seq(pid)
+    fasta = cp["fasta"]
+    desc = cp["description"]
 
-    if not canonical:
-        continue
+    # Try to find the correct sequence from fpbase (has original residues, no X)
+    # Try common fluorescent protein names based on PDB description
+    fpbase_seq = None
+    if desc:
+        # Extract likely protein name from description
+        for candidate in desc.split(",")[0].split():
+            fpbase_seq = get_fpbase_seq(candidate)
+            if fpbase_seq:
+                print(f"  {pid}: found fpbase sequence via name '{candidate}' (len={len(fpbase_seq)})")
+                break
 
     # Remove initial M (task usually says to remove N-terminal Met)
-    canonical_no_met = canonical[1:] if canonical.startswith("M") else canonical
-    fasta_no_met = fasta[1:] if fasta and fasta.startswith("M") else (fasta or "")
+    fasta_no_met = fasta[1:] if fasta.startswith("M") else fasta
 
-    # Check: does the output contain the canonical sequence (with tripeptide)?
-    if canonical_no_met.upper() in protein_upper:
-        print(f"  PASS {pid}: canonical sequence (with tripeptide '{tripeptide}') found in output")
-        continue
+    if fpbase_seq:
+        fpbase_no_met = fpbase_seq[1:] if fpbase_seq.startswith("M") else fpbase_seq
+        if fpbase_no_met.upper() in protein_upper:
+            print(f"  PASS {pid}: fpbase sequence found in output (correct X replacement)")
+            continue
 
-    # Check: does it contain the FASTA sequence (with X replaced by single AA)?
-    # Try common single-AA replacements for X
-    for single_aa in ["Y", "G", "A", "S", "F"]:
+    # Check: does it contain the FASTA sequence with X still present or replaced by single AA?
+    for single_aa in ["X", "Y", "G", "A", "S", "F"]:
         fasta_replaced = fasta_no_met.upper().replace("X", single_aa)
         if fasta_replaced in protein_upper:
-            print(f"  FAIL {pid}: found FASTA sequence with X->'{single_aa}' (SINGLE amino acid). "
-                  f"X should be replaced with tripeptide '{tripeptide}', not a single AA. "
-                  f"Use the PDB REST API canonical sequence: "
-                  f"https://data.rcsb.org/rest/v1/core/polymer_entity/{pid}/1 "
-                  f"-> entity_poly.pdbx_seq_one_letter_code_can")
+            if single_aa == "X":
+                print(f"  FAIL {pid}: FASTA sequence with X still present (not replaced)")
+            else:
+                print(f"  FAIL {pid}: FASTA sequence with X->'{single_aa}' (single amino acid). "
+                      f"X represents a chromophore formed from multiple residues. "
+                      f"Use the fpbase API to get the correct sequence: "
+                      f"https://www.fpbase.org/api/proteins/?format=json&name=PROTEIN_NAME "
+                      f"(returns JSON array with 'seq' field containing unmodified sequence)")
             failed = True
             break
     else:
-        print(f"  WARNING {pid}: neither canonical nor FASTA-based sequence found in output. "
-              f"The protein may not be included, or the sequence may be differently truncated.")
+        print(f"  WARNING {pid}: sequence not found in output (may not be included or differently truncated)")
 
 if failed:
     sys.exit(1)
-print("\\nPASS: All chromophore proteins use correct tripeptide sequences")
+print("\\nPASS: All chromophore proteins use correct sequences")
 \\\`\\\`\\\`
 
 **How to use**:
 1. Install biopython if needed: \`pip install biopython requests\`
 2. Adapt OUTPUT_FILE and PDB_IDS_FILE paths.
 3. Run: \`python3 /tmp/_skill_chromophore_check.py\`
-4. If FAIL: the agent used single-AA replacement for the chromophore X. The error message tells exactly which PDB ID, what tripeptide to use, and the API URL to fetch the correct sequence.`,
+4. If FAIL: the agent used single-AA replacement for the chromophore X or didn't replace it at all. The fixer should use the fpbase API (\`https://www.fpbase.org/api/proteins/?format=json&name=PROTEIN_NAME\`) to get the correct unmodified sequence — the API returns a JSON array of objects with a \`seq\` field. Compare with the PDB FASTA to identify what X should be replaced with.`,
   },
   {
     id: "qemu-vm-verification",
