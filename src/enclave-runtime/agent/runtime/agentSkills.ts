@@ -859,6 +859,21 @@ The verifier uses port 12355. If your test leaves a process holding a port, the 
 
 The container's \`mp.spawn\` is unreliable (Bus errors, shared memory issues). Verify with single-rank tests only. The verifier has its own working test infrastructure.`,
   },
+  {
+    id: "dataset-token-counting",
+    name: "HuggingFace dataset token counting",
+    triggers: [
+      ["dataset", "tokens", "huggingface"],
+      ["dataset", "tokens", "tokenizer"],
+      ["dataset", "token", "count"],
+      ["count", "tokens", "dataset"],
+    ],
+    hint: `**Dataset token counting — column selection is critical**:
+- When the task says "count X tokens" or "how many X tokens", where X is a prefix/keyword that appears in multiple column names, you MUST tokenize ALL columns whose names contain X, not just one.
+- Example: "count deepseek tokens" means tokenize EVERY column with "deepseek" in the name (e.g. \`deepseek_reasoning\`, \`deepseek_solution\`, etc.), then sum the counts.
+- Before writing code, list ALL column names and identify every column matching the keyword. Print them explicitly to verify.
+- Double-check: if you only selected one column but multiple columns match, you are almost certainly wrong.`,
+  },
 ];
 
 // ── Skill detection ──────────────────────────────────────────
