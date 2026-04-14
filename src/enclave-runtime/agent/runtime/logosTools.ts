@@ -239,15 +239,23 @@ export function createLogosCallTool(client: LogosClient): AgentTool {
         })
       ),
     }),
-    execute: async (_id, params) => {
+    execute: async (callId, params) => {
       const toolParams = params.params
         ? JSON.parse(params.params)
         : {};
       try {
         const result = await client.call(params.tool, toolParams);
-        const text =
+        const raw =
           typeof result === "string" ? result : JSON.stringify(result, null, 2);
-        return { content: [{ type: "text", text }] };
+        if (raw.length > MAX_TOOL_OUTPUT_CHARS) {
+          const logUri = `logos://sandbox/call/${callId}.result`;
+          client.write(logUri, raw).catch(() => {});
+          const text =
+            raw.slice(0, MAX_TOOL_OUTPUT_CHARS) +
+            `\n\n[... truncated — showing first ${MAX_TOOL_OUTPUT_CHARS} chars of ${raw.length} total. Use logos_read("${logUri}") for full output ...]`;
+          return { content: [{ type: "text", text }] };
+        }
+        return { content: [{ type: "text", text: raw }] };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         return { content: [{ type: "text", text: `[error] ${msg}` }] };
