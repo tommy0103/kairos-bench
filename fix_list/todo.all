@@ -14,7 +14,8 @@
 # 0.8/1 video-processing          (was PASS, still ~PASS)
 # 1/1 polyglot-c-py               (was FAIL, now PASS)
 # 1/1 count-dataset-tokens        (was FAIL, now PASS)
-# 0/1 polyglot-rust-c
+# 1/1 polyglot-rust-c             (was FAIL, now PASS)
+# 1/1 configure-git-webserver     (was FAIL, now PASS)
 
 ## Still failing — need investigation
 0/1 TIMEOUT  caffe-cifar-10               # build too slow for 900s timeout
@@ -22,8 +23,6 @@
 
 0/1 TIMEOUT  adaptive-rejection-sampler
 0/1 TIMEOUT  compile-compcert
-0/1 FAIL     configure-git-webserver
-
 0/1 TIMEOUT  extract-moves-from-video
 0/1 TIMEOUT  gpt2-codegolf
 0/1 TIMEOUT  install-windows-3-11

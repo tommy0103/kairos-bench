@@ -887,6 +887,21 @@ The container's \`mp.spawn\` is unreliable (Bus errors, shared memory issues). V
 - After verifying your setup works end-to-end (clone → commit → push → curl), do NOT clean up by resetting the repo to an empty state or deleting the deployed files. The verifier may rely on the content you pushed during testing being still present and served by the web server.
 - Clean up only your temporary clone directories (e.g. \`/tmp/test-clone\`), but leave the bare repo's refs and the web root intact.`,
   },
+  {
+    id: "torch-tensor-parallelism-gloo",
+    name: "PyTorch tensor parallelism (Gloo backend compatibility)",
+    triggers: [
+      ["tensor", "parallel", "linear"],
+      ["columnparallellinear"],
+      ["rowparallellinear"],
+      ["tensor", "parallel", "pytorch"],
+    ],
+    hint: `**Tensor parallelism — CPU-only environment pitfalls**:
+- The code will be tested in a CPU-only environment with no GPU. This means NCCL is not available and the distributed backend will be Gloo.
+- Gloo has limited collective op support compared to NCCL. Notably, \`dist.reduce_scatter\` is NOT supported and will raise \`RuntimeError\` at runtime. Use \`dist.all_reduce\` instead and slice the result manually if needed.
+- Similarly, prefer \`dist.all_gather\` (with a list of pre-allocated tensors) over \`dist.all_gather_into_tensor\`.
+- Test your implementation with \`world_size > 1\` before submitting — world_size=1 bypasses most distributed ops and can hide compatibility issues.`,
+  },
 ];
 
 // ── Skill detection ──────────────────────────────────────────
