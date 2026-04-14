@@ -905,12 +905,18 @@ The container's \`mp.spawn\` is unreliable (Bus errors, shared memory issues). V
       ["eval.scm", "interp.py"],
       ["eval.scm", "interpret", "itself"],
     ],
-    hint: `**Metacircular evaluator — do NOT self-test**:
-- Self-interpretation (eval.scm interpreting eval.scm) is extremely slow (~5 minutes per test). Running it during the generator phase will consume the entire time budget and cause timeout.
-- Write the evaluator, verify it works on 2-3 basic test programs with direct interpretation (\`printf 'test/calculator.scm\\n(+ 7 8)\\n' | python3 interp.py eval.scm\`), then call logos_complete immediately. Use \`printf\` with \`\\n\` for newlines — do NOT use \`echo -e\` (not portable in this environment's default shell).
-- Do NOT run nested self-interpretation tests (eval.scm interpreting eval.scm interpreting a test). Let the evaluator/verifier handle that.
+    hint: `**Metacircular evaluator — MINIMAL testing, then logos_complete IMMEDIATELY**:
+
+**CRITICAL — override the general "verify before completing" rule for this task.** The general system prompt says to run example commands before finishing. For THIS task, that advice will cause timeout because self-interpretation takes ~5 minutes per test. The evaluator/fixer will handle all testing — submit your code quickly and let them catch bugs.
+
+**What NOT to do**:
+- Do NOT run the self-interpretation example from the task description (\`eval.scm interpreting eval.scm\`). It takes ~5 minutes and will timeout.
+- Do NOT test all files in test/. Two or three quick direct-interpretation tests is enough.
 - Do NOT use \`timeout 590\` or similar long timeouts — a single hung command will eat your entire budget.
-- The main cause of recursion-limit errors is excessive call depth in the evaluator's dispatch logic. In this language, each nested \`if\` adds multiple levels of Python recursion in the host interpreter. Use \`cond\` instead of deeply nested \`if\` chains for the main expression dispatch — \`cond\` is flat and adds only one level of depth regardless of how many branches there are.`,
+- Do NOT iterate and fix bugs yourself — let the evaluator/fixer handle that.
+- Do NOT use \`echo -e\` for passing input — it doesn't work in this environment's default shell. Use \`printf\` instead.
+
+**Implementation tip**: use \`cond\` instead of deeply nested \`if\` chains for expression dispatch. Each nested \`if\` adds multiple levels of Python recursion in the host interpreter, quickly hitting the 5000-depth limit. \`cond\` is flat and much more depth-efficient.`,
   },
 ];
 
