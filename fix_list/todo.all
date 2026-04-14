@@ -12,6 +12,7 @@
 # 1/1 mailman                     (was PASS, still PASS)
 # 1/1 qemu-alpine-ssh             (was TIMEOUT, now PASS)
 # 0.8/1 video-processing          (was PASS, still ~PASS)
+# 1/1 polyglot-c-py(was FAIL, now PASS)
 
 ## Still failing — need investigation
 0/1 TIMEOUT  caffe-cifar-10               # build too slow for 900s timeout
@@ -29,7 +30,6 @@
 0/1 FAIL     model-extraction-relu-logits
 0/1 FAIL     mteb-leaderboard
 0/1 FAIL     mteb-retrieve
-0/1 FAIL     polyglot-c-py
 0/1 FAIL     polyglot-rust-c
 0/1 TIMEOUT  protein-assembly
 0/1 TIMEOUT  query-optimize
