@@ -149,7 +149,7 @@ Building Caffe from source takes 25-40 min, training CIFAR-10 on CPU another 25-
 
 Try these approaches IN ORDER — stop as soon as one works:
 
-1. **conda/mamba** (fastest, ~2 min): \`curl -sL https://micro.mamba.pm/api/micromamba/linux-64/latest | tar xj -C /usr/local bin/micromamba && micromamba create -n caffe -c conda-forge caffe-cpu -y && eval "$(micromamba shell hook -s bash)" && micromamba activate caffe && which caffe\`. conda-forge provides pre-built Caffe with all dependencies bundled.
+1. **conda/mamba** (fastest, ~2 min): \`curl -sL https://micro.mamba.pm/api/micromamba/linux-64/latest | tar xj -C /usr/local bin/micromamba && export MAMBA_ROOT_PREFIX=/opt/micromamba && /usr/local/bin/micromamba create -n caffe -c conda-forge caffe -y\`. Run caffe commands via \`/usr/local/bin/micromamba run -n caffe caffe ...\`.
 2. **Focal apt package** (~30s if it works): add \`deb http://archive.ubuntu.com/ubuntu focal universe\` repo, try \`apt-get install -y caffe-tools-cpu\`. If dependency conflicts arise (e.g. libboost version mismatch), remove the repo and move to option 3.
 3. **Source build** (last resort, 10-30 min): install build deps, clone, configure, \`make all -j$(nproc)\`. Be aware of OpenCV 4 incompatibilities on Ubuntu 22.04+.
 
@@ -159,7 +159,8 @@ You still need to clone the BVLC/caffe repo (for config files, data scripts, pro
 
 - \`solver_mode\` MUST be \`CPU\`, otherwise it crashes with no GPU.
 - Set \`snapshot\` interval so the model is saved at the exact final iteration required by the task.
-- The data download and LMDB conversion scripts reference relative build paths — adjust them if using system-installed binaries.
+- **Minimize test overhead**: the default solver may run test every 100 iterations with 100 test iterations each. On CPU this is very slow. Set \`test_interval\` to the total number of training iterations (so testing only happens once at the end) to save time.
+- The data download and LMDB conversion scripts reference relative build paths — adjust them if using system-installed or conda binaries.
 - Caffe logs test accuracy as \`Test net output #1: accuracy = ...\` — parse this to verify the task's accuracy threshold.`,
   },
   {
