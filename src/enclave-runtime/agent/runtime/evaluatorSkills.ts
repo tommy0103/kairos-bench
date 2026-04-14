@@ -2334,11 +2334,11 @@ fi
 
 **Recipe**:
 1. Check that \`/app/eval.scm\` exists and is non-empty.
-2. Test direct interpretation on 2-3 test files:
+2. Test direct interpretation on 2-3 test files. **IMPORTANT**: use \`printf\` for newlines, NOT \`echo -e\` — the default shell is \`sh\` which does not support \`echo -e\`, causing literal \`\\n\` to be passed as input and breaking the evaluator:
 \\\`\\\`\\\`bash
 cd /app
-echo -e 'test/calculator.scm\\n(+ 7 8)' | timeout 30 python3 interp.py eval.scm
-echo -e 'test/01-factorial.scm' | timeout 60 python3 interp.py eval.scm
+printf 'test/calculator.scm\\n(+ 7 8)\\n' | timeout 30 python3 interp.py eval.scm
+printf 'test/01-factorial.scm\\n' | timeout 60 python3 interp.py eval.scm
 \\\`\\\`\\\`
 3. Verify the outputs match running the test files directly (\`python3 interp.py test/calculator.scm\`).
 
