@@ -159,7 +159,7 @@ You still need to clone the BVLC/caffe repo (for config files, data scripts, pro
 
 - \`solver_mode\` MUST be \`CPU\`, otherwise it crashes with no GPU.
 - Set \`snapshot\` interval so the model is saved at the exact final iteration required by the task.
-- **Minimize test overhead**: the default solver may run test every 100 iterations with 100 test iterations each. On CPU this is very slow. Set \`test_interval\` to the total number of training iterations (so testing only happens once at the end) to save time.
+- **CRITICAL — \`test_interval\` determines success or failure**: the default solver runs test every 100 iterations with 100 test batches each. On CPU, each test round takes several minutes. With 500 training iterations this means 5 test rounds × ~3 min = 15 min wasted on testing alone, causing timeout EVERY TIME. You MUST set \`test_interval\` equal to \`max_iter\` (e.g. both 500) so testing only happens once at the very end. This single change is the difference between finishing in 10 min vs timing out at 20 min. All 18 past runs failed because of this.
 - The data download and LMDB conversion scripts reference relative build paths — adjust them if using system-installed or conda binaries.
 - Caffe logs test accuracy as \`Test net output #1: accuracy = ...\` — parse this to verify the task's accuracy threshold.`,
   },
@@ -873,6 +873,19 @@ The container's \`mp.spawn\` is unreliable (Bus errors, shared memory issues). V
 - Example: "count deepseek tokens" means tokenize EVERY column with "deepseek" in the name (e.g. \`deepseek_reasoning\`, \`deepseek_solution\`, etc.), then sum the counts.
 - Before writing code, list ALL column names and identify every column matching the keyword. Print them explicitly to verify.
 - Double-check: if you only selected one column but multiple columns match, you are almost certainly wrong.`,
+  },
+  {
+    id: "git-webserver-setup",
+    name: "Git server with web deployment",
+    triggers: [
+      ["git", "clone", "push", "webserver"],
+      ["git", "push", "curl", "8080"],
+      ["git", "server", "web", "push"],
+      ["git clone", "git push", "curl"],
+    ],
+    hint: `**Git-to-web deployment — do NOT reset the repo after testing**:
+- After verifying your setup works end-to-end (clone → commit → push → curl), do NOT clean up by resetting the repo to an empty state or deleting the deployed files. The verifier may rely on the content you pushed during testing being still present and served by the web server.
+- Clean up only your temporary clone directories (e.g. \`/tmp/test-clone\`), but leave the bare repo's refs and the web root intact.`,
   },
 ];
 
