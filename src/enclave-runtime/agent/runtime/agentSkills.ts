@@ -524,30 +524,16 @@ OCR CANNOT reliably distinguish visually similar characters: \`0\`/\`O\`, \`1\`/
       ["scrape", "web", "data"],
     ],
     hint: `**Web data extraction — NEVER curl entire pages or download huge datasets**:
-- Modern web pages (especially HuggingFace Spaces, Gradio apps, dashboards) can be 1-10 MB of HTML/JS. Curling them directly will exceed the LLM context window (1M tokens) and crash the agent.
-- **NEVER** do: \`curl https://some-leaderboard.hf.space/\` or pipe large HTML into the conversation.
+- Modern web pages (especially HuggingFace Spaces, Gradio apps, dashboards) are JS-rendered. Curling or fetching them returns empty or unusable HTML.
+- **NEVER** do: \`curl https://some-leaderboard.hf.space/\` — it won't work.
+- **DO NOT use \`mteb.load_results()\`** — it downloads the ENTIRE results repo (GB of data), will timeout or OOM.
+- **DO NOT clone or sparse-checkout the entire \`mteb/results\` dataset** — it's too large and too slow.
 
-**MTEB leaderboard specifically**:
-- **DO NOT use \`mteb.load_results()\`** — it downloads the ENTIRE results repo from GitHub (GB of data), will timeout or OOM in a container.
-- **Best approach**: use the HuggingFace Datasets API to query the pre-computed leaderboard results:
-  \`\`\`
-  pip install datasets
-  from datasets import load_dataset
-  ds = load_dataset("mteb/results", split="train")
-  # Filter to the specific benchmark/tasks you need
-  \`\`\`
-- **Alternative**: use the Gradio API client to query the leaderboard Space:
-  \`\`\`
-  pip install gradio_client
-  from gradio_client import Client
-  client = Client("mteb/leaderboard")
-  result = client.predict(...)
-  \`\`\`
-- **Fallback**: curl the HuggingFace API for specific models: \`curl -s "https://huggingface.co/api/models?search=scandinavian+embedding&sort=downloads&limit=20" | python3 -m json.tool | head -100\`
-
-**General rules**:
-- Any single command output should be < 50KB. If you expect more, pipe through \`head -c 50000\` or filter with \`grep\`/\`python3\` first.
-- If a Python API call takes > 60 seconds, it's probably downloading too much. Use \`timeout 60\` and try a lighter approach.`,
+**For MTEB or similar benchmark leaderboard queries**:
+- The \`mteb\` Python package can query benchmark task lists (e.g. which tasks belong to a specific benchmark subset).
+- The \`huggingface_hub\` package can download individual result files per model without cloning entire repos.
+- Avoid downloading data for all models — first identify candidate models, then only fetch results for the top candidates.
+- Keep total data transfer under a few MB. If any single operation takes > 60 seconds, it's downloading too much.`,
   },
   {
     id: "html-js-sanitization",
