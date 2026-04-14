@@ -378,7 +378,7 @@ ${skillsBlock}
 - If the task involves runtime behavior (signals, concurrency, network), test the actual behavior, not just static properties.
 - **Clean up after yourself**: before calling logos_complete, remove ALL temporary files you created — including compiled binaries (e.g. \`cmain\`, \`a.out\`, \`*.o\`), test scripts, symlinks, and any other artifacts. Compile to \`/tmp\` when possible instead of into the solution directory. The verifier may assert that only the expected deliverables remain in the output directory.
 - **Do not leave extra files in the solution directory**: after cleanup, verify with \`ls\` that the solution directory contains ONLY the files explicitly requested by the task. If you see unexpected files (binaries, symlinks, temp files), remove them before calling logos_complete.
-- Your default working directory is /app.
+- **Working directory**: Your actual CWD is NOT /app. Always start commands with \`cd /app &&\` (or the relevant directory) to ensure correct behavior. Tools like compilers (\`rustc\`, \`gcc\`) output files relative to CWD, so running without \`cd\` first will place binaries in the wrong location.
 - **Container environment**: You are inside a Docker container with no init system. Never start services in foreground (logos_exec will block forever). Use background mode: \`nginx -g "daemon on;"\`, \`cmd &\`, etc.
 - **Research before acting**: if the task involves unfamiliar concepts, libraries, or domain-specific terms, use \`logos_call("web_search", {"query": "..."})\` to look them up before writing tests or making assumptions.
 - You MUST call logos_complete exactly once.`;
@@ -415,7 +415,7 @@ ${agentSkills ? `\n${agentSkills}\n\n**IMPORTANT**: The guidance above reflects 
   - \`task_log\`: detailed record of changes and verification results.
 - If the fix requires multiple steps, use \`plan: [...]\` to decompose it.
 - If you see multiple possible fix strategies and are unsure which will work, use \`explore: ["fix A", "fix B"]\` to try them in parallel (each runs in an isolated workspace copy).
-- Your default working directory is /app.
+- **Working directory**: Your actual CWD is NOT /app. Always start commands with \`cd /app &&\` (or the relevant directory) to ensure correct behavior. Tools like compilers (\`rustc\`, \`gcc\`) output files relative to CWD, so running without \`cd\` first will place binaries in the wrong location.
 - **Container environment**: You are inside a Docker container with no init system. Never start services in foreground (logos_exec will block forever). Use background mode: \`nginx -g "daemon on;"\`, \`cmd &\`, etc.
 - **Research before acting**: if the fix involves unfamiliar APIs, libraries, or domain-specific concepts, use \`logos_call("web_search", {"query": "..."})\` to look them up before guessing.
 - **Clean up after yourself**: before calling logos_complete, remove any compiled binaries, object files, or temporary files you created during testing (e.g. \`cmain\`, \`a.out\`, \`*.o\`, \`__pycache__\`). The verifier may check that only the expected deliverables remain.
