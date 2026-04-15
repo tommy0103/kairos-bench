@@ -918,6 +918,22 @@ After extracting the FEN, **verify it looks reasonable**: print the board (\`che
 Use Stockfish for the best move: \`apt-get install -y stockfish\`, then use \`python-chess\` engine interface with sufficient depth/time.`,
   },
   {
+    id: "sql-query-optimization",
+    name: "SQL query optimization",
+    triggers: [
+      ["sql", "optimize"],
+      ["sql", "efficient"],
+      ["query", "optimize"],
+      ["query", "efficient"],
+      ["sqlite", "optimize"],
+    ],
+    hint: `**SQL query optimization — only modify the query, never the database**:
+
+Do NOT create indexes, modify tables, or change the database in any way. The task is to rewrite the SQL query itself to be faster. Any database modifications will be detected and cause failure.
+
+Focus on: eliminating correlated subqueries, reducing redundant joins, using CTEs or window functions, rewriting EXISTS/IN clauses, etc.`,
+  },
+  {
     id: "git-webserver-setup",
     name: "Git server with web deployment",
     triggers: [
