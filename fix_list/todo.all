@@ -31,7 +31,6 @@
 0/1 TIMEOUT  gpt2-codegolf
 0/1 TIMEOUT  install-windows-3-11
 0/1 TIMEOUT  make-doom-for-mips
-0/1 FAIL     make-mips-interpreter
 0/1 FAIL     model-extraction-relu-logits
 0/1 FAIL     mteb-leaderboard
 0/1 FAIL     mteb-retrieve
@@ -46,3 +45,4 @@
 # 1/1 filter-js-from-html
 # 1/1 regex-chess
 # 0.8/1 feal-linear-cryptanalysis
+# 0/1 FAIL     make-mips-interpreter

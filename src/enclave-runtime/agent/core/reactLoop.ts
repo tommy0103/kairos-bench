@@ -215,7 +215,7 @@ export async function* reactLoop(
           parsedParams = JSON.parse(toolCall.function.arguments || "{}");
         } catch (e) {
           const raw = toolCall.function.arguments ?? "";
-          const preview = raw.length > 2000 ? raw.slice(0, 2000) + "…" : raw;
+          const preview = raw.length > 2000 ? raw.slice(0, 2000) + `… (${raw.length} bytes total)` : raw;
           console.warn(
             `[reactLoop] failed to parse tool arguments for ${toolName}: ${e} (${raw.length} chars)\n` +
               `  [raw-args] ${preview}`,

@@ -336,7 +336,7 @@ async function main(): Promise<void> {
       switch (event.type) {
         case "tool_execution_start": {
           const raw = JSON.stringify(event.params);
-          const args = raw.length > 200 ? raw.slice(0, 200) + "…" : raw;
+          const args = raw.length > 200 ? raw.slice(0, 200) + `… (${raw.length} bytes total)` : raw;
           console.log(`[tool] ${event.toolName}(${args})`);
           break;
         }

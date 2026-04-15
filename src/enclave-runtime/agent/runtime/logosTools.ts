@@ -79,6 +79,8 @@ export function createLogosWriteTool(client: LogosClient): AgentTool {
     label: "Write",
     description:
       "Write content to a Logos URI. Creates or overwrites the resource. " +
+      "Set append=true to append instead of overwrite. " +
+      "For large files, split into multiple calls with append=true to avoid stream truncation. " +
       "Pure data operation — no side effects beyond storage.",
     parameters: Type.Object({
       uri: Type.String({
@@ -87,8 +89,21 @@ export function createLogosWriteTool(client: LogosClient): AgentTool {
       content: Type.String({
         description: "Content to write.",
       }),
+      append: Type.Optional(
+        Type.Boolean({ description: "If true, append to existing content instead of overwriting. Default: false." }),
+      ),
     }),
     execute: async (_id, params) => {
+      if (params.append) {
+        let existing = "";
+        try {
+          existing = await client.read(params.uri);
+        } catch {
+          // file doesn't exist yet
+        }
+        await client.write(params.uri, existing + params.content);
+        return { content: [{ type: "text", text: `Appended to ${params.uri}` }] };
+      }
       await client.write(params.uri, params.content);
       return { content: [{ type: "text", text: `Written to ${params.uri}` }] };
     },

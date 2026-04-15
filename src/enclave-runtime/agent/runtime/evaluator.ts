@@ -176,7 +176,7 @@ async function runEvaluator(opts: EvalLoopOptions): Promise<EvalResult> {
     switch (event.type) {
       case "tool_execution_start": {
         const raw = JSON.stringify(event.params);
-        const args = raw.length > 200 ? raw.slice(0, 200) + "…" : raw;
+        const args = raw.length > 200 ? raw.slice(0, 200) + `… (${raw.length} bytes total)` : raw;
         console.log(`  [eval] ${event.toolName}(${args})`);
         break;
       }
@@ -247,7 +247,7 @@ async function runFixer(
     switch (event.type) {
       case "tool_execution_start": {
         const raw = JSON.stringify(event.params);
-        const args = raw.length > 200 ? raw.slice(0, 200) + "…" : raw;
+        const args = raw.length > 200 ? raw.slice(0, 200) + `… (${raw.length} bytes total)` : raw;
         console.log(`  [fix] ${event.toolName}(${args})`);
         break;
       }
@@ -320,7 +320,7 @@ You have Logos kernel primitives:
 1. **logos_exec(command)** — Execute a shell command. Output truncated to ~200 lines;
    full output saved to terminal log (read via logos_read when truncated).
 2. **logos_read(uri, offset?, limit?)** — Read from any Logos URI. Supports \`offset\`/\`limit\` for pagination.
-3. **logos_write(uri, content)** — Write to a Logos URI (e.g. \`logos://sandbox/...\`). **WARNING**: logos_write writes to the Logos VFS, NOT to the container filesystem. To create files at absolute paths like \`/app/...\`, use \`logos_exec\` with a shell heredoc instead.
+3. **logos_write(uri, content, append?)** — Write to a Logos URI (e.g. \`logos://sandbox/...\`). Set append=true to append instead of overwrite. For large files, split into multiple logos_write calls with append=true to avoid stream truncation. **WARNING**: logos_write writes to the Logos VFS, NOT to the container filesystem. To create files at absolute paths like \`/app/...\`, use \`logos_exec\` with a shell heredoc instead.
 4. **logos_call(tool, params)** — Invoke a proc tool by name. Discover tools with \`logos_read("logos://proc/")\`. Built-in: \`web_search\`, \`fetch_url\`, \`browse\`. (memory tools exist but are not relevant here.)
 5. **logos_complete(...)** — MANDATORY final call.`;
   }

@@ -66,37 +66,49 @@ export function createOpenAIChatClient(openai: OpenAI): ChatClient {
       let respId = "";
       let respModel = "";
 
-      for await (const chunk of stream as any) {
-        const c = chunk.choices?.[0];
-        if (!c) continue;
-        if (chunk.id) respId = chunk.id;
-        if (chunk.model) respModel = chunk.model;
+      let streamError: unknown = null;
 
-        if (c.delta?.content) {
-          content += c.delta.content;
-          yield { type: "text" as const, text: c.delta.content };
-        }
+      try {
+        for await (const chunk of stream as any) {
+          const c = chunk.choices?.[0];
+          if (!c) continue;
+          if (chunk.id) respId = chunk.id;
+          if (chunk.model) respModel = chunk.model;
 
-        if (c.delta?.tool_calls) {
-          for (const tc of c.delta.tool_calls) {
-            let entry = tcMap.get(tc.index);
-            if (!entry) {
-              entry = { id: "", name: "", args: "" };
-              tcMap.set(tc.index, entry);
-            }
-            if (tc.id) entry.id = tc.id;
-            if (tc.function?.name) entry.name += tc.function.name;
-            if (tc.function?.arguments) entry.args += tc.function.arguments;
+          if (c.delta?.content) {
+            content += c.delta.content;
+            yield { type: "text" as const, text: c.delta.content };
           }
-        }
 
-        if (c.finish_reason) finishReason = c.finish_reason;
+          if (c.delta?.tool_calls) {
+            for (const tc of c.delta.tool_calls) {
+              let entry = tcMap.get(tc.index);
+              if (!entry) {
+                entry = { id: "", name: "", args: "" };
+                tcMap.set(tc.index, entry);
+              }
+              if (tc.id) entry.id = tc.id;
+              if (tc.function?.name) entry.name += tc.function.name;
+              if (tc.function?.arguments) entry.args += tc.function.arguments;
+            }
+          }
+
+          if (c.finish_reason) finishReason = c.finish_reason;
+        }
+      } catch (err) {
+        streamError = err;
       }
 
       const streamIncomplete = !finishReason;
       if (streamIncomplete) {
+        const errDetail = streamError
+          ? ` error=${streamError instanceof Error ? `${streamError.name}: ${streamError.message}` : String(streamError)}`
+          : "";
+        const statusDetail = streamError && typeof (streamError as any).status === "number"
+          ? ` httpStatus=${(streamError as any).status}`
+          : "";
         console.warn(
-          `[chatClient] OpenAI stream ended without finish_reason — response may be truncated`,
+          `[chatClient] OpenAI stream ended without finish_reason — response may be truncated${errDetail}${statusDetail}`,
         );
       }
 
@@ -203,36 +215,39 @@ export async function createAnthropicChatClient(
       let inputTokens = 0;
       let outputTokens = 0;
 
-      for await (const event of stream) {
-        switch (event.type) {
-          case "message_start":
-            msgId = event.message?.id ?? "";
-            msgModel = event.message?.model ?? "";
-            inputTokens = event.message?.usage?.input_tokens ?? 0;
-            break;
+      let streamError: unknown = null;
 
-          case "content_block_start": {
-            const cb = event.content_block;
-            if (cb?.type === "text") {
-              blocks[event.index] = { type: "text", text: "" };
-            } else if (cb?.type === "tool_use") {
-              blocks[event.index] = {
-                type: "tool_use",
-                id: cb.id,
-                name: cb.name,
-                inputJson: "",
-              };
+      try {
+        for await (const event of stream) {
+          switch (event.type) {
+            case "message_start":
+              msgId = event.message?.id ?? "";
+              msgModel = event.message?.model ?? "";
+              inputTokens = event.message?.usage?.input_tokens ?? 0;
+              break;
+
+            case "content_block_start": {
+              const cb = event.content_block;
+              if (cb?.type === "text") {
+                blocks[event.index] = { type: "text", text: "" };
+              } else if (cb?.type === "tool_use") {
+                blocks[event.index] = {
+                  type: "tool_use",
+                  id: cb.id,
+                  name: cb.name,
+                  inputJson: "",
+                };
+              }
+              break;
             }
-            break;
-          }
 
-          case "content_block_delta": {
-            const blk = blocks[event.index];
-            if (!blk) break;
-            if (event.delta?.type === "text_delta") {
-              const text = event.delta.text ?? "";
-              blk.text = (blk.text ?? "") + text;
-              content += text;
+            case "content_block_delta": {
+              const blk = blocks[event.index];
+              if (!blk) break;
+              if (event.delta?.type === "text_delta") {
+                const text = event.delta.text ?? "";
+                blk.text = (blk.text ?? "") + text;
+                content += text;
               if (text) yield { type: "text" as const, text };
             } else if (event.delta?.type === "input_json_delta") {
               blk.inputJson =
@@ -251,11 +266,20 @@ export async function createAnthropicChatClient(
             break;
         }
       }
+      } catch (err) {
+        streamError = err;
+      }
 
       if (!messageComplete) {
+        const errDetail = streamError
+          ? ` error=${streamError instanceof Error ? `${streamError.name}: ${streamError.message}` : String(streamError)}`
+          : "";
+        const statusDetail = streamError && typeof (streamError as any).status === "number"
+          ? ` httpStatus=${(streamError as any).status}`
+          : "";
         console.warn(
           `[chatClient] Anthropic stream ended without message_stop — response may be truncated` +
-            ` (outputTokens=${outputTokens}, maxTokens=${maxTokens}, stopReason=${stopReason})`,
+            ` (outputTokens=${outputTokens}, maxTokens=${maxTokens}, stopReason=${stopReason}, contentBytes=${content.length}, toolBlocks=${blocks.filter(b => b.type === "tool_use").length}${errDetail}${statusDetail})`,
         );
       }
 
@@ -264,13 +288,17 @@ export async function createAnthropicChatClient(
 
       for (const b of allToolBlocks) {
         const rawArgs = b.inputJson ?? "";
-        // Detect truncated tool calls: empty args AND stream didn't complete normally
         const isTruncated = !rawArgs && !messageComplete;
         if (isTruncated) {
           console.warn(
             `[chatClient] dropping truncated tool_use "${b.name}" — stream ended before input was received`,
           );
           continue;
+        }
+        if (!messageComplete && rawArgs) {
+          console.warn(
+            `[chatClient] tool_use "${b.name}" may be truncated — received ${rawArgs.length} bytes of input JSON`,
+          );
         }
         if (!rawArgs) {
           console.warn(

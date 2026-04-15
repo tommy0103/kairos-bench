@@ -314,7 +314,7 @@ async function runSubAgent(opts: {
     switch (event.type) {
       case "tool_execution_start": {
         const raw = JSON.stringify(event.params);
-        const args = raw.length > 200 ? raw.slice(0, 200) + "…" : raw;
+        const args = raw.length > 200 ? raw.slice(0, 200) + `… (${raw.length} bytes total)` : raw;
         console.log(`  [tool] ${event.toolName}(${args})`);
         break;
       }
@@ -359,7 +359,7 @@ You have Logos kernel primitives:
    full output saved to terminal log (read via logos_read when truncated).
    **Time limit: each logos_exec call has a ~${timeoutSec} second timeout.** If a command exceeds this, it is killed and returns exit_code -1. For long-running tasks (training, compilation), design commands to complete within this limit. Use the shell \`timeout\` utility for additional safety (e.g. \`timeout ${Math.round(timeoutSec * 0.5)} ./my_program\`).
 2. **logos_read(uri)** — Read from any Logos URI.
-3. **logos_write(uri, content)** — Write to a Logos URI.
+3. **logos_write(uri, content, append?)** — Write to a Logos URI. Set append=true to append instead of overwrite. For large files, split into multiple logos_write calls with append=true to avoid stream truncation.
 4. **logos_complete(...)** — MANDATORY final call to finish your turn.`;
   }
   return `## Tools
