@@ -933,6 +933,25 @@ The time budget (900s) is tight for writing a full ARS implementation + tests + 
 If writing the R file via logos_write gets truncated, use \`logos_exec\` with \`cat > /app/ars.R << 'EOF'\` or split into chunks with \`logos_write({append: true})\`.`,
   },
   {
+    id: "gpt2-codegolf",
+    name: "GPT-2 code golf — understand the checkpoint format first",
+    triggers: [
+      ["gpt2", "ckpt"],
+      ["gpt-2", "ckpt"],
+      ["gpt2", "codegolf"],
+      ["gpt-2", "codegolf"],
+      ["gpt2", "code golf"],
+      ["gpt-2", "code golf"],
+      [".ckpt", "sample"],
+      [".ckpt", "c file"],
+    ],
+    hint: `**GPT-2 from TF checkpoint — the checkpoint format is the key**:
+
+TF .ckpt is TensorFlow's native checkpoint format — it is NOT a simple raw binary dump of weights. Do not assume it is the same format as karpathy/llm.c or other simplified binary formats. Research the actual TF checkpoint structure before writing any C code.
+
+If Python/TensorFlow is available in the container, inspect the checkpoint first to understand variable names, shapes, and data layout.`,
+  },
+  {
     id: "sql-query-optimization",
     name: "SQL query optimization",
     triggers: [
