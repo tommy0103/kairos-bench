@@ -945,9 +945,9 @@ If writing the R file via logos_write gets truncated, use \`logos_exec\` with \`
       [".ckpt", "sample"],
       [".ckpt", "c file"],
     ],
-    hint: `**GPT-2 from TF checkpoint — the checkpoint format is the key**:
+    hint: `**GPT-2 from TF checkpoint — understand the format first**:
 
-TF .ckpt is TensorFlow's native checkpoint format — it is NOT a simple raw binary dump of weights. Do not assume it is the same format as karpathy/llm.c or other simplified binary formats. Research the actual TF checkpoint structure before writing any C code.
+TF .ckpt is TensorFlow's native checkpoint format — it is NOT a simple raw binary dump of weights. It has its own structure with a variable index and data shards. Research this format before writing any C code.
 
 If Python/TensorFlow is available in the container, inspect the checkpoint first to understand variable names, shapes, and data layout.`,
   },
