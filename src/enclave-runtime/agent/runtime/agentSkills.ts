@@ -273,20 +273,23 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
       ["doomgeneric", "mips"],
       ["doomgeneric_mips"],
     ],
-    hint: `**MIPS interpreter (DoomGeneric) — architecture & pitfalls**:
-- **DON'T read all source files upfront**. The codebase has 3000+ lines of C stdlib reimplementation. Focus only on: (1) ELF headers of the binary, (2) \`doomgeneric.h\` for screen constants, (3) the syscall numbers in \`my_stdlib.c\` (first 20 lines), and (4) \`fake_fs.c\` for filesystem semantics.
-- **Sparse memory is MANDATORY**: the BSS section is ~1GB (\`0x4003c6d0\` bytes). You CANNOT allocate a flat buffer. Use a \`Map<number, Buffer>\` keyed by page number (e.g. 4KB pages). Only allocate pages on first access.
-- **MIPS Linux syscall ABI** (NOT x86!): syscall number in \`$v0\`, args in \`$a0-$a3\`, stack for args 5-6. Return value in \`$v0\`. Key numbers: \`read=4003\`, \`write=4004\`, \`open=4005\`, \`close=4006\`, \`lseek=4019\`, \`brk=4045\`, \`mmap=4090\`. **BUT** this binary uses its OWN syscall convention defined in \`my_stdlib.c\`: \`read=0\`, \`write=1\`, \`open=2\`, \`close=3\`, \`lseek=8\`, etc. Check the \`#define SYS_*\` at the top of \`my_stdlib.c\` and \`fake_fs.c\`. The \`syscall\` instruction triggers the trap — match the numbers the binary ACTUALLY uses.
-- **Framebuffer output — the verifier contract**:
-  1. The verifier runs \`node /app/vm.js\` and waits up to 30 seconds for \`/tmp/frame.bmp\` to appear.
-  2. It compares \`/tmp/frame.bmp\` to a reference image using L2 pixel similarity (PIL).
-  3. DOOM's screen is **320×200 pixels**, 32-bit RGBA (\`DOOMGENERIC_RESX=320\`, \`DOOMGENERIC_RESY=200\`).
-  4. The binary writes the framebuffer through the custom filesystem (\`DG_DrawFrame\` → file write syscall). You need to intercept the write to the framebuffer file and save it as a proper BMP at \`/tmp/frame.bmp\`.
-  5. BMP format: 54-byte header (BITMAPINFOHEADER), 24-bit BGR, bottom-up row order. OR use a library (\`bmp-js\`, \`pngjs\`) — just make sure the format is correct.
-- **Delay slots**: MIPS branches/jumps have a delay slot — the instruction AFTER a branch always executes. Forgetting this is the most common interpreter bug and causes immediate crashes.
-- **Stdout contract — CRITICAL**: The verifier checks that stdout contains the EXACT byte string \`I_InitGraphics: DOOM screen size: w x h: 320 x 200\`. Your interpreter MUST forward ALL writes to fd 1 (stdout) and fd 2 (stderr) to Node.js \`process.stdout\`. If your syscall handler for \`write(fd=1, ...)\` doesn't call \`process.stdout.write(buffer)\`, the verifier will fail even if the frame is correct. Also make sure the \`printf\` in the binary is fully implemented (it writes through fd 1 via the syscall interface).
-- **Self-test before submission**: run \`node /app/vm.js\` yourself, wait 15-20 seconds, then check: (1) Does \`/tmp/frame.bmp\` exist? (2) Is it a valid image (\`file /tmp/frame.bmp\` or open with PIL)? (3) Does stdout contain the text \`I_InitGraphics: DOOM screen size: w x h: 320 x 200\`? ALL THREE must pass. If frame.bmp doesn't appear within 30s, the interpreter has a bug — check syscall handling, memory access, and instruction implementation.
-- **Performance**: the binary needs to execute millions of instructions to reach the first frame. Keep your instruction loop tight — avoid logging per-instruction. Use a simple \`while(true)\` loop with a switch on opcode.`,
+    hint: `**MIPS interpreter (DoomGeneric) — critical pitfalls (5/13 past runs succeeded)**:
+
+1. **Sparse memory is MANDATORY**: the BSS section is ~1GB. You CANNOT allocate a flat buffer. Use a \`Map<number, Buffer>\` keyed by page number (e.g. 4KB pages).
+
+2. **Delay slots**: MIPS branches/jumps have a delay slot — the instruction AFTER a branch always executes. Forgetting this is the most common interpreter bug.
+
+3. **Custom syscall numbers**: this binary does NOT use standard MIPS Linux syscall numbers. Check \`#define SYS_*\` at the top of \`my_stdlib.c\` and \`fake_fs.c\` to find the actual numbers used. The \`syscall\` instruction triggers the trap — match the numbers the binary ACTUALLY uses.
+
+4. **Do NOT use plan mode**: write the entire vm.js in one session. Plan mode splits context across sub-agents, causing massive time waste on re-reading source files. Successful runs completed in ~18 min with a single subtask; failed runs used 4+ subtasks and timed out.
+
+5. **Write large files in chunks**: if writing vm.js via logos_write gets truncated, split into multiple \`logos_write({append: true})\` calls, or use \`logos_exec\` with \`cat >> /app/vm.js << 'EOF'\`.
+
+For screen constants, framebuffer format, and filesystem semantics, read the source:
+- \`doomgeneric/doomgeneric/doomgeneric.h\` — screen resolution defines
+- \`doomgeneric/doomgeneric/my_stdlib.c\` — syscall numbers and conventions
+- \`doomgeneric/doomgeneric/fake_fs.c\` — virtual filesystem implementation
+- \`doomgeneric/doomgeneric/doomgeneric_img.c\` — frame output logic`,
   },
   {
     id: "pdb-fasta-chromophore",
