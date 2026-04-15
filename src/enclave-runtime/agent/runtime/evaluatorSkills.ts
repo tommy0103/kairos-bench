@@ -2312,6 +2312,44 @@ printf 'test/01-factorial.scm\\n' | timeout 60 python3 interp.py eval.scm
 
 If the web server returns the expected content → PASS. Do not require that the "exact user workflow" can be replayed from scratch.`,
   },
+  {
+    id: "git-server-no-pollute",
+    name: "Git server — do not pollute repo state",
+    triggers: [
+      ["git", "ssh", "push"],
+      ["git", "server", "deploy"],
+      ["git", "branch", "push", "deploy"],
+      ["git", "post-receive"],
+      ["git", "multibranch"],
+    ],
+    recipe: `### Skill: Git server testing — do NOT pollute the repo with test content
+
+**The task instructions describe a test workflow that clones the repo, creates branches, and pushes specific content.** If the evaluator has already pushed different content to the same branches, that workflow will fail with "fetch first" or the served content won't match.
+
+**Rules for evaluator testing**:
+1. **DO NOT push to branches mentioned in the task instructions** (typically \`main\` and \`dev\`). If you need to test the push→deploy pipeline, use a throwaway branch name (e.g. \`eval-test\`) and clean it up afterwards.
+2. **If you did push to main/dev**, reset the bare repo to its original state before finishing: remove the refs and clean the deploy directories.
+3. **Prefer testing with curl only** — if the agent already pushed and content is being served, just verify with \`curl\` that the deployment pipeline is working. No need to re-push.
+4. **DO NOT instruct the fixer to re-initialize or delete the bare repo.** This breaks everything.`,
+  },
+  {
+    id: "ocaml-gc-test-scope",
+    name: "OCaml GC fix — only test what instructions ask for",
+    triggers: [
+      ["ocaml", "garbage collector"],
+      ["ocaml", "gc"],
+      ["ocaml", "sweeping"],
+      ["ocaml", "bootstrap"],
+      ["ocaml", "testsuite"],
+    ],
+    recipe: `### Skill: OCaml GC — do NOT run long builds as adversarial tests
+
+**Only test what the task instructions explicitly require.** If the task says "ensure the basic testsuite runs cleanly" via \`make -C testsuite one DIR=tests/basic\`, then run exactly that command and check the results.
+
+**DO NOT run \`make bootstrap\`, \`make world\`, or \`make coreall\` as adversarial tests.** These are full compiler builds that take 10-30+ minutes and will exceed the logos_exec timeout (590s). This causes false FAIL judgments and wastes all remaining time on fixer attempts that cannot finish the build either.
+
+If the basic testsuite passes → PASS.`,
+  },
 ];
 
 // ── Skill detection ──────────────────────────────────────────

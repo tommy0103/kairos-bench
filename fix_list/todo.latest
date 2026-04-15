@@ -30,12 +30,12 @@
 
 ## Improved since baseline (partially passing)
 1/2  compile-compcert              # was 0/1; one pass, one AgentTimeoutError
-1/2  mcmc-sampling-stan            # was 0/1; one pass, one timeout
+
+
+
 
 ## Flaky (was passing, now unstable 1/2)
 1/2  video-processing              # failed trial: takeoff frame off by 2-6 frames (225 vs expected 219-223)
-1/2  fix-ocaml-gc                  # one timeout
-1/2  git-multibranch               # one fail
 1/2  merge-diff-arc-agi-task       # one fail
 1/2  crack-7z-hash                 # one timeout
 1/2  sparql-university             # one fail

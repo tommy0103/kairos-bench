@@ -360,7 +360,7 @@ For screen constants, framebuffer format, and filesystem semantics, read the sou
     ],
     hint: `**QEMU Windows 3.11 — two fatal mistakes that caused 11/12 past runs to fail**:
 
-1. **The win311.img boots to DOS, not Windows.** After QEMU starts you see a blue DOS screen — you must type \`win\` + Enter via the QEMU monitor to launch Windows 3.11 into its graphical desktop. If you skip this, you're stuck at DOS and keyboard interactions produce no visible change.
+1. **The win311.img boots to DOS, not Windows.** After QEMU starts you see a blue DOS screen — type \`win\` + Enter via the QEMU monitor to launch Windows 3.11 into its graphical desktop. If you skip this, you're stuck at DOS and keyboard interactions produce no visible change.
 
 2. **Use \`-vga cirrus\` for Windows 3.11.** The default VGA adapter renders a black screen once Windows enters graphical mode. Cirrus is the compatible choice for this era of Windows.
 

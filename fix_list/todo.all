@@ -19,6 +19,7 @@
 # 1/1 torch-tensor-parallelism    (was TIMEOUT, now PASS)
 # 1/1 cobol-modernization         (was FAIL, now PASS)
 # 1/1 make-mips-interpreter       (was FAIL, and had full skill, now PASS)
+# 1/1 install-windows-3-11
 
 # 0/1 TIMEOUT  protein-assembly
 # 0.5/1 TIMEOUT  schemelike-metacircular-eval
@@ -29,7 +30,7 @@
 0/1 TIMEOUT  compile-compcert
 0/1 TIMEOUT  extract-moves-from-video
 0/1 TIMEOUT  gpt2-codegolf
-0/1 TIMEOUT  install-windows-3-11
+
 0/1 TIMEOUT  make-doom-for-mips
 0/1 FAIL     model-extraction-relu-logits
 0/1 FAIL     mteb-leaderboard

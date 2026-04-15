@@ -109,6 +109,13 @@ function inferExecTimeout(task: string): number | undefined {
     t.includes("train model")
   )
     return 1_800_000; // 30 min — fasttext needs time for train-large-then-quantize
+  if (
+    t.includes("crack") ||
+    t.includes("7z") ||
+    t.includes("hashcat") ||
+    t.includes("john")
+  )
+    return 300_000; // 5 min — if wordlist doesn't crack it in 5 min, brute force won't help either
   return undefined;
 }
 
