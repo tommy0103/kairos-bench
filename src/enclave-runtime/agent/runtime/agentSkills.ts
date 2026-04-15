@@ -350,17 +350,16 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
       ["win311"],
       ["windows 3.1"],
     ],
-    hint: `**QEMU VM setup — common verifier pitfalls**:
-- **Use ABSOLUTE paths for disk images**: the verifier reads the QEMU process cmdline via \`/proc/<pid>/cmdline\` and checks that the FULL absolute path (e.g. \`/app/isos/win311.img\`) appears. If you run \`cd /app && qemu ... -hda isos/win311.img\`, the cmdline will only contain the relative path and the test will FAIL. Always use \`-hda /app/isos/win311.img\`.
-- **Use the exact QEMU version specified — THIS IS CRITICAL FOR VISUAL FEEDBACK**: if the task says "compatible with QEMU 5.2.0", you MUST install THAT version. \`apt install qemu-system-x86\` installs 8.x which has different keyboard/VGA emulation that causes Windows 3.11 to not respond to keystrokes even though the monitor socket works. The verifier sends keys via the monitor and checks for ≥10% pixel change — this WILL FAIL with QEMU 8.x. Install from source: \`apt-get install -y build-essential ninja-build pkg-config libglib2.0-dev libpixman-1-dev && wget https://download.qemu.org/qemu-5.2.0.tar.xz && tar xf qemu-5.2.0.tar.xz && cd qemu-5.2.0 && ./configure --target-list=i386-softmmu && make -j$(nproc) && make install\`. This takes ~5 minutes — START THIS FIRST before any other setup.
-- **QEMU monitor socket at /tmp/qemu-monitor.sock**: the verifier sends keystrokes via \`socat - UNIX-CONNECT:/tmp/qemu-monitor.sock\` using the \`sendkey\` command. Ensure you start QEMU with \`-monitor unix:/tmp/qemu-monitor.sock,server,nowait\`.
-- **Visual feedback verification**: the verifier takes VNC screenshots before/after sending keys (F1, Alt+Tab, F10, Alt+F4, Ctrl+Esc) and checks for ≥10% pixel difference. This means:
-  1. Windows must have ACTUALLY BOOTED to the desktop (not stuck at DOS prompt, error dialog, or boot screen).
-  2. The VNC display must be responsive and updating.
-  3. Keyboard input must actually reach the guest OS.
-  After starting the VM, WAIT for it to fully boot (30-60 seconds for Win 3.11), then take a VNC screenshot yourself (\`apt install vncsnapshot && vncsnapshot localhost:1 /tmp/screen.png\`) and verify you see the Windows desktop. If you see a blank/black screen or DOS prompt, the OS hasn't finished booting.
-- **Start services in background/daemon mode**: \`nginx\` blocks in foreground by default. Use \`nginx\` (which auto-daemonizes) or \`nginx &\`. Similarly, \`websockify --daemon ...\`. Never let a foreground service eat your entire time budget.
-- **Install socat early**: the verifier needs it, and you'll need it to test keyboard input yourself.`,
+    hint: `**QEMU Windows 3.11 — two fatal mistakes that caused 11/12 past runs to fail**:
+
+1. **The win311.img boots to DOS, not Windows.** After QEMU starts you see a blue DOS screen — you must type \`win\` + Enter via the QEMU monitor to launch Windows 3.11 into its graphical desktop. If you skip this, you're stuck at DOS and keyboard interactions produce no visible change.
+
+2. **Use \`-vga cirrus\` for Windows 3.11.** The default VGA adapter renders a black screen once Windows enters graphical mode. Cirrus is the compatible choice for this era of Windows.
+
+If you're unsure about QEMU monitor key sending or VGA adapter compatibility, search:
+- \`logos_call("web_search", {"query": "QEMU monitor sendkey command syntax"})\`
+- \`logos_call("web_search", {"query": "QEMU VGA adapter Windows 3.11 cirrus vs std"})\`
+- \`logos_call("web_search", {"query": "QEMU QMP send-key JSON API"})\``,
   },
   {
     id: "primer-tm-verification",
