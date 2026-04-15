@@ -30,15 +30,11 @@
 
 ## Improved since baseline (partially passing)
 1/2  compile-compcert              # was 0/1; one pass, one AgentTimeoutError
-1/2  make-mips-interpreter         # was 0/1; one pass, one timeout. Passing trial: frame.bmp created + image match, but stdout missing I_InitGraphics line in failed trial
-1/2  mteb-leaderboard              # was 0/1; one pass, one timeout
 1/2  write-compressor              # was 0/1; one pass, one timeout (2 stream truncations)
 1/2  mcmc-sampling-stan            # was 0/1; one pass, one timeout
 
 ## Flaky (was passing, now unstable 1/2)
-1/2  configure-git-webserver       # failed trial: HTTP 404, file not served
 1/2  video-processing              # failed trial: takeoff frame off by 2-6 frames (225 vs expected 219-223)
-1/2  qemu-alpine-ssh               # failed trial: AgentTimeoutError; agent used bare `nc` on QEMU monitor, hung 590s. Skill updated to warn about this.
 1/2  fix-ocaml-gc                  # one timeout
 1/2  git-multibranch               # one fail
 1/2  merge-diff-arc-agi-task       # one fail
