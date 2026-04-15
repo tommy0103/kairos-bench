@@ -2350,6 +2350,28 @@ If the web server returns the expected content → PASS. Do not require that the
 
 If the basic testsuite passes → PASS.`,
   },
+  {
+    id: "sql-optimize-evaluator",
+    name: "SQL optimization — do not run the slow original query",
+    triggers: [
+      ["sql", "optimize"],
+      ["sql", "efficient"],
+      ["query", "optimize"],
+      ["query", "efficient"],
+      ["sqlite", "optimize"],
+    ],
+    recipe: `### Skill: SQL query optimization — do NOT run the original slow query
+
+**DO NOT execute the original unoptimized query to compare performance.** The original query can take minutes to run and will timeout, wasting the entire time budget. The verifier handles performance comparison itself.
+
+**What to check instead**:
+1. \`/app/sol.sql\` exists and contains a single SQL query with no comments
+2. The optimized query executes successfully on the database
+3. The output matches the original (compare against a pre-existing output file if the agent already generated one, otherwise run only the optimized query and check it produces reasonable output)
+4. The database was not modified (no new indexes, tables, or schema changes — check with \`.schema\`)
+
+If the query runs, produces output, and the database is unmodified → PASS.`,
+  },
 ];
 
 // ── Skill detection ──────────────────────────────────────────
