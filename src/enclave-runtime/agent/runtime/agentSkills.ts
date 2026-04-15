@@ -359,6 +359,8 @@ For screen constants, framebuffer format, and filesystem semantics, read the sou
 
 2. **Use \`-vga cirrus\` for Windows 3.11.** The default VGA adapter renders a black screen once Windows enters graphical mode. Cirrus is the compatible choice for this era of Windows.
 
+3. **Use a UNIX monitor socket at \`/tmp/qemu-monitor.sock\`** — not telnet. Use \`-monitor unix:/tmp/qemu-monitor.sock,server,nowait\`. Also use **absolute paths** for the disk image (e.g. \`-hda /app/isos/win311.img\`).
+
 If you're unsure about QEMU monitor key sending or VGA adapter compatibility, search:
 - \`logos_call("web_search", {"query": "QEMU monitor sendkey command syntax"})\`
 - \`logos_call("web_search", {"query": "QEMU VGA adapter Windows 3.11 cirrus vs std"})\`
