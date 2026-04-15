@@ -918,6 +918,21 @@ After extracting the FEN, **verify it looks reasonable**: print the board (\`che
 Use Stockfish for the best move: \`apt-get install -y stockfish\`, then use \`python-chess\` engine interface with sufficient depth/time.`,
   },
   {
+    id: "adaptive-rejection-sampler",
+    name: "Adaptive rejection sampler — no plan mode",
+    triggers: [
+      ["adaptive", "rejection", "sampler"],
+      ["adaptive", "rejection", "sampling"],
+      ["gilks", "1992"],
+      ["gilks", "wild"],
+    ],
+    hint: `**Adaptive rejection sampler — do NOT use plan mode**:
+
+The time budget (900s) is tight for writing a full ARS implementation + tests + sample generation. Every past run that used plan mode timed out due to replanning overhead. Write the entire solution in one session — implement, test, and generate output files without calling logos_complete with a plan.
+
+If writing the R file via logos_write gets truncated, use \`logos_exec\` with \`cat > /app/ars.R << 'EOF'\` or split into chunks with \`logos_write({append: true})\`.`,
+  },
+  {
     id: "sql-query-optimization",
     name: "SQL query optimization",
     triggers: [
