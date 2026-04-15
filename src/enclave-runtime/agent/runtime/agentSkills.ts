@@ -945,11 +945,16 @@ If writing the R file via logos_write gets truncated, use \`logos_exec\` with \`
       [".ckpt", "sample"],
       [".ckpt", "c file"],
     ],
-    hint: `**GPT-2 from TF checkpoint — understand the format first**:
+    hint: `**GPT-2 from TF checkpoint — understand the file format first**:
 
-TF .ckpt is TensorFlow's native checkpoint format — it is NOT a simple raw binary dump of weights. It has its own structure with a variable index and data shards. Research this format before writing any C code.
+The .ckpt file is TensorFlow's native checkpoint format. It stores weights as **named variables** (e.g. \`model/h0/attn/c_attn/w:0\`), not as a flat binary dump in a fixed order. You cannot just read the file sequentially as raw floats — you need to parse the checkpoint index to find where each variable is stored.
 
-If Python/TensorFlow is available in the container, inspect the checkpoint first to understand variable names, shapes, and data layout.`,
+Before writing the C reader, figure out the checkpoint structure:
+1. Check if Python is available and inspect the checkpoint: \`python3 -c "import struct; ..."\` or try installing tensorflow
+2. Look at how the official openai/gpt-2 repo loads weights — the variable names tell you the data layout
+3. The .ckpt format has an index file structure you can parse in C
+
+This is the #1 reason past runs failed — agents assumed the file is a raw float array and got garbage output.`,
   },
   {
     id: "sql-query-optimization",
