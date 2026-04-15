@@ -2351,6 +2351,32 @@ If the web server returns the expected content → PASS. Do not require that the
 If the basic testsuite passes → PASS.`,
   },
   {
+    id: "ars-evaluator-scope",
+    name: "Adaptive rejection sampler — evaluator scope",
+    triggers: [
+      ["adaptive", "rejection", "sampler"],
+      ["adaptive", "rejection", "sampling"],
+      ["gilks", "1992"],
+      ["gilks", "wild"],
+    ],
+    recipe: `### Skill: Adaptive rejection sampler — do NOT over-test
+
+**The time budget is very tight (900s total).** The evaluator must finish quickly to leave time for the verifier.
+
+**Only test these things**:
+1. \`/app/ars.R\` exists and sources without error
+2. The \`ars()\` function exists and can sample from a simple distribution (e.g. \`dnorm\`)
+3. The \`test()\` function exists, runs, and prints results
+
+**DO NOT fail the agent for**:
+- Not accepting expression input (only function input is fine)
+- Not having "strict" TEST_NAME: PASS/FAIL output format
+- Not validating vectorization of the density function
+- Any requirement not explicitly stated in the task instructions
+
+If ars.R exists, ars() produces samples, and test() runs → PASS. Do not waste time on adversarial edge cases that the verifier does not check.`,
+  },
+  {
     id: "sql-optimize-evaluator",
     name: "SQL optimization — do not run the slow original query",
     triggers: [
