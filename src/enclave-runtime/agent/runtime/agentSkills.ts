@@ -285,6 +285,8 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
 
 5. **Write large files in chunks**: if writing vm.js via logos_write gets truncated, split into multiple \`logos_write({append: true})\` calls, or use \`logos_exec\` with \`cat >> /app/vm.js << 'EOF'\`.
 
+6. **Self-test: check stdout completeness**: after running \`node /app/vm.js\`, verify that stdout contains ALL expected DOOM init messages (e.g. \`I_InitGraphics\`, \`I_Init\`, \`M_Init\`, \`R_Init\`). A missing line usually means a MIPS instruction bug is silently breaking a specific printf call path. Also confirm \`/tmp/frame.bmp\` exists and is a valid image.
+
 For screen constants, framebuffer format, and filesystem semantics, read the source:
 - \`doomgeneric/doomgeneric/doomgeneric.h\` — screen resolution defines
 - \`doomgeneric/doomgeneric/my_stdlib.c\` — syscall numbers and conventions
