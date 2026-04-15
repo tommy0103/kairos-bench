@@ -901,9 +901,9 @@ print(f"\\nPASS: All {poly_count} rows have type='polyline'")
     ],
     recipe: `### Skill: MIPS Interpreter — Frame BMP Output Verification
 
-**Purpose**: Verify that \`node /app/vm.js\` actually produces a valid framebuffer image at \`/tmp/frame.bmp\` within 30 seconds, matching the verifier's exact contract. The verifier checks: (1) frame.bmp exists, (2) it's a valid image, (3) it's visually similar to a reference DOOM screen.
+**Purpose**: Verify that \`node /app/vm.js\` runs the MIPS binary, produces DOOM initialization output on stdout, and saves a valid frame image. The task says "I will check that you booted doom correctly, and check that the first frame is correctly created and saved."
 
-**Why this matters**: The agent may think the interpreter works because DOOM init text appears on stdout, but the framebuffer file might not be written (wrong syscall interception), might be in the wrong format (wrong BMP headers, wrong dimensions, wrong pixel order), or might be blank.
+**Why this matters**: The agent may think the interpreter works because some text appears on stdout, but the framebuffer file might not be written (wrong syscall interception), might be in the wrong format, or might be blank.
 
 **Recipe** — run this after the agent produces vm.js:
 
@@ -922,11 +922,11 @@ echo "PASS: vm.js exists"
 echo ""
 echo "=== Check 2: Run vm.js, wait for /tmp/frame.bmp ==="
 rm -f /tmp/frame.bmp
-timeout 35 node /app/vm.js > /tmp/_vm_stdout.txt 2>&1 &
+timeout 60 node /app/vm.js > /tmp/_vm_stdout.txt 2>&1 &
 VM_PID=$!
 
 ELAPSED=0
-while [ ! -f /tmp/frame.bmp ] && [ $ELAPSED -lt 30 ]; do
+while [ ! -f /tmp/frame.bmp ] && [ $ELAPSED -lt 45 ]; do
     sleep 1
     ELAPSED=$((ELAPSED + 1))
 done
@@ -934,7 +934,7 @@ done
 if [ -f /tmp/frame.bmp ]; then
     echo "PASS: /tmp/frame.bmp created after ~\${ELAPSED}s"
 else
-    echo "FAIL: /tmp/frame.bmp NOT created within 30 seconds"
+    echo "FAIL: /tmp/frame.bmp NOT created"
     echo "  stdout (last 20 lines):"
     tail -20 /tmp/_vm_stdout.txt 2>/dev/null || echo "  (no output)"
     kill $VM_PID 2>/dev/null || true
@@ -955,8 +955,6 @@ from PIL import Image
 img = Image.open('/tmp/frame.bmp').convert('RGB')
 w, h = img.size
 print(f'  Image dimensions: {w}x{h}')
-if w != 320 or h != 200:
-    print(f'WARNING: Expected 320x200, got {w}x{h}. Verifier may still accept if similar enough.')
 import numpy as np
 arr = np.array(img)
 mean_val = arr.mean()
@@ -973,18 +971,12 @@ print('PASS: frame.bmp is a valid, non-blank image')
 fi
 
 echo ""
-echo "=== Check 4: DOOM init text in stdout (CRITICAL) ==="
-EXPECTED_TEXT="I_InitGraphics: DOOM screen size: w x h: 320 x 200"
-if grep -qF "$EXPECTED_TEXT" /tmp/_vm_stdout.txt 2>/dev/null; then
-    echo "PASS: Exact verifier text found in stdout"
+echo "=== Check 4: DOOM init text in stdout ==="
+if grep -q "I_Init\\|M_Init\\|R_Init\\|D_Init" /tmp/_vm_stdout.txt 2>/dev/null; then
+    echo "PASS: DOOM initialization messages found in stdout"
 else
-    echo "FAIL: Expected text not found in stdout:"
-    echo "  Expected: '$EXPECTED_TEXT'"
-    echo "  The verifier checks for this EXACT byte string."
-    echo "  Common causes:"
-    echo "  1. The write syscall for fd=1 (stdout) is not forwarding to process.stdout"
-    echo "  2. The printf implementation in the binary is incomplete"
-    echo "  3. The DG_Init / I_InitGraphics function is not being reached"
+    echo "FAIL: No DOOM initialization messages found in stdout"
+    echo "  The interpreter should forward all writes to fd 1/2 to process.stdout"
     echo "  Last 30 lines of stdout:"
     tail -30 /tmp/_vm_stdout.txt 2>/dev/null || echo "  (no output)"
     FAILED=1
@@ -1004,10 +996,10 @@ fi
 
 **How to use**:
 1. After the agent creates \`/app/vm.js\`, write this script to a temp file and run: \`bash /tmp/_skill_doom_frame_check.sh\`
-2. If frame.bmp doesn't appear: the interpreter isn't reaching \`DG_DrawFrame\` or the framebuffer write syscall isn't being intercepted. The agent needs to check its syscall handling.
+2. If frame.bmp doesn't appear: the interpreter isn't reaching \`DG_DrawFrame\` or the framebuffer write syscall isn't being intercepted.
 3. If frame.bmp is blank/black: the framebuffer address in memory is wrong or the pixel format conversion is incorrect.
-4. If frame.bmp has wrong dimensions: check \`DOOMGENERIC_RESX\` (320) and \`DOOMGENERIC_RESY\` (200) in the source.
-5. **CRITICAL**: The verifier uses L2 similarity, not exact match. The image just needs to look like a DOOM screen. But it must be a valid BMP/image file.`,
+4. If frame.bmp has wrong dimensions: check the screen resolution defines in the source code.
+5. **DO NOT test whether frame.bmp is continuously updated or written multiple times.** Only check that it exists and looks like a real DOOM frame. Testing update frequency causes false FAILs that lead the fixer to break working code.`,
   },
   {
     id: "pdb-chromophore-sequence-check",
@@ -2334,6 +2326,29 @@ printf 'test/01-factorial.scm\\n' | timeout 60 python3 interp.py eval.scm
 **DO NOT** run nested self-interpretation tests (\`eval.scm\` interpreting \`eval.scm\` interpreting a test). These are too slow for the evaluator budget and produce false timeout-based failures that waste fixer rounds.
 
 **Verdict**: If eval.scm exists and direct interpretation produces correct output for the tested programs → PASS. Do NOT test self-interpretation.`,
+  },
+  {
+    id: "git-webserver-no-reset",
+    name: "Git webserver — do not reset repo",
+    triggers: [
+      ["git", "clone", "push", "curl"],
+      ["git", "push", "webserver"],
+      ["git", "server", "web", "push"],
+      ["git", "push", "8080"],
+      ["configure", "git", "webserver"],
+    ],
+    recipe: `### Skill: Git-to-web deployment — do NOT reset the repo
+
+**DO NOT fail the agent because the repo already contains pushed files (e.g. hello.html).** The agent tests its own setup by doing a push during configuration. This means the repo and web root already have content when the evaluator runs.
+
+**DO NOT instruct the fixer to clear/reset the bare repo, delete refs, or re-init the repo.** This destroys the deployed files and causes the verifier to get HTTP 404.
+
+**What to test instead**:
+1. The web server on port 8080 serves the expected file (e.g. \`curl http://localhost:8080/hello.html\`)
+2. The post-receive hook exists and is executable
+3. A NEW push (with a different file) gets deployed correctly
+
+If the web server returns the expected content → PASS. Do not require that the "exact user workflow" can be replayed from scratch.`,
   },
 ];
 

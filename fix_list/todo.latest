@@ -1,0 +1,79 @@
+# Task Status Overview
+# Source: jobs/2026-04-15__17-18-00 (178 trials, 89 tasks x2)
+# Compared against: fix_list/todo.all (baseline)
+# Overall: 136/178 pass (76.4%)
+
+## Fully passing (2/2) — 67 tasks
+# bn-fit-modify, break-filter-js-from-html, build-cython-ext, build-pmars,
+# build-pov-ray, cancel-async-tasks, circuit-fibsqrt, cobol-modernization,
+# code-from-image, constraints-scheduling, count-dataset-tokens,
+# custom-memory-heap-crash, db-wal-recovery, distribution-search,
+# dna-assembly, dna-insert, extract-elf, extract-moves-from-video,
+# feal-differential-cryptanalysis, feal-linear-cryptanalysis,
+# filter-js-from-html, financial-document-processor, fix-code-vulnerability,
+# fix-git, gcode-to-text, git-leak-recovery, headless-terminal,
+# hf-model-inference, kv-store-grpc, large-scale-text-editing,
+# largest-eigenval, llm-inference-batching-scheduler, log-summary-date-ranges,
+# mailman, modernize-scientific-stack, multi-source-data-merger,
+# nginx-request-logging, openssl-selfsigned-cert, overfull-hbox,
+# password-recovery, path-tracing, path-tracing-reverse, polyglot-c-py,
+# polyglot-rust-c, portfolio-optimization, prove-plus-comm, pypi-server,
+# pytorch-model-cli, pytorch-model-recovery, qemu-startup, regex-chess,
+# regex-log, reshard-c4-data, rstan-to-pystan, sanitize-git-repo,
+# sqlite-db-truncate, sqlite-with-gcov, torch-pipeline-parallelism,
+# torch-tensor-parallelism, tune-mjcf, vulnerable-secret,
+# winning-avg-corewars
+
+## Newly fixed since baseline
+# 2/2 extract-moves-from-video    (was 0/1 TIMEOUT)
+# 2/2 tune-mjcf                   (was 0/1 TIMEOUT)
+
+## Improved since baseline (partially passing)
+1/2  compile-compcert              # was 0/1; one pass, one AgentTimeoutError
+1/2  make-mips-interpreter         # was 0/1; one pass, one timeout. Passing trial: frame.bmp created + image match, but stdout missing I_InitGraphics line in failed trial
+1/2  mteb-leaderboard              # was 0/1; one pass, one timeout
+1/2  write-compressor              # was 0/1; one pass, one timeout (2 stream truncations)
+1/2  mcmc-sampling-stan            # was 0/1; one pass, one timeout
+
+## Flaky (was passing, now unstable 1/2)
+1/2  configure-git-webserver       # failed trial: HTTP 404, file not served
+1/2  video-processing              # failed trial: takeoff frame off by 2-6 frames (225 vs expected 219-223)
+1/2  qemu-alpine-ssh               # failed trial: AgentTimeoutError; agent used bare `nc` on QEMU monitor, hung 590s. Skill updated to warn about this.
+1/2  fix-ocaml-gc                  # one timeout
+1/2  git-multibranch               # one fail
+1/2  merge-diff-arc-agi-task       # one fail
+1/2  crack-7z-hash                 # one timeout
+1/2  schemelike-metacircular-eval  # one timeout
+1/2  sparql-university             # one fail
+1/2  train-fasttext                # one fail
+1/2  chess-best-move               # see below (0/2 but was not in baseline failing list)
+
+## Still failing (0/2) — need investigation
+0/2  adaptive-rejection-sampler    # both AgentTimeoutError
+0/2  caffe-cifar-10                # both AgentTimeoutError; build too slow
+0/2  chess-best-move               # both AgentTimeoutError 900s; one wrong move, one no output
+0/2  gpt2-codegolf                 # both AgentTimeoutError
+0/2  install-windows-3-11          # both AgentTimeoutError; skill updated (cirrus + win + socket path) but this run was before skill took effect
+0/2  make-doom-for-mips            # both AgentTimeoutError
+0/2  model-extraction-relu-logits  # both fail (NonZeroAgentExitCodeError + verifier fail)
+0/2  mteb-retrieve                 # both fail
+0/2  protein-assembly              # both NonZeroAgentExitCodeError (bench-runner exit 1)
+0/2  raman-fitting                 # both fail
+0/2  sam-cell-seg                  # both fail
+
+## Not in this run
+# query-optimize (was in baseline, not in this batch)
+
+## Code fixes applied during this session
+# 1. planExecutor.ts: fixed exec fallback writing logos:// URI as real path -> now writes to /tmp/logos-sandbox/
+# 2. planExecutor.ts: changed log URIs from logos://sandbox/plan/X to logos://sandbox/plan-X (flat, no subdirectory)
+# 3. planExecutor.ts + bench-runner.ts: prompts updated to "try logos_read first, fallback to cat /tmp/logos-sandbox/"
+# 4. logosTools.ts: logos_write now supports append=true parameter
+# 5. All tool docs (planExecutor, evaluator, exploreExecutor, logosTools): updated logos_write signature + "split large files into chunks" hint
+# 6. chatClient.ts: added debug logging for stream truncation (error type, httpStatus, contentBytes, toolBlocks, inputJson bytes received)
+# 7. All bench-runner.txt log outputs: tool call args now show total byte count when truncated
+
+## Skill changes applied during this session
+# install-windows-3-11 (qemu-vm-setup): Medium level — added DOS->win boot, -vga cirrus, /tmp/qemu-monitor.sock unix socket, absolute paths
+# make-mips-interpreter: Medium level — sparse memory, delay slots, custom syscalls, no plan mode, chunk writes, stdout completeness self-test
+# qemu-general: added warning about bare nc/telnet hanging on QEMU sockets

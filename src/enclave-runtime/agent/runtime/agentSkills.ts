@@ -342,7 +342,9 @@ For screen constants, framebuffer format, and filesystem semantics, read the sou
    - Check telnet port: \`(echo "" | telnet 127.0.0.1 6665) 2>&1 | head -5\` or use \`ss -tlnp | grep 6665\`.
    - For Alpine boot: allow 10-30 seconds for boot. Poll in a loop: \`for i in $(seq 1 30); do echo | telnet 127.0.0.1 6665 2>&1 | grep -q "login" && break; sleep 2; done\`.
 
-4. **No KVM in containers**: \`/dev/kvm\` is usually not available. QEMU falls back to TCG (software emulation), which is slower but works. Do NOT pass \`-enable-kvm\` — it will fail. Expect boot to take 10-60 seconds depending on the OS.`,
+4. **No KVM in containers**: \`/dev/kvm\` is usually not available. QEMU falls back to TCG (software emulation), which is slower but works. Do NOT pass \`-enable-kvm\` — it will fail. Expect boot to take 10-60 seconds depending on the OS.
+
+5. **Never use bare \`nc\` or \`telnet\` to talk to QEMU sockets** — they hang indefinitely and eat the entire 590s logos_exec timeout. Always use \`timeout\` or \`socat\` with \`-T\` flag, e.g. \`timeout 5 socat - UNIX-CONNECT:/tmp/monitor.sock\` or \`echo "cmd" | timeout 5 nc -q 2 127.0.0.1 6666\`.`,
   },
   {
     id: "qemu-vm-setup",
@@ -525,14 +527,12 @@ OCR CANNOT reliably distinguish visually similar characters: \`0\`/\`O\`, \`1\`/
     hint: `**Web data extraction — NEVER curl entire pages or download huge datasets**:
 - Modern web pages (especially HuggingFace Spaces, Gradio apps, dashboards) are JS-rendered. Curling or fetching them returns empty or unusable HTML.
 - **NEVER** do: \`curl https://some-leaderboard.hf.space/\` — it won't work.
-- **DO NOT use \`mteb.load_results()\`** — it downloads the ENTIRE results repo (GB of data), will timeout or OOM.
-- **DO NOT clone or sparse-checkout the entire \`mteb/results\` dataset** — it's too large and too slow.
 - **DO NOT use the Gradio client API** (\`gradio_client.Client("mteb/leaderboard")\`) — the queue is frequently stopped or full, and API calls hang or timeout. Every past run that tried Gradio wasted 10+ minutes and got nothing. Skip it entirely.
 
 **Benchmark leaderboard queries**:
 - The \`mteb\` Python package and \`huggingface_hub\` package are available and useful. Explore their APIs.
-- Avoid downloading data for all models — first identify candidate models, then only fetch results for the top candidates.
-- Keep total data transfer under a few MB. If any single operation takes > 60 seconds, it's downloading too much.
+- For MTEB results, you can \`git clone --depth=1\` the \`embeddings-benchmark/results\` repo and then checkout the commit corresponding to the target date. This gives you direct access to per-model JSON result files.
+- **Write your answer early**: once you have a strong candidate, write it to the output file FIRST, then continue verifying. A correct early answer beats a perfect analysis that times out.
 - **Time-sensitive queries ("as of DATE")**: benchmark datasets may contain results submitted at any time. If the task specifies a date, filter by when results were submitted — check model creation dates or commit timestamps.
 - **Model type matters**: leaderboards may distinguish between embedding models and general-purpose LLMs. Pay attention to what the task is actually asking for.`,
   },
