@@ -18,13 +18,13 @@
 # 1/1 configure-git-webserver     (was FAIL, now PASS)
 # 1/1 torch-tensor-parallelism    (was TIMEOUT, now PASS)
 # 1/1 cobol-modernization         (was FAIL, now PASS)
+# 1/1 make-mips-interpreter       (was FAIL, and had full skill, now PASS)
 
 # 0/1 TIMEOUT  protein-assembly
-# 0/1 TIMEOUT  schemelike-metacircular-eval
+# 0.5/1 TIMEOUT  schemelike-metacircular-eval
 
 ## Still failing — need investigation
 0/1 TIMEOUT  caffe-cifar-10               # build too slow for 900s timeout
-
 0/1 TIMEOUT  adaptive-rejection-sampler
 0/1 TIMEOUT  compile-compcert
 0/1 TIMEOUT  extract-moves-from-video
@@ -45,4 +45,4 @@
 # 1/1 filter-js-from-html
 # 1/1 regex-chess
 # 0.8/1 feal-linear-cryptanalysis
-# 0/1 FAIL     make-mips-interpreter
+

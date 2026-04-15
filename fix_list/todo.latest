@@ -30,7 +30,6 @@
 
 ## Improved since baseline (partially passing)
 1/2  compile-compcert              # was 0/1; one pass, one AgentTimeoutError
-1/2  write-compressor              # was 0/1; one pass, one timeout (2 stream truncations)
 1/2  mcmc-sampling-stan            # was 0/1; one pass, one timeout
 
 ## Flaky (was passing, now unstable 1/2)
@@ -39,9 +38,7 @@
 1/2  git-multibranch               # one fail
 1/2  merge-diff-arc-agi-task       # one fail
 1/2  crack-7z-hash                 # one timeout
-1/2  schemelike-metacircular-eval  # one timeout
 1/2  sparql-university             # one fail
-1/2  train-fasttext                # one fail
 1/2  chess-best-move               # see below (0/2 but was not in baseline failing list)
 
 ## Still failing (0/2) — need investigation
@@ -52,7 +49,6 @@
 0/2  install-windows-3-11          # both AgentTimeoutError; skill updated (cirrus + win + socket path) but this run was before skill took effect
 0/2  make-doom-for-mips            # both AgentTimeoutError
 0/2  model-extraction-relu-logits  # both fail (NonZeroAgentExitCodeError + verifier fail)
-0/2  mteb-retrieve                 # both fail
 0/2  protein-assembly              # both NonZeroAgentExitCodeError (bench-runner exit 1)
 0/2  raman-fitting                 # both fail
 0/2  sam-cell-seg                  # both fail

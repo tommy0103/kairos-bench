@@ -108,7 +108,8 @@ After writing plaintexts.txt, verify line count, then call logos_complete. Do NO
 - If a build fails, read the FULL error output (use logos_read if truncated) before attempting a fix. Do not blindly retry.
 - Common pitfalls: missing dev packages (install with \`apt-get install -y\`), wrong OCaml/Coq version, missing autoconf/automake.
 - **CompCert-specific**: CompCert 3.x requires Coq in a specific version range (e.g. 8.12-8.16, NOT 8.18+). Always run \`grep -i coq configure\` or \`head -100 configure\` FIRST to check. Use opam to install the exact required version in one go — do not guess.
-- For long builds (Coq proofs, LLVM, GCC): the build itself may take 20-60 minutes. Start it early and do not waste time on unnecessary steps beforehand.`,
+- For long builds (Coq proofs, LLVM, GCC): the build itself may take 20-60 minutes. Start it early and do not waste time on unnecessary steps beforehand.
+- **Do NOT use plan mode for compilation tasks.** \`opam install\` and \`make\` can exceed the 590s logos_exec timeout — that's expected. When a command times out, the process is still running in the background. Check with \`pgrep -a make\` or \`pgrep -a opam\`, and if it's still going, just re-run the same command (make is idempotent). Do NOT enter plan mode — replanning wastes far more time than waiting for the build.`,
   },
   {
     id: "ml-training-gpu",
@@ -874,6 +875,47 @@ The container's \`mp.spawn\` is unreliable (Bus errors, shared memory issues). V
 - Example: "count deepseek tokens" means tokenize EVERY column with "deepseek" in the name (e.g. \`deepseek_reasoning\`, \`deepseek_solution\`, etc.), then sum the counts.
 - Before writing code, list ALL column names and identify every column matching the keyword. Print them explicitly to verify.
 - Double-check: if you only selected one column but multiple columns match, you are almost certainly wrong.`,
+  },
+  {
+    id: "embedding-model-usage",
+    name: "Embedding model query prefix",
+    triggers: [
+      ["embedding", "cosine"],
+      ["embedding", "similarity"],
+      ["bge", "embedding"],
+      ["bge", "cosine"],
+      ["bge", "similarity"],
+      ["embedding", "retrieve"],
+      ["cosine", "similarity", "model"],
+    ],
+    hint: `**Embedding models — check the model's required query format BEFORE encoding**:
+Many embedding models (e.g. BGE, E5, GTE) require a specific instruction prefix prepended to the query text for retrieval tasks. Without the correct prefix, cosine similarity rankings will be wrong.
+
+Before writing code, search for the model's usage:
+- \`logos_call("web_search", {"query": "<model_name> embedding query instruction prefix"})\`
+- \`logos_call("fetch_url", {"url": "https://huggingface.co/<org>/<model_name>"})\` — check the model card for usage examples
+
+For example, BGE models typically need \`"为这个句子生成表示以用于检索相关文章："\` (Chinese) or \`"Represent this sentence for searching relevant passages:"\` (English) prepended to the query. Using the wrong prefix (or no prefix) produces incorrect similarity rankings.`,
+  },
+  {
+    id: "chess-board-recognition",
+    name: "Chess board image to best move",
+    triggers: [
+      ["chess", "board", "move"],
+      ["chess", "image", "move"],
+      ["chess_board", "move"],
+      ["chess", "best move"],
+      ["chess", "png", "move"],
+    ],
+    hint: `**Chess board recognition — the FEN extraction is the hardest part**:
+
+The critical step is correctly converting the board image to a FEN string. Pixel-based piece recognition is error-prone and causes wrong FEN → wrong best move. Before writing your own recognizer, search for better approaches:
+- \`logos_call("web_search", {"query": "chess board image recognition FEN python library"})\`
+- \`logos_call("web_search", {"query": "chess piece detection from screenshot python"})\`
+
+After extracting the FEN, **verify it looks reasonable**: print the board (\`chess.Board(fen)\`), count pieces (should make sense for a real game), and check that the position is legal (\`board.is_valid()\`). If any piece count looks wrong, your recognition has a bug — fix it before running the engine.
+
+Use Stockfish for the best move: \`apt-get install -y stockfish\`, then use \`python-chess\` engine interface with sufficient depth/time.`,
   },
   {
     id: "git-webserver-setup",

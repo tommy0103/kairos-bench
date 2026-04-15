@@ -240,6 +240,7 @@ export async function* reactLoop(
 
         let resultText: string;
         let result: unknown;
+        const toolStartTime = Date.now();
 
         if (isEmpty) {
           resultText =
@@ -252,10 +253,19 @@ export async function* reactLoop(
         } else {
           try {
             if (toolName === LOGOS_COMPLETE) {
-              completeParams = parsedParams as unknown as LogosCompleteParams;
-              resultText = "Turn completed.";
-              result = { ok: true };
-              completed = true;
+              const cp = parsedParams as unknown as LogosCompleteParams;
+              if (!cp.task_log && (cp.plan || cp.sleep)) {
+                resultText =
+                  "Error: task_log is REQUIRED when using plan or sleep. " +
+                  "Call logos_complete again with a task_log field containing a detailed record " +
+                  "of what you did, key outputs, commands run, errors encountered, and current state.";
+                result = { error: "missing task_log" };
+              } else {
+                completeParams = cp;
+                resultText = "Turn completed.";
+                result = { ok: true };
+                completed = true;
+              }
             } else {
               const tool = toolMap.get(toolName);
               if (!tool) {
@@ -271,6 +281,12 @@ export async function* reactLoop(
             resultText = `Error: ${errMsg}`;
             result = { error: errMsg };
           }
+        }
+
+        const toolElapsedMs = Date.now() - toolStartTime;
+        const toolElapsedSec = (toolElapsedMs / 1000).toFixed(1);
+        if (toolName !== LOGOS_COMPLETE && !isEmpty) {
+          resultText += `\n\n(took ${toolElapsedSec}s)`;
         }
 
         if (emptyCallStreak >= 3) {

@@ -105,6 +105,16 @@ export async function executePlan(
 
     const params = execResult.params;
 
+    if (!params.task_log && execResult.toolTrace.length > 0) {
+      const SLOW_THRESHOLD_MS = 10_000;
+      const lines = execResult.toolTrace.map((t) => {
+        const sec = (t.elapsedMs / 1000).toFixed(1);
+        const slow = t.elapsedMs >= SLOW_THRESHOLD_MS ? " [SLOW]" : "";
+        return `- ${t.tool}(${t.args}) → ${t.result.slice(0, 200)}${t.result.length > 200 ? "…" : ""} (${sec}s${slow})`;
+      });
+      params.task_log = `## Auto-generated tool trace (agent did not provide task_log)\n\n${lines.join("\n")}`;
+    }
+
     const logPath =
       depth === 0
         ? `logos://sandbox/plan-step-${step}.log`
@@ -268,6 +278,7 @@ async function persistTaskLog(
 interface SubAgentResult {
   params?: LogosCompleteParams;
   turns: number;
+  toolTrace: Array<{ tool: string; args: string; result: string; elapsedMs: number }>;
 }
 
 async function runSubAgent(opts: {
@@ -308,6 +319,10 @@ async function runSubAgent(opts: {
 
   let turns = 0;
   let completeParams: LogosCompleteParams | undefined;
+  const toolTrace: SubAgentResult["toolTrace"] = [];
+  let currentToolStart = 0;
+  let currentToolName = "";
+  let currentToolArgs = "";
 
   for await (const event of loop) {
     turns++;
@@ -316,6 +331,9 @@ async function runSubAgent(opts: {
         const raw = JSON.stringify(event.params);
         const args = raw.length > 200 ? raw.slice(0, 200) + `… (${raw.length} bytes total)` : raw;
         console.log(`  [tool] ${event.toolName}(${args})`);
+        currentToolStart = Date.now();
+        currentToolName = event.toolName;
+        currentToolArgs = args;
         break;
       }
       case "tool_execution_end":
@@ -327,6 +345,12 @@ async function runSubAgent(opts: {
           const preview =
             text.length > 300 ? text.slice(0, 300) + "..." : text;
           console.log(`  [result] ${preview}`);
+          toolTrace.push({
+            tool: currentToolName,
+            args: currentToolArgs,
+            result: text.length > 500 ? text.slice(0, 500) + "…" : text,
+            elapsedMs: Date.now() - currentToolStart,
+          });
         }
         break;
       case "logos_complete":
@@ -344,7 +368,7 @@ async function runSubAgent(opts: {
     }
   }
 
-  return { params: completeParams, turns };
+  return { params: completeParams, turns, toolTrace };
 }
 
 // ── Prompt fragments ─────────────────────────────────────────
