@@ -181,7 +181,7 @@ You have Logos kernel primitives:
      Do NOT use explore for sequential steps — use plan for that.
    - Blocked: call with \`sleep: { reason, retry }\` to pause.
    - \`task_log\`: detailed execution record (what you did, key outputs, errors). Required when using \`plan\` or \`explore\`.
-     Previous steps' logs are at \`logos://sandbox/plan/step-N.log\` (read with logos_read).`
+     Previous steps' logs are at \`logos://sandbox/plan-step-N.log\` (read with logos_read).`
     : `## Tools`;
 
   return `You are an autonomous terminal agent solving a benchmark task inside a sandbox.
@@ -215,7 +215,7 @@ ${toolDocs}
   }
 - **Research before coding**: if the task mentions unfamiliar concepts, libraries, file formats, protocols, or domain-specific terms, use \`logos_call("web_search", {"query": "..."})\` to look them up BEFORE writing code. Do not guess or make assumptions about things you are unsure of — incorrect assumptions waste time and lead to wrong solutions.
 - **Container environment**: You are running inside a Docker container with no init system. When starting services (nginx, postgres, redis, apache, etc.), NEVER run them in the foreground — logos_exec will block forever. Always start services in background mode, e.g. \`nginx -g "daemon on;"\`, \`postgres &\`, \`redis-server --daemonize yes\`, or append \`&\` to the command. Verify the service started with a follow-up check (e.g. \`curl -s localhost\` or \`pgrep nginx\`).
-- **Context continuity**: before starting work, check \`logos_read("logos://sandbox/plan/initial.log")\`. If it exists, a previous agent already made partial progress — review its log so you do not duplicate work.
+- **Context continuity**: before starting work, check \`logos_read("logos://sandbox/plan-initial.log")\`. If it returns empty, fall back to \`logos_exec("cat /tmp/logos-sandbox/plan-initial.log")\`. If a log exists, a previous agent already made partial progress — review it so you do not duplicate work.
 - **Context pressure**: if the system warns that your context window is nearly full, immediately enter plan mode by calling logos_complete with \`task_log\` (detailed record of everything done so far) and \`plan\` (remaining steps). Do not ignore context pressure warnings.
 - **Never give up directly**: if you feel stuck or believe the task is too complex to complete in one pass, do NOT call logos_complete with just a summary to end the task. Instead, use plan mode — decompose the remaining work into smaller subtasks via \`plan: [...]\` so that fresh agents can tackle each piece independently. Only use \`sleep\` if there is a genuine external blocker (e.g. missing credentials, unavailable service).${buildAgentSkillsSection(
     taskDescription
@@ -400,7 +400,7 @@ async function main(): Promise<void> {
         if (completeParams.task_log) {
           await persistLog(
             session.tools,
-            "logos://sandbox/plan/initial.log",
+            "logos://sandbox/plan-initial.log",
             completeParams.task_log,
             "initial task_log",
             true // append
@@ -431,7 +431,7 @@ async function main(): Promise<void> {
         if (completeParams.task_log) {
           await persistLog(
             session.tools,
-            "logos://sandbox/plan/initial.log",
+            "logos://sandbox/plan-initial.log",
             completeParams.task_log,
             "initial task_log (explore)",
             true // append
@@ -486,6 +486,10 @@ async function main(): Promise<void> {
   process.exit(success ? 0 : 1);
 }
 
+function logosUriToFsPath(uri: string): string {
+  return uri.replace(/^logos:\/\/sandbox\//, "/tmp/logos-sandbox/");
+}
+
 async function persistLog(
   tools: import("./agent/core/types").AgentTool[],
   uri: string,
@@ -526,12 +530,13 @@ async function persistLog(
     const execTool = tools.find((t) => t.name === "logos_exec");
     if (execTool) {
       try {
+        const fsPath = logosUriToFsPath(uri);
         const escaped = block.replace(/'/g, "'\\''");
         await execTool.execute("persist-log", {
-          command: `mkdir -p "$(dirname '${uri}')" && cat >> '${uri}' << 'LOGOS_EOF'\n${escaped}\nLOGOS_EOF`,
+          command: `mkdir -p "$(dirname '${fsPath}')" && cat >> '${fsPath}' << 'LOGOS_EOF'\n${escaped}\nLOGOS_EOF`,
         });
         console.log(
-          `[bench-runner] appended ${label} → ${uri} (via exec fallback)`
+          `[bench-runner] appended ${label} → ${fsPath} (via exec fallback)`
         );
       } catch (e) {
         console.warn(`[bench-runner] failed to append ${label}:`, e);
@@ -554,12 +559,13 @@ async function persistLog(
   const execTool = tools.find((t) => t.name === "logos_exec");
   if (execTool) {
     try {
+      const fsPath = logosUriToFsPath(uri);
       const escaped = payload.replace(/'/g, "'\\''");
       await execTool.execute("persist-log", {
-        command: `mkdir -p "$(dirname '${uri}')" && cat > '${uri}' << 'LOGOS_EOF'\n${escaped}\nLOGOS_EOF`,
+        command: `mkdir -p "$(dirname '${fsPath}')" && cat > '${fsPath}' << 'LOGOS_EOF'\n${escaped}\nLOGOS_EOF`,
       });
       console.log(
-        `[bench-runner] persisted ${label} → ${uri} (via exec fallback)`
+        `[bench-runner] persisted ${label} → ${fsPath} (via exec fallback)`
       );
     } catch (e) {
       console.warn(`[bench-runner] failed to persist ${label}:`, e);

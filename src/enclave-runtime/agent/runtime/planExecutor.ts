@@ -107,8 +107,8 @@ export async function executePlan(
 
     const logPath =
       depth === 0
-        ? `logos://sandbox/plan/step-${step}.log`
-        : `logos://sandbox/plan/d${depth}-step-${step}.log`;
+        ? `logos://sandbox/plan-step-${step}.log`
+        : `logos://sandbox/plan-d${depth}-step-${step}.log`;
 
     if (params.plan && params.plan.length > 0 && depth < MAX_PLAN_DEPTH) {
       console.log(
@@ -206,6 +206,10 @@ export async function executePlan(
 
 // ── Task log persistence ─────────────────────────────────────
 
+function logosUriToFsPath(uri: string): string {
+  return uri.replace(/^logos:\/\/sandbox\//, "/tmp/logos-sandbox/");
+}
+
 async function persistTaskLog(
   tools: AgentTool[],
   logPath: string,
@@ -240,16 +244,17 @@ async function persistTaskLog(
     }
   }
 
-  // Append via shell
+  // Append via shell — write to /tmp/logos-sandbox/ so agent can read via logos_read or cat
   const execTool = tools.find((t) => t.name === "logos_exec");
   if (execTool) {
+    const fsPath = logosUriToFsPath(logPath);
     try {
       const escaped = block.replace(/'/g, "'\\''");
       await execTool.execute("plan-internal", {
-        command: `mkdir -p "$(dirname '${logPath}')" && cat >> '${logPath}' << 'LOGOS_EOF'\n${escaped}\nLOGOS_EOF`,
+        command: `mkdir -p "$(dirname '${fsPath}')" && cat >> '${fsPath}' << 'LOGOS_EOF'\n${escaped}\nLOGOS_EOF`,
       });
     } catch {
-      console.log(`[plan] failed to persist task_log to ${logPath}`);
+      console.log(`[plan] failed to persist task_log to ${fsPath}`);
     }
   }
 }
@@ -399,13 +404,14 @@ ${stepsBlock}
 
 **IMPORTANT**: Read the most recent step's log first to understand current state and avoid redoing work:
 \`logos_read("${lastStep.logPath}")\`
-You may also read \`logos_read("logos://sandbox/plan/initial.log")\` for pre-plan context.
+If logos_read returns empty, fall back to: \`logos_exec("cat ${logosUriToFsPath(lastStep.logPath)}")\`
+You may also read \`logos_read("logos://sandbox/plan-initial.log")\` for pre-plan context.
 `;
   } else {
     priorContextBlock = `
 ## Prior context
 
-- **Check existing logs first**: call \`logos_read("logos://sandbox/plan/initial.log")\`. If it exists, a previous agent already made progress — review the log to understand what has been done and avoid duplicating work. If the file does not exist, proceed normally.
+- **Check existing logs first**: call \`logos_read("logos://sandbox/plan-initial.log")\`. If it returns empty, fall back to \`logos_exec("cat /tmp/logos-sandbox/plan-initial.log")\`. If a log exists, a previous agent already made progress — review it to understand what has been done and avoid duplicating work.
 `;
   }
 
@@ -476,7 +482,7 @@ ${toolDocsBlock(kernelMode, execTimeoutSec)}
 ## Your decision
 
 Review the completed work and remaining plan. You can inspect current state:
-- Read any step's detailed log using the \`task_log\` paths listed above (e.g. \`logos_read("logos://sandbox/plan/step-1.log")\`)
+- Read any step's detailed log using the \`task_log\` paths listed above via \`logos_read\`. If logos_read returns empty, fall back to \`logos_exec("cat /tmp/logos-sandbox/plan-step-N.log")\`
 - Check files on disk: \`logos_exec("ls /app/...")\`
 
 Then choose one action:
