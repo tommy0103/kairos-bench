@@ -112,26 +112,29 @@ class LogosAgent(BaseInstalledAgent):
         )
 
     async def install(self, environment: BaseEnvironment) -> None:
-        # 1. System deps (apt with azure mirror) + ensure libssl3 for logos-kernel
+        # 1a. apt-get update
+        await self.exec_as_root(
+            environment,
+            command="apt-get update -qq",
+        )
+
+        # 1b. install base packages
+        await self.exec_as_root(
+            environment,
+            command="apt-get install -y -qq --fix-missing curl unzip git ca-certificates poppler-utils lynx",
+        )
+
+        # 1c. ensure libssl3
         await self.exec_as_root(
             environment,
             command=(
-                "sed -i 's|http://archive.ubuntu.com|http://azure.archive.ubuntu.com|g' /etc/apt/sources.list 2>/dev/null || true && "
-                "sed -i 's|http://security.ubuntu.com|http://azure.archive.ubuntu.com|g' /etc/apt/sources.list 2>/dev/null || true && "
-                "for i in 1 2 3; do "
+                "apt-get install -y -qq libssl3 2>/dev/null || "
+                "( echo 'deb http://deb.debian.org/debian bookworm main' > /etc/apt/sources.list.d/bookworm-libssl.list && "
                 "  apt-get update -qq && "
-                "  apt-get install -y -qq --fix-missing curl unzip git ca-certificates poppler-utils lynx && break; "
-                "  echo \"apt retry $i/3...\"; sleep 5; "
-                "done && "
-                "("
-                "  apt-get install -y -qq libssl3 2>/dev/null || "
-                "  ( echo 'deb http://deb.debian.org/debian bookworm main' > /etc/apt/sources.list.d/bookworm-libssl.list && "
-                "    apt-get update -qq && "
-                "    apt-get install -y -qq libssl3 && "
-                "    rm -f /etc/apt/sources.list.d/bookworm-libssl.list && "
-                "    apt-get update -qq "
-                "  ) || echo '[logos-agent] WARNING: could not install libssl3'"
-                ")"
+                "  apt-get install -y -qq libssl3 && "
+                "  rm -f /etc/apt/sources.list.d/bookworm-libssl.list && "
+                "  apt-get update -qq "
+                ") || echo '[logos-agent] WARNING: could not install libssl3'"
             ),
         )
 
@@ -139,6 +142,7 @@ class LogosAgent(BaseInstalledAgent):
         await self.exec_as_agent(
             environment,
             command=(
+                'echo "[logos-agent] step 2/6: installing bun..." && '
                 'if ! command -v bun &>/dev/null; then '
                 '  BUN_INSTALL="$HOME/.bun" && mkdir -p "$BUN_INSTALL/bin" && '
                 '  ARCH=$(uname -m) && '
@@ -153,7 +157,7 @@ class LogosAgent(BaseInstalledAgent):
                 '  cp /tmp/package/bin/bun "$BUN_INSTALL/bin/bun" && '
                 '  chmod +x "$BUN_INSTALL/bin/bun" && '
                 '  rm -rf /tmp/package; '
-                "fi"
+                'fi && echo "[logos-agent] step 2/6: done"'
             ),
         )
 
@@ -166,7 +170,7 @@ class LogosAgent(BaseInstalledAgent):
             environment,
             command=(
                 f"export PATH=$HOME/.bun/bin:$PATH && "
-                f"echo '[logos-agent] ensuring kairos repo...' && "
+                f"echo '[logos-agent] step 3/6: cloning kairos repo...' && "
                 f"if [ ! -f {KAIROS_DIR}/package.json ]; then "
                 f"  rm -rf {KAIROS_DIR} && "
                 f"  for i in 1 2 3; do "
@@ -177,7 +181,8 @@ class LogosAgent(BaseInstalledAgent):
                 f"  done; "
                 f"fi && "
                 f"[ -f {KAIROS_DIR}/package.json ] || "
-                f"{{ echo '[logos-agent] ERROR: failed to clone kairos repo'; exit 1; }}"
+                f"{{ echo '[logos-agent] ERROR: failed to clone kairos repo'; exit 1; }} && "
+                f"echo '[logos-agent] step 3/6: done'"
             ),
         )
 
@@ -186,10 +191,10 @@ class LogosAgent(BaseInstalledAgent):
             environment,
             command=(
                 f"export PATH=$HOME/.bun/bin:$PATH && "
-                f"echo '[logos-agent] installing kairos dependencies...' && "
+                f"echo '[logos-agent] step 4/6: installing kairos dependencies...' && "
                 f"cd {KAIROS_DIR} && "
                 f"(PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 bun install) && "
-                f"echo '[logos-agent] dependency install complete'"
+                f"echo '[logos-agent] step 4/6: done'"
             ),
         )
 
@@ -198,7 +203,7 @@ class LogosAgent(BaseInstalledAgent):
             environment,
             command=(
                 f"export PATH=$HOME/.bun/bin:$PATH && "
-                f"echo '[logos-agent] ensuring logos binaries...' && "
+                f"echo '[logos-agent] step 5/6: ensuring logos binaries...' && "
                 f"mkdir -p {LOGOS_BIN_DIR} && "
                 f"if [ ! -x {LOGOS_BIN_DIR}/logos-kernel ]; then "
                 f"  echo '[logos-agent] downloading pre-built kernel...' && "
@@ -207,7 +212,7 @@ class LogosAgent(BaseInstalledAgent):
                 f"fi && "
                 f"mkdir -p {KAIROS_DIR}/src/vfs/proto && "
                 f"cp {LOGOS_BIN_DIR}/logos.proto {KAIROS_DIR}/src/vfs/proto/logos.proto && "
-                f"echo '[logos-agent] logos binaries ready'"
+                f"echo '[logos-agent] step 5/6: done'"
             ),
         )
 
@@ -217,6 +222,7 @@ class LogosAgent(BaseInstalledAgent):
         await self.exec_as_agent(
             environment,
             command=(
+                f"echo '[logos-agent] step 6/6: starting kernel...' && "
                 f"mkdir -p {state_dir}/sandbox {state_dir}/entities {state_dir}/memory "
                 f"  {state_dir}/proc-store {state_dir}/svc-store && "
                 f"rm -f {logos_sock} && "

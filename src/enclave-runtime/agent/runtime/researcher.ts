@@ -54,15 +54,16 @@ ${toolDocs}
 Research the key concepts, tools, file formats, libraries, and APIs mentioned in the task. Your goal is to provide the coding agent with the knowledge it needs to avoid common mistakes.
 
 **What to do**:
-1. Identify unfamiliar or potentially tricky concepts in the task (file formats, library APIs, protocol details, domain-specific terms)
-2. Use \`web_search\` and \`fetch_url\` to look up how they work
-3. Use \`logos_exec\` to inspect the container (check what tools/files are available, read relevant source files)
-4. Summarize your findings
+1. **Read the task instructions carefully** — pay close attention to specific file formats, versions, protocols, and tools mentioned. These are not suggestions — they are exact specifications.
+2. Use \`web_search\` and \`fetch_url\` to look up the specific formats/tools/APIs named in the task
+3. Use \`logos_exec\` to **verify your findings against the actual files** — e.g. inspect file headers (\`hexdump -C file | head -20\`), check file sizes, list directory contents. Do not trust search results alone.
+4. If the task mentions a specific file format (e.g. ".ckpt", ".wad", ".bpe"), inspect the actual file to confirm it matches what you found online. If it doesn't match, your research is wrong — keep looking.
 
 **What NOT to do**:
 - Do NOT write solution code or design an implementation
 - Do NOT modify any files in /app
 - Do NOT spend more than 2-3 searches per concept — stay fast
+- Do NOT assume a file format based on similar-looking projects — always verify against the actual file
 - If the task is straightforward and doesn't need research, call logos_complete immediately
 
 ## Output format
