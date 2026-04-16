@@ -112,12 +112,12 @@ class LogosAgent(BaseInstalledAgent):
         )
 
     async def install(self, environment: BaseEnvironment) -> None:
-        # 1. System deps (apt with aliyun mirror) + ensure libssl3 for logos-kernel
+        # 1. System deps (apt with azure mirror) + ensure libssl3 for logos-kernel
         await self.exec_as_root(
             environment,
             command=(
-                "sed -i 's|http://archive.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true && "
-                "sed -i 's|http://security.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true && "
+                "sed -i 's|http://archive.ubuntu.com|http://azure.archive.ubuntu.com|g' /etc/apt/sources.list 2>/dev/null || true && "
+                "sed -i 's|http://security.ubuntu.com|http://azure.archive.ubuntu.com|g' /etc/apt/sources.list 2>/dev/null || true && "
                 "for i in 1 2 3; do "
                 "  apt-get update -qq && "
                 "  apt-get install -y -qq --fix-missing curl unzip git ca-certificates poppler-utils lynx && break; "
