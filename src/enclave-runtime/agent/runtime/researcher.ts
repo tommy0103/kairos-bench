@@ -123,7 +123,7 @@ export async function runResearcher(opts: {
   const startTime = Date.now();
   const timeoutAt = startTime + RESEARCHER_TIMEOUT_MS;
   const urgentAt = startTime + Math.round(RESEARCHER_TIMEOUT_MS * 0.75);
-  const hardDeadline = startTime + RESEARCHER_TIMEOUT_MS + 30_000;
+  const hardDeadline = startTime + RESEARCHER_TIMEOUT_MS + 60_000;
 
   for await (const event of loop) {
     turns++;
