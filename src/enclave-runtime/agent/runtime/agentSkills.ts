@@ -954,6 +954,22 @@ Before writing the C reader, figure out the checkpoint structure:
 This is the #1 reason past runs failed — agents assumed the file is a raw float array and got garbage output.`,
   },
   {
+    id: "make-doom-for-mips",
+    name: "Cross-compile DOOM to MIPS ELF",
+    triggers: [
+      ["build", "doomgeneric_mips"],
+      ["build", "doomgeneric", "elf"],
+      ["doomgeneric", "mips", "elf", "build"],
+    ],
+    hint: `**Cross-compile DOOM to MIPS — do NOT use plan mode**:
+
+The time budget (900s) is tight. Every past run that used plan mode timed out due to replanning overhead. Write everything in one session.
+
+Two things that caused failures in past runs:
+1. **Read the VM's source** (\`/app/vm.js\`) to understand what syscall convention it expects — it does NOT use standard MIPS Linux syscalls.
+2. **Read the source for screen resolution** — do not hardcode dimensions, check \`doomgeneric.h\` for the actual values. Past runs used 320x200 but the reference expected 640x400.`,
+  },
+  {
     id: "sql-query-optimization",
     name: "SQL query optimization",
     triggers: [
