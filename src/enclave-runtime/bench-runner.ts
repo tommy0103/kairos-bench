@@ -51,6 +51,7 @@ import { executePlan } from "./agent/runtime/planExecutor";
 import { executeExplore } from "./agent/runtime/exploreExecutor";
 import { evaluateAndRetry } from "./agent/runtime/evaluator";
 import { buildAgentSkillsSection } from "./agent/runtime/agentSkills";
+import { runResearcher } from "./agent/runtime/researcher";
 
 // ── Config ───────────────────────────────────────────────────
 const apiKey = process.env.API_KEY ?? process.env.OPENAI_API_KEY ?? "";
@@ -313,7 +314,35 @@ async function main(): Promise<void> {
     );
   }
 
-  const systemPrompt = buildSystemPrompt(session.useKernel);
+  // ── Researcher phase ────────────────────────────────────────
+  console.log(`[bench-runner] running researcher`);
+  const researchResult = await runResearcher({
+    client: chatClient,
+    model,
+    tools: session.tools,
+    taskDescription,
+    kernelMode: session.useKernel,
+  });
+  console.log(
+    `[bench-runner] researcher done (${researchResult.turns} turns, reply=${researchResult.reply.length} chars)`
+  );
+
+  if (researchResult.taskLog) {
+    await persistLog(
+      session.tools,
+      "logos://sandbox/research.log",
+      researchResult.taskLog,
+      "researcher task_log",
+      false,
+    );
+  }
+
+  let researchSection = "";
+  if (researchResult.reply && researchResult.reply.length > 10) {
+    researchSection = `\n\n## Research findings\n\nA research agent has investigated the key concepts in this task. Here are its findings:\n\n${researchResult.reply}\n\nFor more detailed research notes, read \`logos_read("logos://sandbox/research.log")\`.`;
+  }
+
+  const systemPrompt = buildSystemPrompt(session.useKernel) + researchSection;
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: systemPrompt },
