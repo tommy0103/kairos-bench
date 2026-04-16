@@ -267,12 +267,9 @@ The test video is ~270+ frames (jump at ~220); the example is ~120 frames (jump 
     id: "mips-interpreter-doom",
     name: "MIPS interpreter for DoomGeneric",
     triggers: [
-      ["mips", "interpreter"],
-      ["mips", "vm.js"],
+      ["mips", "interpreter", "vm.js"],
+      ["implement", "mips", "interpreter"],
       ["mips", "elf", "interpreter"],
-      ["mips", "doom"],
-      ["doomgeneric", "mips"],
-      ["doomgeneric_mips"],
     ],
     hint: `**MIPS interpreter (DoomGeneric) — critical pitfalls (5/13 past runs succeeded)**:
 

@@ -892,12 +892,9 @@ print(f"\\nPASS: All {poly_count} rows have type='polyline'")
     id: "mips-doom-frame-check",
     name: "MIPS Interpreter Frame Output Check",
     triggers: [
-      ["mips", "interpreter"],
-      ["mips", "vm.js"],
+      ["mips", "interpreter", "vm.js"],
+      ["implement", "mips", "interpreter"],
       ["mips", "elf", "interpreter"],
-      ["mips", "doom"],
-      ["doomgeneric", "mips"],
-      ["doomgeneric_mips"],
     ],
     recipe: `### Skill: MIPS Interpreter — Frame BMP Output Verification
 
