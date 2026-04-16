@@ -25,7 +25,7 @@ export interface ResearchResult {
 
 function buildResearcherPrompt(
   taskDescription: string,
-  kernelMode: boolean,
+  kernelMode: boolean
 ): string {
   const toolDocs = kernelMode
     ? `## Tools
@@ -119,14 +119,17 @@ export async function runResearcher(opts: {
   let turns = 0;
   let toolCalls = 0;
   let completeParams: LogosCompleteParams | undefined;
+  let urgentInjected = false;
   const startTime = Date.now();
   const timeoutAt = startTime + RESEARCHER_TIMEOUT_MS;
+  const urgentAt = startTime + Math.round(RESEARCHER_TIMEOUT_MS * 0.75);
+  const hardDeadline = startTime + RESEARCHER_TIMEOUT_MS + 30_000;
 
   for await (const event of loop) {
     turns++;
 
-    if (Date.now() > timeoutAt && !completeParams) {
-      console.log(`[researcher] timeout after ${RESEARCHER_TIMEOUT_MS / 1000}s, stopping`);
+    if (Date.now() > hardDeadline && !completeParams) {
+      console.log(`[researcher] hard deadline reached, stopping`);
       break;
     }
 
@@ -144,20 +147,42 @@ export async function runResearcher(opts: {
         if (event.toolName !== "logos_complete") {
           const text =
             typeof event.result === "object" && event.result !== null
-              ? ((event.result as any)?.content?.[0]?.text ?? "")
+              ? (event.result as any)?.content?.[0]?.text ?? ""
               : String(event.result ?? "");
-          const preview =
-            text.length > 300 ? text.slice(0, 300) + "..." : text;
+          const preview = text.length > 300 ? text.slice(0, 300) + "..." : text;
           console.log(`  [research-result] ${preview}`);
 
           toolCalls++;
           const elapsedSec = Math.round((Date.now() - startTime) / 1000);
-          const remainingSec = Math.max(0, Math.round((timeoutAt - Date.now()) / 1000));
+          const remainingSec = Math.max(
+            0,
+            Math.round((timeoutAt - Date.now()) / 1000)
+          );
           const remainingTurns = RESEARCHER_MAX_TURNS - turns;
-          messages.push({
-            role: "user" as const,
-            content: `⏱ ${remainingSec}s remaining, ~${remainingTurns} turns remaining (${toolCalls} tool calls used, ${elapsedSec}s elapsed)`,
-          });
+
+          if (!urgentInjected && Date.now() > urgentAt) {
+            urgentInjected = true;
+            console.log(
+              `[researcher] time almost up, injecting urgent message`
+            );
+            messages.push({
+              role: "user" as const,
+              content:
+                `⚠️ TIME IS ALMOST UP (${remainingSec}s remaining). You MUST call logos_complete NOW with your findings so far. ` +
+                `Do not make any more tool calls. Summarize everything you have learned and call logos_complete immediately.`,
+            });
+          } else if (Date.now() > timeoutAt) {
+            console.log(`[researcher] time expired, forcing completion`);
+            messages.push({
+              role: "user" as const,
+              content: `🛑 TIME IS UP. Call logos_complete RIGHT NOW with whatever you have. Do NOT call any other tool.`,
+            });
+          } else {
+            messages.push({
+              role: "user" as const,
+              content: `⏱ ${remainingSec}s remaining, ~${remainingTurns} turns remaining (${toolCalls} tool calls used, ${elapsedSec}s elapsed)`,
+            });
+          }
         }
         break;
       case "logos_complete":
