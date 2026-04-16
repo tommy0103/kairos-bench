@@ -41,7 +41,7 @@ function buildResearcherPrompt(
 - **logos_exec(command)** — Execute a shell command.
 - **logos_complete(...)** — MANDATORY final call.`;
 
-  return `You are a research assistant preparing background knowledge for a coding agent.
+  return `You are a research assistant preparing background knowledge for a task-solving agent.
 
 ## Task to research
 
@@ -51,13 +51,15 @@ ${toolDocs}
 
 ## Your job
 
-Research the key concepts, tools, file formats, libraries, and APIs mentioned in the task. Your goal is to provide the coding agent with the knowledge it needs to avoid common mistakes.
+Read the task instructions carefully. Identify the parts that are **most confusing, ambiguous, or likely to trip up someone working on this task** — these are what you should research. Tasks span many domains (software engineering, bioinformatics, cryptography, physics, ML, system administration, etc.), so the tricky parts could be anything: an unfamiliar file format, a domain-specific convention, a library with surprising API behavior, a scientific method with specific requirements.
+
+Your research will be handed to the agent who actually solves the task. Focus on what would help them the most.
 
 **What to do**:
-1. **Read the task instructions carefully** — pay close attention to specific file formats, versions, protocols, and tools mentioned. These are not suggestions — they are exact specifications.
-2. Use \`web_search\` and \`fetch_url\` to look up the specific formats/tools/APIs named in the task
-3. Use \`logos_exec\` to **verify your findings against the actual files** — e.g. inspect file headers (\`hexdump -C file | head -20\`), check file sizes, list directory contents. Do not trust search results alone.
-4. If the task mentions a specific file format (e.g. ".ckpt", ".wad", ".bpe"), inspect the actual file to confirm it matches what you found online. If it doesn't match, your research is wrong — keep looking.
+1. **Read the instructions and ask yourself: what would I need to look up if I were solving this?** Focus on the parts you are least confident about.
+2. Use \`web_search\` and \`fetch_url\` to look up those specific things — file formats, library APIs, scientific conventions, mathematical methods, protocol specifications, domain-specific terminology, etc.
+3. Use \`logos_exec\` to **verify your findings against the actual files in the container** — e.g. inspect file headers (\`hexdump -C file | head -20\`), check file sizes, read source code. Do not trust search results alone.
+4. If the task mentions a specific file format (e.g. ".ckpt", ".pdb", ".wad"), inspect the actual file to confirm it matches what you found online. If it doesn't match, your research is wrong — keep looking.
 
 **What NOT to do**:
 - Do NOT write solution code or design an implementation
@@ -70,7 +72,7 @@ Research the key concepts, tools, file formats, libraries, and APIs mentioned in
 
 Call \`logos_complete\` with:
 - \`reply\`: A concise summary of your findings that will be shown directly to the coding agent. Include:
-  - Key facts the agent needs to know
+  - Key facts the agent needs to know (technical details, domain knowledge, scientific background)
   - Links to useful documentation pages you found
   - Any gotchas or common mistakes you discovered
 - \`task_log\`: Detailed notes from your research (full page contents, detailed API docs, etc.)

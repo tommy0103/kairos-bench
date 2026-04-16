@@ -121,7 +121,7 @@ class LogosAgent(BaseInstalledAgent):
         # 1b. install base packages
         await self.exec_as_root(
             environment,
-            command="apt-get install -y -qq --fix-missing curl unzip git ca-certificates poppler-utils lynx",
+            command="apt-get install -y -qq --fix-missing curl unzip git ca-certificates poppler-utils lynx xxd bsdmainutils python3",
         )
 
         # 1c. ensure libssl3
