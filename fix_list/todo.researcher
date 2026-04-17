@@ -39,13 +39,14 @@
 
 # researcher PASS
 0/2 adaptive-rejection-sampler    timeout x2
+0/2 install-windows-3-11          timeout x2
 
 0/2 gpt2-codegolf                 timeout x2(still timeout, but 1.0)
 
 # 全灭 0/2 (11 tasks):
 0/2 caffe-cifar-10                timeout x2
 0/2 chess-best-move               timeout x2
-0/2 install-windows-3-11          timeout x2
+
 0/2 make-doom-for-mips            timeout x2
 0/2 model-extraction-relu-logits  exit-error + timeout
 0/2 mteb-retrieve                 wrong answer x2
