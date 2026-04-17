@@ -71,6 +71,7 @@ Your research will be handed to the agent who actually solves the task. Focus on
 - Do NOT spend more than 2-3 searches per concept — stay fast
 - Do NOT assume a file format based on similar-looking projects — always verify against the actual file. **If your verification shows the actual file does NOT match what a reference project expects (e.g. different binary layout, wrong header, mismatched sizes), STOP trying to force that reference to fit.** Search with different keywords to find the correct format or the actual project this file came from. Spending many turns trying to reconcile a wrong hypothesis is the second most common failure mode.
 - Do NOT waste all your turns on local environment inspection (ls, which, dpkg, find) without doing any web searches — this is the single most common failure mode
+- Do NOT install large packages (e.g. torch, tensorflow, transformers, CUDA toolkits). These take minutes to install and eat into the agent's time budget. If you need to understand a file format or weight layout, search the web for documentation or find someone who has already analyzed it — do not try to reverse-engineer it by loading with heavy frameworks.
 - Do NOT search for benchmark solutions, leaderboards, or task-specific walkthroughs (e.g. "terminal-bench", "skillsbench", "benchmark solution"). You must research the underlying domain knowledge, not look up answers to the task itself. This is cheating and will be penalized.
 - If the task is straightforward and doesn't need research, call logos_complete immediately
 

@@ -146,17 +146,19 @@ export function createLogosPatchTool(client: LogosClient): AgentTool {
 
 export function createLogosExecTool(
   client: LogosClient,
-  execTimeoutMs?: number
+  execTimeoutMs?: number,
+  taskId?: string,
 ): AgentTool {
   const timeoutMs = execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS;
   const timeoutSec = Math.round(timeoutMs / 1000);
+  const sandboxPrefix = taskId ? `logos://sandbox/${taskId}` : "logos://sandbox";
   return {
     name: "logos_exec",
     label: "Execute",
     description:
       "Execute a shell command in the sandbox. Logos URIs are translated " +
       "to real paths automatically. Output is truncated to the last ~200 " +
-      "lines; full output is saved to logos://sandbox/terminal/{call_id}.stdout " +
+      "lines; full output is saved to " + sandboxPrefix + "/terminal/{call_id}.stdout " +
       "(retrieve with logos_read). " +
       `Commands time out after ~${timeoutSec}s — never run foreground services (use & or daemon mode).`,
     parameters: Type.Object({
@@ -230,7 +232,7 @@ export function createLogosExecTool(
         throw err;
       }
 
-      const logBase = `logos://sandbox/terminal/${callId}`;
+      const logBase = `${sandboxPrefix}/terminal/${callId}`;
       if (result.stdout) {
         client.write(`${logBase}.stdout`, result.stdout).catch(() => {});
       }
@@ -293,7 +295,8 @@ export function createLogosExecTool(
   };
 }
 
-export function createLogosCallTool(client: LogosClient): AgentTool {
+export function createLogosCallTool(client: LogosClient, taskId?: string): AgentTool {
+  const sandboxPrefix = taskId ? `logos://sandbox/${taskId}` : "logos://sandbox";
   return {
     name: "logos_call",
     label: "Call",
@@ -319,7 +322,7 @@ export function createLogosCallTool(client: LogosClient): AgentTool {
         const raw =
           typeof result === "string" ? result : JSON.stringify(result, null, 2);
         if (raw.length > MAX_TOOL_OUTPUT_CHARS) {
-          const logUri = `logos://sandbox/call/${callId}.result`;
+          const logUri = `${sandboxPrefix}/call/${callId}.result`;
           client.write(logUri, raw).catch(() => {});
           const text =
             raw.slice(0, MAX_TOOL_OUTPUT_CHARS) +
@@ -337,13 +340,13 @@ export function createLogosCallTool(client: LogosClient): AgentTool {
 
 export function createAllLogosTools(
   client: LogosClient,
-  opts?: { execTimeoutMs?: number }
+  opts?: { execTimeoutMs?: number; taskId?: string }
 ): AgentTool[] {
   return [
     createLogosReadTool(client),
     createLogosWriteTool(client),
     createLogosPatchTool(client),
-    createLogosExecTool(client, opts?.execTimeoutMs),
-    createLogosCallTool(client),
+    createLogosExecTool(client, opts?.execTimeoutMs, opts?.taskId),
+    createLogosCallTool(client, opts?.taskId),
   ];
 }
