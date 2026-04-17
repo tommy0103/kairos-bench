@@ -152,7 +152,7 @@ const evalProvider = resolveEvalProvider();
 
 // ── System prompt ────────────────────────────────────────────
 
-function buildSystemPrompt(kernelMode: boolean): string {
+function buildSystemPrompt(kernelMode: boolean, taskId?: string): string {
   const toolDocs = kernelMode
     ? `## Tools
 
@@ -228,7 +228,7 @@ ${toolDocs}
 - **Container environment**: You are running inside a Docker container with no init system. When starting services (nginx, postgres, redis, apache, etc.), NEVER run them in the foreground — logos_exec will block forever. Always start services in background mode, e.g. \`nginx -g "daemon on;"\`, \`postgres &\`, \`redis-server --daemonize yes\`, or append \`&\` to the command.
   **nginx tips**: The container may ship a pre-existing \`/etc/nginx/nginx.conf\` with its own \`server\` block on port 80. Always inspect \`/etc/nginx/nginx.conf\` BEFORE writing your own config. If it already has a server on port 80, modify that block in-place or remove it — do not just write to \`sites-available/default\` and assume it will take effect, because the main config may not \`include sites-enabled/*\`.
   **nginx daemon mode**: Running bare \`nginx\` in a container will block forever if the config has \`daemon off;\` or no daemon directive. ALWAYS start nginx with: \`nginx -g "daemon on;"\` (or \`nginx -c /path/to/nginx.conf -g "daemon on;"\`). After starting, verify with \`pgrep nginx && curl -sI http://localhost/\`.
-- **Context continuity**: before starting work, check \`logos_read("logos://sandbox/plan-initial.log")\`. If it returns empty, fall back to \`logos_exec("cat /tmp/logos-sandbox/plan-initial.log")\`. If a log exists, a previous agent already made partial progress — review it so you do not duplicate work.
+- **Context continuity**: before starting work, check \`logos_read("logos://sandbox/${taskId ?? ""}/plan-initial.log")\`. If it returns empty, fall back to \`logos_exec("cat /tmp/logos-sandbox/${taskId ?? ""}/plan-initial.log")\`. If a log exists, a previous agent already made partial progress — review it so you do not duplicate work.
 - **Context pressure**: if the system warns that your context window is nearly full, immediately enter plan mode by calling logos_complete with \`task_log\` (detailed record of everything done so far) and \`plan\` (remaining steps). Do not ignore context pressure warnings.
 - **Never give up directly**: if you feel stuck or believe the task is too complex to complete in one pass, do NOT call logos_complete with just a summary to end the task. Instead, use plan mode — decompose the remaining work into smaller subtasks via \`plan: [...]\` so that fresh agents can tackle each piece independently. Only use \`sleep\` if there is a genuine external blocker (e.g. missing credentials, unavailable service).${buildAgentSkillsSection(
     taskDescription
@@ -332,11 +332,12 @@ async function main(): Promise<void> {
     `[bench-runner] researcher done (${researchResult.turns} turns, reply=${researchResult.reply.length} chars)`
   );
 
-  let researchLogRef = `logos_read("logos://sandbox/research.log")`;
+  const researchLogUri = `logos://sandbox/${session.taskId}/research.log`;
+  let researchLogRef = `logos_read("${researchLogUri}")`;
   if (researchResult.taskLog) {
     const { usedUri, fallback } = await persistLog(
       session.tools,
-      "logos://sandbox/research.log",
+      researchLogUri,
       researchResult.taskLog,
       "researcher task_log",
       false
@@ -351,7 +352,7 @@ async function main(): Promise<void> {
     researchSection = `\n\n## Research findings\n\nA research agent has investigated the key concepts in this task. Here are its findings:\n\n${researchResult.reply}\n\nFor more detailed research notes, read via \`${researchLogRef}\`.`;
   }
 
-  const systemPrompt = buildSystemPrompt(session.useKernel) + researchSection;
+  const systemPrompt = buildSystemPrompt(session.useKernel, session.taskId) + researchSection;
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: systemPrompt },
@@ -448,7 +449,7 @@ async function main(): Promise<void> {
         if (completeParams.task_log) {
           await persistLog(
             session.tools,
-            "logos://sandbox/plan-initial.log",
+            `logos://sandbox/${session.taskId}/plan-initial.log`,
             completeParams.task_log,
             "initial task_log",
             true // append
@@ -466,6 +467,7 @@ async function main(): Promise<void> {
           kernelMode: session.useKernel,
           contextLimit,
           execTimeoutSec: execTimeoutMs ? execTimeoutMs / 1000 : undefined,
+          taskId: session.taskId,
         });
         break;
       }
@@ -479,7 +481,7 @@ async function main(): Promise<void> {
         if (completeParams.task_log) {
           await persistLog(
             session.tools,
-            "logos://sandbox/plan-initial.log",
+            `logos://sandbox/${session.taskId}/plan-initial.log`,
             completeParams.task_log,
             "initial task_log (explore)",
             true // append
