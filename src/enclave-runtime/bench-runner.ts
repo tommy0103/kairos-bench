@@ -51,6 +51,7 @@ import { executePlan } from "./agent/runtime/planExecutor";
 import { executeExplore } from "./agent/runtime/exploreExecutor";
 import { evaluateAndRetry } from "./agent/runtime/evaluator";
 import { buildAgentSkillsSection } from "./agent/runtime/agentSkills";
+import { buildMissingSpecSection } from "./agent/runtime/missingSpec";
 import { runResearcher } from "./agent/runtime/researcher";
 
 // ── Config ───────────────────────────────────────────────────
@@ -197,7 +198,7 @@ You have Logos kernel primitives:
 
 ## Task
 
-${taskDescription}
+${taskDescription}${buildMissingSpecSection(taskDescription)}
 
 ${toolDocs}
 
