@@ -32,7 +32,9 @@ export const MISSING_SPECS: MissingSpec[] = [
       "After QEMU starts, you must send the keystrokes `win` followed by Enter " +
       "via the QEMU monitor (e.g. `sendkey w`, `sendkey i`, `sendkey n`, `sendkey ret`) " +
       "to launch the Windows 3.11 graphical desktop. The VM is not ready until " +
-      "the Windows GUI is visible — allow ~10 seconds after sending `win` for it to load.",
+      "the Windows GUI is visible — allow ~10 seconds after sending `win` for it to load. " +
+      "IMPORTANT: The QEMU monitor MUST be configured as a UNIX socket at `/tmp/qemu-monitor.sock` " +
+      "using `-monitor unix:/tmp/qemu-monitor.sock,server,nowait`. Do NOT use telnet or TCP for the monitor.",
   },
 ];
 

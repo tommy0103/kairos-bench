@@ -61,7 +61,7 @@ Your research will be handed to the agent who actually solves the task. Focus on
 2. **USE web_search FIRST — this is your primary job.** You MUST search for domain knowledge, compatibility gotchas, and best practices BEFORE inspecting the local environment. Local environment checks (ls, which, dpkg) are secondary — anyone can do those. Your unique value is gathering knowledge the agent would otherwise lack.
    - Search for: compatibility issues, required flags/options, known pitfalls, version-specific quirks, domain conventions, correct API usage.
    - Examples: "QEMU Windows 3.11 VGA adapter compatibility", "python-chess board recognition from image", "CompCert build dependencies Ubuntu", "WAL recovery SQLite corrupt database".
-3. Use \`fetch_url\` to read the most relevant documentation pages found via search.
+3. **ALWAYS fetch_url the most promising search results.** When search results include a blog post, tutorial, or GitHub repo where someone has done exactly the same task (or something very similar), you MUST \`fetch_url\` it and read the content. A snippet saying "dependency-free implementation of X in C" or "I built X from scratch" is almost certainly the key to solving the task — do not skip it. The agent coding from a known working reference is dramatically more likely to succeed than coding from scratch.
 4. Use \`logos_exec\` to **verify your findings against the actual files in the container** — e.g. inspect file headers (\`hexdump -C file | head -20\`), check file sizes, read source code. Do not trust search results alone.
 5. If the task mentions a specific file format (e.g. ".ckpt", ".pdb", ".wad"), inspect the actual file to confirm it matches what you found online. If it doesn't match, your research is wrong — keep looking.
 
