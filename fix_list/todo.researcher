@@ -1,0 +1,76 @@
+# Researcher 分支评估 (04-17 vs 04-15 baseline)
+# 总体: 139 pass → 131 pass, pass rate 79.0% → 73.6%, 负优化
+# errors: 42 → 38 (略降), timeouts 依然很高
+
+# === 退步 (16 tasks) ===
+
+# 超时导致退步 (8 tasks):
+2/2→0/2 tune-mjcf              timeout x2, 全灭
+2/2→1/2 path-tracing-reverse   timeout x2 (但1个超时仍然pass)
+2/2→1/2 db-wal-recovery        timeout x1
+2/2→1/2 extract-moves-from-video  timeout x1
+2/2→1/2 feal-differential-cryptanalysis  timeout x1
+2/2→1/2 feal-linear-cryptanalysis  timeout x1
+2/2→1/2 winning-avg-corewars   timeout x1
+2/2→0/2 break-filter-js-from-html  timeout x1 + exit-error x1, 全灭
+
+# 答案错误导致退步 (8 tasks):
+2/2→1/2 bn-fit-modify          wrong answer
+2/2→1/2 build-pmars            wrong answer
+2/2→1/2 distribution-search    wrong answer
+2/2→1/2 dna-assembly           wrong answer
+2/2→1/2 openssl-selfsigned-cert  wrong answer
+2/2→1/2 overfull-hbox          wrong answer
+2/2→1/2 sqlite-with-gcov       wrong answer
+2/2→1/2 torch-tensor-parallelism  wrong answer
+
+# === 进步 (9 tasks) ===
+0/0→2/2 query-optimize         旧版未跑此task
+1/2→2/2 configure-git-webserver
+1/2→2/2 crack-7z-hash
+1/2→2/2 fix-ocaml-gc
+1/2→2/2 git-multibranch
+1/2→2/2 make-mips-interpreter
+1/2→2/2 mcmc-sampling-stan
+1/2→2/2 schemelike-metacircular-eval
+1/2→2/2 sparql-university
+
+# === 旧版 (04-15 baseline) 未全部通过的 task (27 tasks) ===
+
+# researcher PASS
+0/2 adaptive-rejection-sampler    timeout x2
+
+# 全灭 0/2 (11 tasks):
+0/2 caffe-cifar-10                timeout x2
+0/2 chess-best-move               timeout x2
+0/2 gpt2-codegolf                 timeout x2
+0/2 install-windows-3-11          timeout x2
+0/2 make-doom-for-mips            timeout x2
+0/2 model-extraction-relu-logits  exit-error + timeout
+0/2 mteb-retrieve                 wrong answer x2
+0/2 protein-assembly              exit-error x2
+0/2 sam-cell-seg                  wrong answer x2
+0/2 raman-fitting                 timeout + wrong answer
+
+# 半过 1/2 (16 tasks):
+1/2 compile-compcert              timeout
+1/2 configure-git-webserver       wrong answer
+1/2 crack-7z-hash                 timeout
+1/2 fix-ocaml-gc                  timeout
+1/2 git-multibranch               wrong answer
+1/2 make-mips-interpreter         timeout
+1/2 mcmc-sampling-stan            timeout
+1/2 merge-diff-arc-agi-task       wrong answer
+1/2 mteb-leaderboard              timeout
+1/2 qemu-alpine-ssh               timeout
+1/2 query-optimize                verifier-timeout (只跑了1个trial)
+1/2 schemelike-metacircular-eval  wrong answer
+1/2 sparql-university             wrong answer
+1/2 train-fasttext                timeout
+1/2 video-processing              wrong answer
+1/2 write-compressor              timeout
+
+# === 分析 ===
+# 1. 超时问题: researcher 引入额外研究步骤可能导致时间不够用
+# 2. 答案质量: 8个task从正确变错误，策略变化降低了解题质量
+# 3. 可能原因: researcher 的时间分配不合理，研究阶段占用过多时间

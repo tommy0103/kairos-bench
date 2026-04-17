@@ -15,7 +15,7 @@ import type { LogosClient } from "./logosClient";
 const STDOUT_TAIL_LINES = 200;
 const STDERR_TAIL_LINES = 50;
 const DEFAULT_EXEC_TIMEOUT_MS = 590_000;
-const MAX_TOOL_OUTPUT_CHARS = 400_000; // ~100K tokens
+const MAX_TOOL_OUTPUT_CHARS = 100_000; // ~100K tokens
 
 /**
  * Keep the last `maxLines` lines of `text`.
@@ -25,7 +25,7 @@ const MAX_TOOL_OUTPUT_CHARS = 400_000; // ~100K tokens
 export function tailLines(
   text: string,
   maxLines: number,
-  hint?: string,
+  hint?: string
 ): string {
   if (!text) return "";
   const lines = text.split("\n");
@@ -51,10 +51,15 @@ export function createLogosReadTool(client: LogosClient): AgentTool {
           'Logos URI to read, e.g. "logos://memory/messages" or "logos://system/tasks".',
       }),
       offset: Type.Optional(
-        Type.Number({ description: "Byte offset to start reading from (default: 0)." }),
+        Type.Number({
+          description: "Byte offset to start reading from (default: 0).",
+        })
       ),
       limit: Type.Optional(
-        Type.Number({ description: "Max bytes to return (default: no limit, but capped at ~400K chars)." }),
+        Type.Number({
+          description:
+            "Max bytes to return (default: no limit, but capped at ~400K chars).",
+        })
       ),
     }),
     execute: async (_id, params) => {
@@ -66,7 +71,9 @@ export function createLogosReadTool(client: LogosClient): AgentTool {
       const totalLen = content.length;
       let text = sliced;
       if (truncated) {
-        text += `\n\n[... truncated — showing bytes ${offset}..${offset + sliced.length} of ${totalLen}. Use offset/limit to read more. ...]`;
+        text += `\n\n[... truncated — showing bytes ${offset}..${
+          offset + sliced.length
+        } of ${totalLen}. Use offset/limit to read more. ...]`;
       }
       return { content: [{ type: "text", text }] };
     },
@@ -90,7 +97,10 @@ export function createLogosWriteTool(client: LogosClient): AgentTool {
         description: "Content to write.",
       }),
       append: Type.Optional(
-        Type.Boolean({ description: "If true, append to existing content instead of overwriting. Default: false." }),
+        Type.Boolean({
+          description:
+            "If true, append to existing content instead of overwriting. Default: false.",
+        })
       ),
     }),
     execute: async (_id, params) => {
@@ -102,7 +112,9 @@ export function createLogosWriteTool(client: LogosClient): AgentTool {
           // file doesn't exist yet
         }
         await client.write(params.uri, existing + params.content);
-        return { content: [{ type: "text", text: `Appended to ${params.uri}` }] };
+        return {
+          content: [{ type: "text", text: `Appended to ${params.uri}` }],
+        };
       }
       await client.write(params.uri, params.content);
       return { content: [{ type: "text", text: `Written to ${params.uri}` }] };
@@ -134,7 +146,7 @@ export function createLogosPatchTool(client: LogosClient): AgentTool {
 
 export function createLogosExecTool(
   client: LogosClient,
-  execTimeoutMs?: number,
+  execTimeoutMs?: number
 ): AgentTool {
   const timeoutMs = execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS;
   const timeoutSec = Math.round(timeoutMs / 1000);
@@ -161,9 +173,10 @@ export function createLogosExecTool(
           client.exec(params.command),
           new Promise<never>((_, reject) =>
             setTimeout(
-              () => reject(new Error(`logos_exec timed out after ${timeoutSec}s`)),
-              timeoutMs,
-            ),
+              () =>
+                reject(new Error(`logos_exec timed out after ${timeoutSec}s`)),
+              timeoutMs
+            )
           ),
         ]);
       } catch (err) {
@@ -193,27 +206,34 @@ export function createLogosExecTool(
         client.write(`${logBase}.stderr`, result.stderr).catch(() => {});
       }
 
-      let stdout = tailLines(
-        result.stdout,
-        STDOUT_TAIL_LINES,
-        `read ${logBase}.stdout for full output`,
-      ) || "(empty)";
-      let stderr = tailLines(
-        result.stderr,
-        STDERR_TAIL_LINES,
-        `read ${logBase}.stderr for full output`,
-      ) || "(empty)";
+      let stdout =
+        tailLines(
+          result.stdout,
+          STDOUT_TAIL_LINES,
+          `read ${logBase}.stdout for full output`
+        ) || "(empty)";
+      let stderr =
+        tailLines(
+          result.stderr,
+          STDERR_TAIL_LINES,
+          `read ${logBase}.stderr for full output`
+        ) || "(empty)";
 
       const combined = stdout.length + stderr.length;
       if (combined > MAX_TOOL_OUTPUT_CHARS) {
-        const stderrBudget = Math.min(stderr.length, Math.floor(MAX_TOOL_OUTPUT_CHARS * 0.2));
+        const stderrBudget = Math.min(
+          stderr.length,
+          Math.floor(MAX_TOOL_OUTPUT_CHARS * 0.2)
+        );
         const stdoutBudget = MAX_TOOL_OUTPUT_CHARS - stderrBudget;
         if (stdout.length > stdoutBudget) {
-          stdout = stdout.slice(0, stdoutBudget) +
+          stdout =
+            stdout.slice(0, stdoutBudget) +
             `\n[... stdout truncated at ${stdoutBudget} chars — read ${logBase}.stdout for full output ...]`;
         }
         if (stderr.length > stderrBudget) {
-          stderr = stderr.slice(0, stderrBudget) +
+          stderr =
+            stderr.slice(0, stderrBudget) +
             `\n[... stderr truncated at ${stderrBudget} chars — read ${logBase}.stderr for full output ...]`;
         }
       }
@@ -255,9 +275,7 @@ export function createLogosCallTool(client: LogosClient): AgentTool {
       ),
     }),
     execute: async (callId, params) => {
-      const toolParams = params.params
-        ? JSON.parse(params.params)
-        : {};
+      const toolParams = params.params ? JSON.parse(params.params) : {};
       try {
         const result = await client.call(params.tool, toolParams);
         const raw =
@@ -281,7 +299,7 @@ export function createLogosCallTool(client: LogosClient): AgentTool {
 
 export function createAllLogosTools(
   client: LogosClient,
-  opts?: { execTimeoutMs?: number },
+  opts?: { execTimeoutMs?: number }
 ): AgentTool[] {
   return [
     createLogosReadTool(client),
