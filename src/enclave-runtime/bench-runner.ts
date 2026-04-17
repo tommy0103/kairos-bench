@@ -332,19 +332,23 @@ async function main(): Promise<void> {
     `[bench-runner] researcher done (${researchResult.turns} turns, reply=${researchResult.reply.length} chars)`
   );
 
+  let researchLogRef = `logos_read("logos://sandbox/research.log")`;
   if (researchResult.taskLog) {
-    await persistLog(
+    const { usedUri, fallback } = await persistLog(
       session.tools,
       "logos://sandbox/research.log",
       researchResult.taskLog,
       "researcher task_log",
       false
     );
+    if (fallback) {
+      researchLogRef = `logos_exec("cat ${usedUri}")`;
+    }
   }
 
   let researchSection = "";
   if (researchResult.reply && researchResult.reply.length > 10) {
-    researchSection = `\n\n## Research findings\n\nA research agent has investigated the key concepts in this task. Here are its findings:\n\n${researchResult.reply}\n\nFor more detailed research notes, read \`logos_read("logos://sandbox/research.log")\`.`;
+    researchSection = `\n\n## Research findings\n\nA research agent has investigated the key concepts in this task. Here are its findings:\n\n${researchResult.reply}\n\nFor more detailed research notes, read via \`${researchLogRef}\`.`;
   }
 
   const systemPrompt = buildSystemPrompt(session.useKernel) + researchSection;
@@ -540,7 +544,7 @@ async function persistLog(
   content: string,
   label: string,
   append = false
-): Promise<void> {
+): Promise<{ usedUri: string; fallback: boolean }> {
   const timestamp = new Date().toISOString();
   const block = `\n--- ${label} [${timestamp}] ---\n${content}\n`;
   const payload = append ? block : content;
@@ -566,7 +570,7 @@ async function persistLog(
           content: existing + block,
         });
         console.log(`[bench-runner] appended ${label} → ${uri}`);
-        return;
+        return { usedUri: uri, fallback: false };
       } catch {
         // fall through to exec append
       }
@@ -582,11 +586,12 @@ async function persistLog(
         console.log(
           `[bench-runner] appended ${label} → ${fsPath} (via exec fallback)`
         );
+        return { usedUri: fsPath, fallback: true };
       } catch (e) {
         console.warn(`[bench-runner] failed to append ${label}:`, e);
       }
     }
-    return;
+    return { usedUri: uri, fallback: false };
   }
 
   // Overwrite mode (original behavior)
@@ -595,9 +600,9 @@ async function persistLog(
     try {
       await writeTool.execute("persist-log", { uri, content: payload });
       console.log(`[bench-runner] persisted ${label} → ${uri}`);
-      return;
-    } catch {
-      // logos_write denied — fall through to exec
+      return { usedUri: uri, fallback: false };
+    } catch (e) {
+      console.warn(`[bench-runner] logos_write denied for ${label}:`, e);
     }
   }
   const execTool = tools.find((t) => t.name === "logos_exec");
@@ -611,10 +616,12 @@ async function persistLog(
       console.log(
         `[bench-runner] persisted ${label} → ${fsPath} (via exec fallback)`
       );
+      return { usedUri: fsPath, fallback: true };
     } catch (e) {
       console.warn(`[bench-runner] failed to persist ${label}:`, e);
     }
   }
+  return { usedUri: uri, fallback: false };
 }
 
 main().catch((err) => {
