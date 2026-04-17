@@ -75,6 +75,7 @@ Your research will be handed to the agent who actually solves the task. Focus on
 - Do NOT install large packages (e.g. torch, tensorflow, transformers, CUDA toolkits). These take minutes to install and eat into the agent's time budget. If you need to understand a file format or weight layout, search the web for documentation or find someone who has already analyzed it — do not try to reverse-engineer it by loading with heavy frameworks.
 - Do NOT search for benchmark solutions, leaderboards, or task-specific walkthroughs (e.g. "terminal-bench", "skillsbench", "benchmark solution"). You must research the underlying domain knowledge, not look up answers to the task itself. This is cheating and will be penalized.
 - If the task is straightforward and doesn't need research, call logos_complete immediately
+- **Be fast**: Your time comes out of the agent's total budget. If after reading the task you have nothing to search for (no unfamiliar concepts, no unknown file formats, no domain knowledge gaps), call logos_complete immediately with a brief note. Do NOT spend turns on local inspection (ls, hexdump, etc.) just to "be thorough" — the agent can do that itself. Only stay if you have web searches to make.
 
 ## Output format
 
