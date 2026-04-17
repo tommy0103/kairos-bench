@@ -167,10 +167,42 @@ export function createLogosExecTool(
       }),
     }),
     execute: async (callId, params) => {
+      let cmd: string = params.command;
+      const servicePattern = /&&[^&]*\b(nginx|apache2|httpd|postgres|redis-server|mysqld|mongod|websockify)\b/;
+      if (servicePattern.test(cmd)) {
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                "ERROR: Command rejected — you are chaining a service start (nginx, websockify, etc.) " +
+                "with && in a single command. This will block if the service runs in foreground. " +
+                "Start each service in its OWN separate logos_exec call, then verify it is running.",
+            },
+          ],
+        };
+      }
+
+      // Auto-fix bare nginx calls to ensure daemon mode
+      // Matches: `nginx`, `nginx -s reload`, `nginx -c /path`, etc.
+      // Does NOT match if already has `-g "daemon` or `& ` (already backgrounded)
+      let nginxRewritten = false;
+      if (/\bnginx\b/.test(cmd) && !/\bnginx\s+-s\s+(stop|quit|reopen)/.test(cmd) && !/-g\s+.*daemon/.test(cmd) && !/\bnginx\b.*&\s*$/.test(cmd)) {
+        cmd = cmd.replace(
+          /\bnginx\b((?:\s+-[cptgseq]\s+\S+)*)\s*$/m,
+          'nginx$1 -g "daemon on;"'
+        );
+        // If replacement didn't stick (complex command), wrap it
+        if (!/-g\s+.*daemon/.test(cmd)) {
+          cmd = cmd.replace(/\bnginx\b/, 'nginx -g "daemon on;"');
+        }
+        nginxRewritten = true;
+      }
+
       let result: { stdout: string; stderr: string; exit_code: number };
       try {
         result = await Promise.race([
-          client.exec(params.command),
+          client.exec(cmd),
           new Promise<never>((_, reject) =>
             setTimeout(
               () =>
@@ -239,6 +271,12 @@ export function createLogosExecTool(
       }
 
       const text = [
+        ...(nginxRewritten
+          ? [
+              `[NOTE] Your nginx command would have blocked (no daemon flag). It was automatically rewritten to include -g "daemon on;". In the future, always use: nginx -g "daemon on;"`,
+              "",
+            ]
+          : []),
         `exit_code: ${result.exit_code}`,
         "",
         "stdout:",

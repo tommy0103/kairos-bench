@@ -156,7 +156,7 @@ class LogosAgent(BaseInstalledAgent):
                 "APT_OPTS='-o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20' && "
                 "for i in 1 2 3 4 5; do "
                 "  timeout 120 apt-get $APT_OPTS install -y -qq --fix-missing "
-                "    curl unzip git ca-certificates poppler-utils lynx xxd bsdmainutils python3 python3-pip && break; "
+                "    curl unzip git ca-certificates poppler-utils lynx xxd bsdmainutils python3 python3-pip python3-numpy && break; "
                 "  echo \"[logos-agent] apt install retry $i/5...\"; sleep 5; "
                 "done"
             ),
