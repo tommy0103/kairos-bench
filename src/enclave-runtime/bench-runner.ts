@@ -349,7 +349,15 @@ async function main(): Promise<void> {
 
   let researchSection = "";
   if (researchResult.reply && researchResult.reply.length > 10) {
-    researchSection = `\n\n## Research findings\n\nA research agent has investigated the key concepts in this task. Here are its findings:\n\n${researchResult.reply}\n\nFor more detailed research notes, read via \`${researchLogRef}\`.`;
+    let detailedNotes = "";
+    if (researchResult.taskLog) {
+      const MAX_INLINE_LOG = 8000;
+      const log = researchResult.taskLog.length > MAX_INLINE_LOG
+        ? researchResult.taskLog.slice(0, MAX_INLINE_LOG) + `\n\n[... truncated at ${MAX_INLINE_LOG} chars — full log at \`${researchLogRef}\` ...]`
+        : researchResult.taskLog;
+      detailedNotes = `\n\n<details>\n<summary>Detailed research notes</summary>\n\n${log}\n</details>`;
+    }
+    researchSection = `\n\n## Research findings\n\nA research agent has investigated the key concepts in this task. Here are its findings:\n\n${researchResult.reply}${detailedNotes}`;
   }
 
   const systemPrompt = buildSystemPrompt(session.useKernel, session.taskId) + researchSection;
