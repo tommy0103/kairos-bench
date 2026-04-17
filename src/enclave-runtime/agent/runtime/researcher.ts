@@ -69,7 +69,7 @@ Your research will be handed to the agent who actually solves the task. Focus on
 - Do NOT write solution code or design an implementation
 - Do NOT modify any files in /app
 - Do NOT spend more than 2-3 searches per concept — stay fast
-- Do NOT assume a file format based on similar-looking projects — always verify against the actual file
+- Do NOT assume a file format based on similar-looking projects — always verify against the actual file. **If your verification shows the actual file does NOT match what a reference project expects (e.g. different binary layout, wrong header, mismatched sizes), STOP trying to force that reference to fit.** Search with different keywords to find the correct format or the actual project this file came from. Spending many turns trying to reconcile a wrong hypothesis is the second most common failure mode.
 - Do NOT waste all your turns on local environment inspection (ls, which, dpkg, find) without doing any web searches — this is the single most common failure mode
 - If the task is straightforward and doesn't need research, call logos_complete immediately
 
