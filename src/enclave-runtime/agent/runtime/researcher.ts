@@ -14,8 +14,9 @@ import type { ChatClient } from "../core/chatClient";
 import { reactLoop } from "../core/reactLoop";
 import type { AgentTool, LogosCompleteParams } from "../core/types";
 
-const RESEARCHER_TIMEOUT_MS = 120_000;
+const RESEARCHER_TIMEOUT_MS = 360_000;
 const RESEARCHER_MAX_TURNS = 20;
+const RESEARCHER_EXEC_TIMEOUT_MS = 40_000;
 
 export interface ResearchResult {
   reply: string;
@@ -98,7 +99,32 @@ export async function runResearcher(opts: {
     "logos_call",
     "logos_complete",
   ]);
-  const filteredTools = tools.filter((t) => allowedTools.has(t.name));
+  const filteredTools = tools
+    .filter((t) => allowedTools.has(t.name))
+    .map((t) => {
+      if (t.name === "logos_exec") {
+        const origExecute = t.execute;
+        return {
+          ...t,
+          description:
+            t.description.replace(/\d+ second timeout/, `${RESEARCHER_EXEC_TIMEOUT_MS / 1000} second timeout`),
+          execute: (id: string, params: Record<string, unknown>, signal?: AbortSignal) => {
+            return Promise.race([
+              origExecute(id, params, signal),
+              new Promise<never>((_, reject) =>
+                setTimeout(
+                  () => reject(new Error(`researcher logos_exec timed out after ${RESEARCHER_EXEC_TIMEOUT_MS / 1000}s`)),
+                  RESEARCHER_EXEC_TIMEOUT_MS,
+                ),
+              ),
+            ]).catch((err) => ({
+              content: [{ type: "text" as const, text: `exit_code: -1 (TIMEOUT after ${RESEARCHER_EXEC_TIMEOUT_MS / 1000}s)\n\nCommand timed out. Use shorter commands.` }],
+            }));
+          },
+        } as AgentTool;
+      }
+      return t;
+    });
 
   const systemPrompt = buildResearcherPrompt(taskDescription, kernelMode);
 
@@ -107,6 +133,14 @@ export async function runResearcher(opts: {
     { role: "user", content: taskDescription },
   ];
 
+  const abortController = new AbortController();
+  const hardTimer = setTimeout(() => {
+    console.log(
+      `[researcher] hard deadline reached, aborting current operation`
+    );
+    abortController.abort();
+  }, RESEARCHER_TIMEOUT_MS + 60_000);
+
   const loop = reactLoop({
     client,
     model,
@@ -114,6 +148,7 @@ export async function runResearcher(opts: {
     tools: filteredTools,
     maxTurns: RESEARCHER_MAX_TURNS,
     temperature: 0.2,
+    signal: abortController.signal,
   });
 
   let turns = 0;
@@ -122,77 +157,84 @@ export async function runResearcher(opts: {
   let urgentInjected = false;
   const startTime = Date.now();
   const timeoutAt = startTime + RESEARCHER_TIMEOUT_MS;
-  const urgentAt = startTime + Math.round(RESEARCHER_TIMEOUT_MS * 0.75);
-  const hardDeadline = startTime + RESEARCHER_TIMEOUT_MS + 60_000;
+  const urgentAt = startTime + Math.round(RESEARCHER_TIMEOUT_MS * 0.8);
 
-  for await (const event of loop) {
-    turns++;
+  try {
+    for await (const event of loop) {
+      turns++;
 
-    if (Date.now() > hardDeadline && !completeParams) {
-      console.log(`[researcher] hard deadline reached, stopping`);
-      break;
-    }
-
-    switch (event.type) {
-      case "tool_execution_start": {
-        const raw = JSON.stringify(event.params);
-        const args =
-          raw.length > 200
-            ? raw.slice(0, 200) + `… (${raw.length} bytes total)`
-            : raw;
-        console.log(`  [research] ${event.toolName}(${args})`);
-        break;
-      }
-      case "tool_execution_end":
-        if (event.toolName !== "logos_complete") {
-          const text =
-            typeof event.result === "object" && event.result !== null
-              ? (event.result as any)?.content?.[0]?.text ?? ""
-              : String(event.result ?? "");
-          const preview = text.length > 300 ? text.slice(0, 300) + "..." : text;
-          console.log(`  [research-result] ${preview}`);
-
-          toolCalls++;
-          const elapsedSec = Math.round((Date.now() - startTime) / 1000);
-          const remainingSec = Math.max(
-            0,
-            Math.round((timeoutAt - Date.now()) / 1000)
-          );
-          const remainingTurns = RESEARCHER_MAX_TURNS - turns;
-
-          if (!urgentInjected && Date.now() > urgentAt) {
-            urgentInjected = true;
-            console.log(
-              `[researcher] time almost up, injecting urgent message`
-            );
-            messages.push({
-              role: "user" as const,
-              content:
-                `⚠️ TIME IS ALMOST UP (${remainingSec}s remaining). You MUST call logos_complete NOW with your findings so far. ` +
-                `Do not make any more tool calls. Summarize everything you have learned and call logos_complete immediately.`,
-            });
-          } else if (Date.now() > timeoutAt) {
-            console.log(`[researcher] time expired, forcing completion`);
-            messages.push({
-              role: "user" as const,
-              content: `🛑 TIME IS UP. Call logos_complete RIGHT NOW with whatever you have. Do NOT call any other tool.`,
-            });
-          } else {
-            messages.push({
-              role: "user" as const,
-              content: `⏱ ${remainingSec}s remaining, ~${remainingTurns} turns remaining (${toolCalls} tool calls used, ${elapsedSec}s elapsed)`,
-            });
-          }
+      switch (event.type) {
+        case "tool_execution_start": {
+          const raw = JSON.stringify(event.params);
+          const args =
+            raw.length > 200
+              ? raw.slice(0, 200) + `… (${raw.length} bytes total)`
+              : raw;
+          console.log(`  [research] ${event.toolName}(${args})`);
+          break;
         }
-        break;
-      case "logos_complete":
-        completeParams = event.params;
-        console.log(`  [research-complete] ${event.params.summary}`);
-        break;
-      case "max_turns_reached":
-        console.log(`[researcher] max turns (${RESEARCHER_MAX_TURNS}) reached`);
-        break;
+        case "tool_execution_end":
+          if (event.toolName !== "logos_complete") {
+            const text =
+              typeof event.result === "object" && event.result !== null
+                ? (event.result as any)?.content?.[0]?.text ?? ""
+                : String(event.result ?? "");
+            const preview =
+              text.length > 300 ? text.slice(0, 300) + "..." : text;
+            console.log(`  [research-result] ${preview}`);
+
+            toolCalls++;
+            const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+            const remainingSec = Math.max(
+              0,
+              Math.round((timeoutAt - Date.now()) / 1000)
+            );
+            const remainingTurns = RESEARCHER_MAX_TURNS - turns;
+
+            if (!urgentInjected && Date.now() > urgentAt) {
+              urgentInjected = true;
+              console.log(
+                `[researcher] time almost up, injecting urgent message`
+              );
+              messages.push({
+                role: "user" as const,
+                content:
+                  `⚠️ TIME IS ALMOST UP (${remainingSec}s remaining). You MUST call logos_complete NOW with your findings so far. ` +
+                  `Do not make any more tool calls. Summarize everything you have learned and call logos_complete immediately.`,
+              });
+            } else if (Date.now() > timeoutAt) {
+              console.log(`[researcher] time expired, forcing completion`);
+              messages.push({
+                role: "user" as const,
+                content: `🛑 TIME IS UP. Call logos_complete RIGHT NOW with whatever you have. Do NOT call any other tool.`,
+              });
+            } else {
+              messages.push({
+                role: "user" as const,
+                content: `⏱ ${remainingSec}s remaining, ~${remainingTurns} turns remaining (${toolCalls} tool calls used, ${elapsedSec}s elapsed)`,
+              });
+            }
+          }
+          break;
+        case "logos_complete":
+          completeParams = event.params;
+          console.log(`  [research-complete] ${event.params.summary}`);
+          break;
+        case "max_turns_reached":
+          console.log(
+            `[researcher] max turns (${RESEARCHER_MAX_TURNS}) reached`
+          );
+          break;
+      }
     }
+  } catch (err) {
+    if (abortController.signal.aborted) {
+      console.log(`[researcher] aborted by hard deadline`);
+    } else {
+      throw err;
+    }
+  } finally {
+    clearTimeout(hardTimer);
   }
 
   if (!completeParams) {
