@@ -1045,7 +1045,7 @@ Focus on: eliminating correlated subqueries, reducing redundant joins, using CTE
 export function detectAgentSkills(taskText: string): AgentSkill[] {
   const lower = taskText.toLowerCase();
   return AGENT_SKILLS.filter((skill) =>
-    skill.triggers.some((group) => group.every((kw) => lower.includes(kw))),
+    skill.triggers.some((group) => group.every((kw) => lower.includes(kw)))
   );
 }
 
@@ -1054,8 +1054,9 @@ export function detectAgentSkills(taskText: string): AgentSkill[] {
  * Returns empty string if no skills match.
  */
 export function buildAgentSkillsSection(taskText: string): string {
-  const matched = detectAgentSkills(taskText);
-  if (matched.length === 0) return "";
-  const sections = matched.map((s) => s.hint).join("\n\n");
-  return `\n\n## Task-specific guidance\n\n${sections}`;
+  // const matched = detectAgentSkills(taskText);
+  // if (matched.length === 0) return "";
+  // const sections = matched.map((s) => s.hint).join("\n\n");
+  // return `\n\n## Task-specific guidance\n\n${sections}`;
+  return "";
 }
