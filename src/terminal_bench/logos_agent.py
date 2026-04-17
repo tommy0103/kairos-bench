@@ -112,16 +112,36 @@ class LogosAgent(BaseInstalledAgent):
         )
 
     async def install(self, environment: BaseEnvironment) -> None:
-        # 1. System deps (apt with aliyun mirror) + ensure libssl3 for logos-kernel
+        # 1. System deps (apt with configurable mirror) + ensure libssl3 for logos-kernel.
+        # Mirror host comes from $APT_MIRROR_HOST (e.g. `azure.archive.ubuntu.com`,
+        # `mirrors.tuna.tsinghua.edu.cn/ubuntu`, ...). Empty string disables the rewrite.
+        # Covers both the legacy /etc/apt/sources.list and the deb822 files under
+        # /etc/apt/sources.list.d/ (ubuntu.sources on 24.04), handling both
+        # `deb http://...` and `URIs: http://...` lines.
+        # NOTE: use `,` as the sed s-command delimiter — using `|` collides with the
+        # regex alternation in `(archive|security)` and silently fails (hidden by `|| true`).
+        apt_mirror = os.environ.get("APT_MIRROR_HOST", "azure.archive.ubuntu.com").strip()
+        if apt_mirror:
+            apt_mirror = apt_mirror.removeprefix("http://").removeprefix("https://").rstrip("/")
+            rewrite_cmd = (
+                "for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do "
+                f"  [ -f \"$f\" ] && sed -i -E 's,https?://(archive|security)\\.ubuntu\\.com,http://{apt_mirror},g' \"$f\" || true; "
+                "done && "
+            )
+        else:
+            rewrite_cmd = ""
+
         await self.exec_as_root(
             environment,
             command=(
-                "sed -i 's|http://archive.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true && "
-                "sed -i 's|http://security.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true && "
-                "for i in 1 2 3; do "
-                "  apt-get update -qq && "
-                "  apt-get install -y -qq --fix-missing curl unzip git ca-certificates poppler-utils lynx && break; "
-                "  echo \"apt retry $i/3...\"; sleep 5; "
+                f"{rewrite_cmd}"
+                # Bound each apt attempt with an outer `timeout` so a stuck mirror/DNS
+                # fails fast instead of eating the whole 360s agent setup budget.
+                "APT_OPTS='-o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20' && "
+                "for i in 1 2 3 4 5; do "
+                "  timeout 60 apt-get $APT_OPTS update -qq && "
+                "  timeout 120 apt-get $APT_OPTS install -y -qq --fix-missing curl unzip git ca-certificates poppler-utils lynx && break; "
+                "  echo \"[logos-agent] apt retry $i/5...\"; sleep 5; "
                 "done && "
                 "("
                 "  apt-get install -y -qq libssl3 2>/dev/null || "
