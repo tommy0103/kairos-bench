@@ -112,16 +112,54 @@ class LogosAgent(BaseInstalledAgent):
         )
 
     async def install(self, environment: BaseEnvironment) -> None:
-        # 1a. apt-get update
+        # 1a. Rewrite Ubuntu apt sources to the configured mirror, then apt-get update.
+        # Mirror host comes from $APT_MIRROR_HOST (e.g. `azure.archive.ubuntu.com`,
+        # `mirrors.tuna.tsinghua.edu.cn/ubuntu`, ...). Set to empty to keep the default.
+        # Covers both the legacy /etc/apt/sources.list and the deb822 files under
+        # /etc/apt/sources.list.d/ (e.g. ubuntu.sources on 24.04), handling both
+        # `deb http://...` and `URIs: http://...` lines.
+        # NOTE: use `,` as the sed s-command delimiter — using `|` collides with
+        # the regex alternation in `(archive|security)` and silently fails
+        # (hidden by `|| true`), which previously caused agent setups to hang
+        # 360s on the unreachable archive.ubuntu.com.
+        # The outer `timeout` bounds each apt attempt so a stuck mirror/DNS
+        # fails fast instead of eating the whole 360s agent setup budget.
+        apt_mirror = os.environ.get("APT_MIRROR_HOST", "azure.archive.ubuntu.com").strip()
+        if apt_mirror:
+            # Strip scheme if the user set a full URL, and any trailing slash,
+            # so the sed replacement composes a valid `http://<host>[/path]`.
+            apt_mirror = apt_mirror.removeprefix("http://").removeprefix("https://").rstrip("/")
+            rewrite_cmd = (
+                "for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do "
+                f"  [ -f \"$f\" ] && sed -i -E 's,https?://(archive|security)\\.ubuntu\\.com,http://{apt_mirror},g' \"$f\" || true; "
+                "done && "
+            )
+        else:
+            rewrite_cmd = ""
+
         await self.exec_as_root(
             environment,
-            command="apt-get update -qq",
+            command=(
+                f"{rewrite_cmd}"
+                "APT_OPTS='-o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20' && "
+                "for i in 1 2 3 4 5; do "
+                "  timeout 60 apt-get $APT_OPTS update -qq && break; "
+                "  echo \"[logos-agent] apt update retry $i/5...\"; sleep 5; "
+                "done"
+            ),
         )
 
         # 1b. install base packages
         await self.exec_as_root(
             environment,
-            command="apt-get install -y -qq --fix-missing curl unzip git ca-certificates poppler-utils lynx xxd bsdmainutils python3",
+            command=(
+                "APT_OPTS='-o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20' && "
+                "for i in 1 2 3 4 5; do "
+                "  timeout 120 apt-get $APT_OPTS install -y -qq --fix-missing "
+                "    curl unzip git ca-certificates poppler-utils lynx xxd bsdmainutils python3 && break; "
+                "  echo \"[logos-agent] apt install retry $i/5...\"; sleep 5; "
+                "done"
+            ),
         )
 
         # 1c. ensure libssl3
