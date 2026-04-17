@@ -2395,6 +2395,31 @@ If ars.R exists, ars() produces samples, and test() runs → PASS. Do not waste 
 
 If the query runs, produces output, and the database is unmodified → PASS.`,
   },
+  {
+    id: "gpt2-codegolf",
+    name: "GPT-2 Code Golf",
+    triggers: [
+      ["gpt-2", "codegolf"],
+      ["gpt-2", "code golf"],
+      ["gpt2", "codegolf"],
+      ["gpt2", "code golf"],
+      ["gpt-2", "<5000 bytes"],
+      ["gpt-2", "5000 bytes"],
+    ],
+    recipe: `### Skill: GPT-2 Code Golf — lightweight verification
+
+**Purpose**: The agent wrote a tiny C file that loads GPT-2 weights and runs inference.
+Compiling and running this program takes significant time. The agent has already
+verified compilation and output during its own run. Do NOT spend time re-compiling
+or re-running the model.
+
+**Recipe**:
+1. Check that \`/app/gpt2.c\` exists and is under 5000 bytes: \`wc -c /app/gpt2.c\`
+2. Check it compiles: \`gcc -O3 /app/gpt2.c -lm -o /tmp/gpt2_test && echo OK\`
+3. If both pass → immediately call \`logos_complete\` with \`PASS\`.
+
+**DO NOT** run the compiled binary or attempt inference — it is too slow and will cause a timeout.`,
+  },
 ];
 
 // ── Skill detection ──────────────────────────────────────────

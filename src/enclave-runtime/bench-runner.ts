@@ -131,6 +131,7 @@ function guessContextLimit(m: string): number {
   }
   return 64_000;
 }
+
 const contextLimit =
   parseInt(process.env.CONTEXT_LIMIT ?? "0", 10) || guessContextLimit(model);
 
@@ -333,7 +334,7 @@ async function main(): Promise<void> {
       "logos://sandbox/research.log",
       researchResult.taskLog,
       "researcher task_log",
-      false,
+      false
     );
   }
 
@@ -372,7 +373,10 @@ async function main(): Promise<void> {
       switch (event.type) {
         case "tool_execution_start": {
           const raw = JSON.stringify(event.params);
-          const args = raw.length > 200 ? raw.slice(0, 200) + `… (${raw.length} bytes total)` : raw;
+          const args =
+            raw.length > 200
+              ? raw.slice(0, 200) + `… (${raw.length} bytes total)`
+              : raw;
           console.log(`[tool] ${event.toolName}(${args})`);
           break;
         }
