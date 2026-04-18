@@ -2395,6 +2395,28 @@ If ars.R exists, ars() produces samples, and test() runs → PASS. Do not waste 
 
 If the query runs, produces output, and the database is unmodified → PASS.`,
   },
+  {
+    id: "raman-spectroscopy-eval",
+    name: "Raman spectroscopy peak fitting evaluation",
+    triggers: [
+      ["raman", "graphene"],
+      ["raman", "peak"],
+      ["raman", "lorentzian"],
+      ["raman", "fitting"],
+      ["raman", "spectrum"],
+    ],
+    recipe: `### Skill: Raman spectroscopy — the raw data x-axis is NOT in cm⁻¹
+
+**CRITICAL**: The raw data file likely uses a non-standard x-axis (wavelength in nm, CCD pixel, etc.), NOT Raman shift in cm⁻¹. The agent's results.json should contain peak positions in cm⁻¹ (standard Raman convention: G peak ~1580 cm⁻¹, 2D peak ~2670 cm⁻¹ for graphene).
+
+**When validating the agent's fit, you MUST apply the same unit conversion the agent used.** Do NOT fit Lorentzians directly on the raw x-axis and compare with the agent's cm⁻¹ values — they will not match because they are in different units.
+
+**Validation steps**:
+1. Check results.json exists with correct schema (G and 2D keys, each with x0/gamma/amplitude/offset)
+2. Check that x0 values are in plausible cm⁻¹ range: G peak x0 should be 1550-1620 cm⁻¹, 2D peak x0 should be 2640-2720 cm⁻¹
+3. If x0 values are in cm⁻¹ range → the agent already did the conversion. PASS on format.
+4. If x0 values are NOT in cm⁻¹ range (e.g. thousands) → the agent did NOT convert. FAIL.`,
+  },
 ];
 
 // ── Skill detection ──────────────────────────────────────────
