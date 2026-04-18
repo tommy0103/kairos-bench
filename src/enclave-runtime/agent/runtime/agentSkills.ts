@@ -1072,6 +1072,22 @@ Focus on: eliminating correlated subqueries, reducing redundant joins, using CTE
 - Run \`readelf -l /app/a.out\` to inspect the actual LOAD segment virtual addresses before writing code.
 - Include BSS regions: for each PT_LOAD segment, emit zero-valued words for the range between \`p_filesz\` and \`p_memsz\`.`,
   },
+  {
+    id: "relu-model-extraction",
+    name: "ReLU neural network weight extraction",
+    triggers: [
+      ["relu", "forward", "steal"],
+      ["relu", "a1", "extract"],
+      ["relu", "weight", "query"],
+      ["relu", "neural", "steal"],
+      ["forward", "steal", "matrix"],
+    ],
+    hint: `**ReLU model extraction — the verifier requires extremely high numerical precision (ratio tolerance < 1e-4)**:
+- "Equal up to scaling" is checked with element-wise ratio deviation < 1e-4. Naive finite-difference gradient methods typically achieve ~1e-3 which is NOT sufficient.
+- Search for published methods on exact ReLU network weight recovery before writing code: \`logos_call("web_search", {"query": "exact ReLU neural network weight extraction cryptanalytic"})\`
+- Read \`forward.py\` first to understand the exact architecture and parameter shapes.
+- After recovering all rows, verify precision by checking internal consistency: for each recovered row, sample multiple points near its kink and confirm the gradient jump is consistent to < 1e-5 relative error. If any row looks noisy, gather more samples and re-solve.`,
+  },
 ];
 
 // ── Skill detection ──────────────────────────────────────────

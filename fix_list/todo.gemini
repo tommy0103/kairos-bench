@@ -28,9 +28,8 @@ gpt2-codegolf PASS but TIMEOUT
 dna-insert PASS
 configure-git-webserver PASS
 extract-elf PASS
-financial-document-processor
-
-
+financial-document-processor PASS
+make-mips-interpreter PASS
 
 ## Researcher wins over master (researcher pass, master fail)
 #    4.7-res 1/1 P  4.6-res 2/2 P  master 0/1 F
