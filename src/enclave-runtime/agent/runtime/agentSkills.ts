@@ -1083,10 +1083,10 @@ Focus on: eliminating correlated subqueries, reducing redundant joins, using CTE
       ["forward", "steal", "matrix"],
     ],
     hint: `**ReLU model extraction — the verifier requires extremely high numerical precision (ratio tolerance < 1e-4)**:
-- "Equal up to scaling" is checked with element-wise ratio deviation < 1e-4. Naive finite-difference gradient methods typically achieve ~1e-3 which is NOT sufficient.
-- Search for published methods on exact ReLU network weight recovery before writing code: \`logos_call("web_search", {"query": "exact ReLU neural network weight extraction cryptanalytic"})\`
+- "Equal up to scaling" is checked with element-wise ratio deviation < 1e-4. This is much stricter than cosine similarity — a row can have cosine=0.9999 but still fail ratio check.
+- **Kink detection + finite-difference gradient jump does NOT achieve sufficient precision.** All 12 past attempts using this approach failed (0/12). The gradient jump method accumulates numerical error from finite differences that exceeds the 1e-4 ratio tolerance.
+- You need a fundamentally different approach. Search for published methods: \`logos_call("web_search", {"query": "exact ReLU neural network weight extraction cryptanalytic"})\`
 - Read \`forward.py\` first to understand the exact architecture and parameter shapes.
-- After recovering all rows, verify precision by checking internal consistency: for each recovered row, sample multiple points near its kink and confirm the gradient jump is consistent to < 1e-5 relative error. If any row looks noisy, gather more samples and re-solve.
 - **Random seed pitfall**: \`forward.py\` uses \`np.random.seed()\` at module level to generate weights. If your \`steal.py\` also sets a seed, the interaction between your seed and the import can produce different random sequences depending on whether forward was already cached. Always set your seed AFTER importing forward, and use a different seed value.`,
   },
   {
@@ -1100,9 +1100,11 @@ Focus on: eliminating correlated subqueries, reducing redundant joins, using CTE
       ["raman", "spectrum"],
     ],
     hint: `**Raman spectroscopy — results MUST be in cm⁻¹ (Raman shift)**:
-- The fitted peak parameters (x0, gamma) must be reported in cm⁻¹ (Raman shift), which is the standard unit in Raman spectroscopy. If the raw data uses a different x-axis unit (wavelength, CCD pixel, etc.), you MUST convert to cm⁻¹ before reporting.
+- The fitted peak parameters (x0, gamma) must be reported in cm⁻¹ (Raman shift), which is the standard unit in Raman spectroscopy. If the raw data uses a different x-axis unit, you MUST convert to cm⁻¹ before fitting.
 - Search for expected peak positions: \`logos_call("web_search", {"query": "graphene Raman spectrum G peak 2D peak wavenumber cm-1"})\`
-- If the x values in the data file don't fall in the expected cm⁻¹ range (e.g. G peak ~1580 cm⁻¹, 2D peak ~2670 cm⁻¹ for graphene), the x-axis is NOT in cm⁻¹. You need to figure out what unit it is and convert. Search: \`logos_call("web_search", {"query": "Raman spectrometer raw data wavelength to wavenumber conversion formula"})\`
+- If the x values in the data file don't fall in the expected cm⁻¹ range (e.g. G peak ~1580 cm⁻¹, 2D peak ~2670 cm⁻¹ for graphene), the x-axis is NOT in cm⁻¹. You need to figure out what unit it is and convert.
+- **The conversion is NOT linear.** Raman spectrometers typically output wavelength (or a value proportional to wavelength), and the relationship between wavelength and wavenumber is \`ν = 1/λ\` (nonlinear). A linear calibration \`cm⁻¹ = a*x + b\` will distort the peak shape and give wrong gamma/amplitude values. You must find the correct nonlinear transformation, convert the x-axis first, then fit Lorentzians in the cm⁻¹ domain.
+- Search for the conversion formula: \`logos_call("web_search", {"query": "Raman spectrometer raw data wavelength to wavenumber conversion formula"})\`
 - European-format CSV files use commas as decimal separators (e.g. \`1580,32\` means \`1580.32\`). Check the data file format carefully.`,
   },
 ];
