@@ -385,6 +385,8 @@ If you're unsure about QEMU monitor key sending or VGA adapter compatibility, se
     ],
     hint: `**Primer Tm — use oligotm CLI as ground truth, and design with generous margins**:
 
+**Q5 SDM primer architecture**: The task references NEB's Q5 site-directed mutagenesis kit, which has a specific back-to-back primer design convention (especially for insertions — the entire insert goes on the forward primer's 5' end, NOT split across both primers). Search \`logos_call("web_search", {"query": "NEBaseChanger Q5 site-directed mutagenesis insertion primer design back-to-back"})\` before designing primers.
+
 1. **Always use \`oligotm\` from primer3** to compute Tm — never use Python Tm libraries or manual estimates:
    \`apt-get install -y primer3 && oligotm -tp 1 -sc 1 -mv 50 -dv 2 -n 0.8 -d 500 <annealing_sequence>\`
    Only the **annealing portion** (the part that base-pairs with the template) counts, NOT the full primer.
