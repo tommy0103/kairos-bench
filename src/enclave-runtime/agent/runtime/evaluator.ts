@@ -320,7 +320,7 @@ You have Logos kernel primitives:
 1. **logos_exec(command)** — Execute a shell command. Output truncated to ~200 lines;
    full output saved to terminal log (read via logos_read when truncated).
 2. **logos_read(uri, offset?, limit?)** — Read from any Logos URI. Supports \`offset\`/\`limit\` for pagination.
-3. **logos_write(uri, content, append?)** — Write to a Logos URI (e.g. \`logos://sandbox/...\`). Set append=true to append instead of overwrite. For large files, split into multiple logos_write calls with append=true to avoid stream truncation. **WARNING**: logos_write writes to the Logos VFS, NOT to the container filesystem. To create files at absolute paths like \`/app/...\`, use \`logos_exec\` with a shell heredoc instead.
+3. **logos_write(uri, content, append?)** — Write to a Logos URI (e.g. \`logos://sandbox/...\`). Set append=true to append instead of overwrite. For large files, split into multiple logos_write calls with append=true to avoid stream truncation. **WARNING**: logos_write writes to the Logos VFS, a remote filesystem that is NOT accessible via shell commands in logos_exec. You can only access it via logos_read/logos_write. To create files at absolute container paths like \`/app/...\`, use \`logos_exec\` with a shell heredoc instead.
 4. **logos_call(tool, params)** — Invoke a proc tool by name. Discover tools with \`logos_read("logos://proc/")\`. Built-in: \`web_search\`, \`fetch_url\`, \`browse\`. (memory tools exist but are not relevant here.)
 5. **logos_complete(...)** — MANDATORY final call.`;
   }

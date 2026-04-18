@@ -149,7 +149,7 @@ const evalProvider = resolveEvalProvider();
 
 // ── System prompt ────────────────────────────────────────────
 
-function buildSystemPrompt(kernelMode: boolean): string {
+function buildSystemPrompt(kernelMode: boolean, taskId?: string): string {
   const toolDocs = kernelMode
     ? `## Tools
 
@@ -161,11 +161,11 @@ You have Logos kernel primitives:
    to logos_read to retrieve it.
 
 2. **logos_read(uri, offset?, limit?)** — Read from any Logos URI.
-   Examples: \`logos://sandbox/...\`, \`logos://system/tasks\`, \`logos://proc/\`
+   Examples: \`logos://sandbox/${taskId ?? "{task_id}"}/...\`, \`logos://system/tasks\`, \`logos://proc/\`
    For large content, use \`offset\` (byte offset) and \`limit\` (max bytes) to paginate. Output is capped at ~400K chars.
 
-3. **logos_write(uri, content)** — Write to a Logos URI (e.g. \`logos://sandbox/...\`). Pure data, no side effects.
-   **WARNING**: logos_write writes to the Logos VFS, NOT to the container filesystem. Writing to an absolute path like \`/app/foo.py\` will silently land in the sandbox workspace, not at \`/app/foo.py\`. To create files at absolute container paths, use \`logos_exec\` with a shell heredoc: \`cat > /app/foo.py << 'EOF'\`.
+3. **logos_write(uri, content)** — Write to a Logos URI (e.g. \`logos://sandbox/${taskId ?? "{task_id}"}/...\`). Pure data, no side effects.
+   **WARNING**: logos_write writes to the Logos VFS, NOT to the container filesystem. The \`logos://sandbox/\` namespace is a remote filesystem — it is NOT accessible via shell commands in logos_exec. You can only read/write it via logos_read/logos_write. To create files at absolute container paths like \`/app/foo.py\`, use \`logos_exec\` with a shell heredoc: \`cat > /app/foo.py << 'EOF'\`.
 
 4. **logos_call(tool, params)** — Invoke a proc tool by name.
    Discover available tools with \`logos_read("logos://proc/")\`. Built-in tools include:
@@ -188,7 +188,7 @@ You have Logos kernel primitives:
      Do NOT use explore for sequential steps — use plan for that.
    - Blocked: call with \`sleep: { reason, retry }\` to pause.
    - \`task_log\`: detailed execution record (what you did, key outputs, errors). Required when using \`plan\` or \`explore\`.
-     Previous steps' logs are at \`logos://sandbox/plan-step-N.log\` (read with logos_read).`
+     Previous steps' logs are at \`logos://sandbox/${taskId ?? "{task_id}"}/plan-step-N.log\` (read with logos_read).`
     : `## Tools`;
 
   return `You are an autonomous terminal agent solving a benchmark task inside a sandbox.
@@ -226,7 +226,7 @@ ${toolDocs}
   - **If the task mentions a specific file format** (e.g. .ckpt, .pdb, .wad), inspect the actual file to confirm it matches what you found online. If it doesn't, search with different keywords rather than forcing a wrong hypothesis.
   - Skip research for straightforward tasks (build from source, fix a bug, write a standard script) where you already know the domain well.
 - **Container environment**: You are running inside a Docker container with no init system. When starting services (nginx, postgres, redis, apache, etc.), NEVER run them in the foreground — logos_exec will block forever. Always start services in background mode, e.g. \`nginx -g "daemon on;"\`, \`postgres &\`, \`redis-server --daemonize yes\`, or append \`&\` to the command. Verify the service started with a follow-up check (e.g. \`curl -s localhost\` or \`pgrep nginx\`).
-- **Context continuity**: before starting work, check \`logos_read("logos://sandbox/plan-initial.log")\`. If it returns empty, fall back to \`logos_exec("cat /tmp/logos-sandbox/plan-initial.log")\`. If a log exists, a previous agent already made partial progress — review it so you do not duplicate work.
+- **Context continuity**: before starting work, check \`logos_read("logos://sandbox/${taskId ?? "{task_id}"}/plan-initial.log")\`. If it returns empty, fall back to \`logos_exec("cat /tmp/logos-sandbox/plan-initial.log")\`. If a log exists, a previous agent already made partial progress — review it so you do not duplicate work.
 - **Context pressure**: if the system warns that your context window is nearly full, immediately enter plan mode by calling logos_complete with \`task_log\` (detailed record of everything done so far) and \`plan\` (remaining steps). Do not ignore context pressure warnings.
 - **Never give up directly**: if you feel stuck or believe the task is too complex to complete in one pass, do NOT call logos_complete with just a summary to end the task. Instead, use plan mode — decompose the remaining work into smaller subtasks via \`plan: [...]\` so that fresh agents can tackle each piece independently. Only use \`sleep\` if there is a genuine external blocker (e.g. missing credentials, unavailable service).${buildAgentSkillsSection(
     taskDescription
@@ -317,7 +317,7 @@ async function main(): Promise<void> {
     );
   }
 
-  const systemPrompt = buildSystemPrompt(session.useKernel);
+  const systemPrompt = buildSystemPrompt(session.useKernel, session.taskId);
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: systemPrompt },
@@ -411,7 +411,7 @@ async function main(): Promise<void> {
         if (completeParams.task_log) {
           await persistLog(
             session.tools,
-            "logos://sandbox/plan-initial.log",
+            `logos://sandbox/${session.taskId}/plan-initial.log`,
             completeParams.task_log,
             "initial task_log",
             true // append
@@ -429,6 +429,7 @@ async function main(): Promise<void> {
           kernelMode: session.useKernel,
           contextLimit,
           execTimeoutSec: execTimeoutMs ? execTimeoutMs / 1000 : undefined,
+          taskId: session.taskId,
         });
         break;
       }
@@ -442,7 +443,7 @@ async function main(): Promise<void> {
         if (completeParams.task_log) {
           await persistLog(
             session.tools,
-            "logos://sandbox/plan-initial.log",
+            `logos://sandbox/${session.taskId}/plan-initial.log`,
             completeParams.task_log,
             "initial task_log (explore)",
             true // append

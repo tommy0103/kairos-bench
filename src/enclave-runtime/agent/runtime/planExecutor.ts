@@ -43,6 +43,7 @@ export interface PlanExecutorOptions {
   contextLimit?: number;
   /** Actual per-command timeout in seconds (shown in tool docs). */
   execTimeoutSec?: number;
+  taskId?: string;
 }
 
 // ── Main entry point ─────────────────────────────────────────
@@ -87,7 +88,7 @@ export async function executePlan(
       client,
       model,
       tools,
-      systemPrompt: buildExecutorPrompt(originalTask, subtask, kernelMode, completed, execTimeoutSec),
+      systemPrompt: buildExecutorPrompt(originalTask, subtask, kernelMode, completed, execTimeoutSec, opts.taskId),
       userMessage: subtask,
       maxTurns: maxTurnsPerAgent,
       temperature,
@@ -117,8 +118,8 @@ export async function executePlan(
 
     const logPath =
       depth === 0
-        ? `logos://sandbox/plan-step-${step}.log`
-        : `logos://sandbox/plan-d${depth}-step-${step}.log`;
+        ? `logos://sandbox/${opts.taskId ?? "unknown"}/plan-step-${step}.log`
+        : `logos://sandbox/${opts.taskId ?? "unknown"}/plan-d${depth}-step-${step}.log`;
 
     if (params.plan && params.plan.length > 0 && depth < MAX_PLAN_DEPTH) {
       console.log(
@@ -410,6 +411,7 @@ function buildExecutorPrompt(
   kernelMode: boolean,
   completed: CompletedSubtask[] = [],
   execTimeoutSec?: number,
+  taskId?: string,
 ): string {
   let priorContextBlock = "";
   if (completed.length > 0) {
@@ -429,13 +431,13 @@ ${stepsBlock}
 **IMPORTANT**: Read the most recent step's log first to understand current state and avoid redoing work:
 \`logos_read("${lastStep.logPath}")\`
 If logos_read returns empty, fall back to: \`logos_exec("cat ${logosUriToFsPath(lastStep.logPath)}")\`
-You may also read \`logos_read("logos://sandbox/plan-initial.log")\` for pre-plan context.
+You may also read \`logos_read("logos://sandbox/${taskId ?? "{task_id}"}/plan-initial.log")\` for pre-plan context.
 `;
   } else {
     priorContextBlock = `
 ## Prior context
 
-- **Check existing logs first**: call \`logos_read("logos://sandbox/plan-initial.log")\`. If it returns empty, fall back to \`logos_exec("cat /tmp/logos-sandbox/plan-initial.log")\`. If a log exists, a previous agent already made progress — review it to understand what has been done and avoid duplicating work.
+- **Check existing logs first**: call \`logos_read("logos://sandbox/${taskId ?? "{task_id}"}/plan-initial.log")\`. If it returns empty, fall back to \`logos_exec("cat /tmp/logos-sandbox/plan-initial.log")\`. If a log exists, a previous agent already made progress — review it to understand what has been done and avoid duplicating work.
 `;
   }
 

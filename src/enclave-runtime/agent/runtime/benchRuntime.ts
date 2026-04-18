@@ -67,6 +67,7 @@ export async function createKernelSession(
 
   const logosTools = createAllLogosTools(logosClient, {
     execTimeoutMs: opts.execTimeoutMs,
+    taskId,
   });
   const tools = [...logosTools, createLogosCompleteTool()];
   const handler = createCompleteHandler({ logosClient });
