@@ -107,7 +107,7 @@ After writing plaintexts.txt, verify line count, then call logos_complete. Do NO
 - Use \`nproc\` to determine available cores and pass \`-j$(nproc)\` to make.
 - If a build fails, read the FULL error output (use logos_read if truncated) before attempting a fix. Do not blindly retry.
 - Common pitfalls: missing dev packages (install with \`apt-get install -y\`), wrong OCaml/Coq version, missing autoconf/automake.
-- **CompCert-specific**: CompCert 3.x requires Coq in a specific version range (e.g. 8.12-8.16, NOT 8.18+). Always run \`grep -i coq configure\` or \`head -100 configure\` FIRST to check. Use opam to install the exact required version in one go — do not guess.
+- **CompCert-specific**: CompCert 3.x requires Coq AND menhir in specific version ranges. Always run \`grep -i 'coq\\|menhir' configure\` FIRST to find the exact accepted versions. Install them in one \`opam install\` command (e.g. \`opam install -y coq.8.16.1 menhir.20220210\`) — do not install latest and hope it works.
 - For long builds (Coq proofs, LLVM, GCC): the build itself may take 20-60 minutes. Start it early and do not waste time on unnecessary steps beforehand.
 - **Do NOT use plan mode for compilation tasks.** \`opam install\` and \`make\` can exceed the 590s logos_exec timeout — that's expected. When a command times out, the process is still running in the background. Check with \`pgrep -a make\` or \`pgrep -a opam\`, and if it's still going, just re-run the same command (make is idempotent). Do NOT enter plan mode — replanning wastes far more time than waiting for the build.`,
   },
