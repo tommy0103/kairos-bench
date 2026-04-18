@@ -1086,7 +1086,8 @@ Focus on: eliminating correlated subqueries, reducing redundant joins, using CTE
 - "Equal up to scaling" is checked with element-wise ratio deviation < 1e-4. Naive finite-difference gradient methods typically achieve ~1e-3 which is NOT sufficient.
 - Search for published methods on exact ReLU network weight recovery before writing code: \`logos_call("web_search", {"query": "exact ReLU neural network weight extraction cryptanalytic"})\`
 - Read \`forward.py\` first to understand the exact architecture and parameter shapes.
-- After recovering all rows, verify precision by checking internal consistency: for each recovered row, sample multiple points near its kink and confirm the gradient jump is consistent to < 1e-5 relative error. If any row looks noisy, gather more samples and re-solve.`,
+- After recovering all rows, verify precision by checking internal consistency: for each recovered row, sample multiple points near its kink and confirm the gradient jump is consistent to < 1e-5 relative error. If any row looks noisy, gather more samples and re-solve.
+- **Random seed pitfall**: \`forward.py\` uses \`np.random.seed()\` at module level to generate weights. If your \`steal.py\` also sets a seed, the interaction between your seed and the import can produce different random sequences depending on whether forward was already cached. Always set your seed AFTER importing forward, and use a different seed value.`,
   },
 ];
 
