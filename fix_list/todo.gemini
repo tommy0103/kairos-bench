@@ -23,8 +23,14 @@
 # tune-mjcf, vulnerable-secret, winning-avg-corewars, write-compressor,
 # sqlite-with-gcov
 
+
+gpt2-codegolf PASS but TIMEOUT
+dna-insert PASS
+configure-git-webserver PASS
+
+
 ## Researcher wins over master (researcher pass, master fail)
-# configure-git-webserver   4.7-res 1/1 P  4.6-res 2/2 P  master 0/1 F
+#    4.7-res 1/1 P  4.6-res 2/2 P  master 0/1 F
 # dna-insert                4.7-res 1/1 P  4.6-res 1/2 M  master 0/1 F
 # extract-elf               4.7-res 1/1 P  4.6-res 2/2 P  master 0/1 F
 # financial-document-proc   4.7-res 1/1 P  4.6-res 2/2 P  master 0/1 F

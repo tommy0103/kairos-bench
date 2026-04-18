@@ -1055,6 +1055,22 @@ Focus on: eliminating correlated subqueries, reducing redundant joins, using CTE
 
 **Implementation tip**: use \`cond\` instead of deeply nested \`if\` chains for expression dispatch. Each nested \`if\` adds multiple levels of Python recursion in the host interpreter, quickly hitting the 5000-depth limit. \`cond\` is flat and much more depth-efficient.`,
   },
+  {
+    id: "elf-memory-extraction",
+    name: "ELF binary memory extraction",
+    triggers: [
+      ["extract", "memory", "binary"],
+      ["extract", "elf", "memory"],
+      ["memory addresses", "binary"],
+      ["extract.js", "a.out"],
+      ["memory values", "binary"],
+    ],
+    hint: `**ELF memory extraction — use the actual virtual addresses from the ELF, not the example output**:
+- The example output in the task description (e.g. \`"4194304": ...\`) is illustrative only. Do NOT hardcode \`0x400000\` or any other base address offset.
+- PIE binaries have virtual addresses starting at \`0x0\` in their program headers. Non-PIE binaries typically start at \`0x400000\`. Your code must use the \`p_vaddr\` values directly from the PT_LOAD segments — do NOT add any base offset on top.
+- Run \`readelf -l /app/a.out\` to inspect the actual LOAD segment virtual addresses before writing code.
+- Include BSS regions: for each PT_LOAD segment, emit zero-valued words for the range between \`p_filesz\` and \`p_memsz\`.`,
+  },
 ];
 
 // ── Skill detection ──────────────────────────────────────────
