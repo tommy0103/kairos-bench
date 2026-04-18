@@ -1,71 +1,69 @@
 # Task Status Overview
-# Source: jobs/2026-04-15__17-18-00 (178 trials, 89 tasks x2)
-# Compared against: fix_list/todo.all (baseline)
-# Overall: 136/178 pass (76.4%)
+# Source: jobs/jobs-0418/4.7-master (89 tasks, 1 trial each)
+# Compared against: fix_list/todo.latest (previous: jobs/2026-04-15__17-18-00)
+# Overall: 71/89 pass (79.8%), 18 fail, 11 errors (AgentTimeoutError)
 
-## Fully passing (2/2) — 67 tasks
+## Fully passing — 71 tasks
+# adaptive-rejection-sampler (NEW PASS - was 0/2)
 # bn-fit-modify, break-filter-js-from-html, build-cython-ext, build-pmars,
 # build-pov-ray, cancel-async-tasks, circuit-fibsqrt, cobol-modernization,
 # code-from-image, constraints-scheduling, count-dataset-tokens,
+# crack-7z-hash (was flaky 1/2, now pass),
 # custom-memory-heap-crash, db-wal-recovery, distribution-search,
-# dna-assembly, dna-insert, extract-elf, extract-moves-from-video,
-# feal-differential-cryptanalysis, feal-linear-cryptanalysis,
-# filter-js-from-html, financial-document-processor, fix-code-vulnerability,
-# fix-git, gcode-to-text, git-leak-recovery, headless-terminal,
-# hf-model-inference, kv-store-grpc, large-scale-text-editing,
-# largest-eigenval, llm-inference-batching-scheduler, log-summary-date-ranges,
-# mailman, modernize-scientific-stack, multi-source-data-merger,
+# dna-assembly, feal-differential-cryptanalysis, feal-linear-cryptanalysis,
+# filter-js-from-html, fix-code-vulnerability, fix-git, fix-ocaml-gc,
+# gcode-to-text, git-leak-recovery, git-multibranch, headless-terminal,
+# hf-model-inference, install-windows-3-11 (was 0/2, now pass),
+# kv-store-grpc, large-scale-text-editing, largest-eigenval,
+# llm-inference-batching-scheduler, log-summary-date-ranges, mailman,
+# mcmc-sampling-stan, merge-diff-arc-agi-task (was flaky 1/2, now pass),
+# modernize-scientific-stack, multi-source-data-merger,
 # nginx-request-logging, openssl-selfsigned-cert, overfull-hbox,
-# password-recovery, path-tracing, path-tracing-reverse, polyglot-c-py,
-# polyglot-rust-c, portfolio-optimization, prove-plus-comm, pypi-server,
-# pytorch-model-cli, pytorch-model-recovery, qemu-startup, regex-chess,
-# regex-log, reshard-c4-data, rstan-to-pystan, sanitize-git-repo,
-# sqlite-db-truncate, sqlite-with-gcov, torch-pipeline-parallelism,
-# torch-tensor-parallelism, tune-mjcf, vulnerable-secret,
-# winning-avg-corewars
+# password-recovery, path-tracing (timeout but pass),
+# path-tracing-reverse (timeout but pass), polyglot-c-py, polyglot-rust-c,
+# portfolio-optimization, protein-assembly (was 0/2, now pass),
+# prove-plus-comm, pypi-server, pytorch-model-cli, pytorch-model-recovery,
+# qemu-alpine-ssh, qemu-startup, query-optimize (was not in prev run, now pass),
+# regex-chess, regex-log, reshard-c4-data, rstan-to-pystan (timeout but pass),
+# sanitize-git-repo, schemelike-metacircular-eval,
+# sparql-university (was flaky 1/2, now pass),
+# sqlite-db-truncate, sqlite-with-gcov,
+# torch-pipeline-parallelism, torch-tensor-parallelism,
+# train-fasttext, tune-mjcf, vulnerable-secret,
+# winning-avg-corewars (timeout but pass), write-compressor
 
-## Newly fixed since baseline
-# 2/2 extract-moves-from-video    (was 0/1 TIMEOUT)
-# 2/2 tune-mjcf                   (was 0/1 TIMEOUT)
+## Newly fixed since previous run
+# protein-assembly       was 0/2 -> 1/1 PASS
+# install-windows-3-11   was 0/2 -> 1/1 PASS
+# adaptive-rejection-sampler  was 0/2 -> 1/1 PASS  (prev both timeout)
+# query-optimize         was not in prev run -> 1/1 PASS
+# schemelike-metacircular-eval  was not tracked -> 1/1 PASS
+# write-compressor       was 0.5/1 -> 1/1 PASS
+# crack-7z-hash          was 1/2 -> 1/1 PASS
+# merge-diff-arc-agi-task  was 1/2 -> 1/1 PASS
+# sparql-university      was 1/2 -> 1/1 PASS
 
-## Improved since baseline (partially passing)
-1/2  compile-compcert              # was 0/1; one pass, one AgentTimeoutError
+## Regressed (was passing, now failing)
+0/1  configure-git-webserver     # was passing in baseline and prev run
+0/1  dna-insert                  # was passing (2/2)
+0/1  financial-document-processor # was passing (2/2)
 
+## Still failing — 0/1
+0/1  compile-compcert             # AgentTimeoutError (was 1/2 improved)
+0/1  chess-best-move              # AgentTimeoutError (was 0/2)
+0/1  caffe-cifar-10               # AgentTimeoutError (was 0/2)
+0/1  extract-moves-from-video     # NonZeroAgentExitCodeError (was 2/2 PASS — regression)
+0/1  video-processing             # AgentTimeoutError (was 1/2 flaky)
+0/1  make-mips-interpreter        # fail (was passing in baseline)
+0/1  mteb-leaderboard             # fail (was 0.5/1)
+0/1  mteb-retrieve                # fail (was 0/1)
+0/1  raman-fitting                # fail (was 0/1)
+0/1  model-extraction-relu-logits # fail (was 0/1)
+0/1  sam-cell-seg                 # fail (was 0/1)
+0/1  make-doom-for-mips           # fail (was 0/2)
+0/1  gpt2-codegolf                # AgentTimeoutError (was 0/2)
+0/1  extract-elf                  # fail (was 2/2 PASS — regression)
 
-
-
-## Flaky (was passing, now unstable 1/2)
-1/2  video-processing              # failed trial: takeoff frame off by 2-6 frames (225 vs expected 219-223)
-1/2  merge-diff-arc-agi-task       # one fail
-1/2  crack-7z-hash                 # one timeout
-1/2  sparql-university             # one fail
-1/2  chess-best-move               # see below (0/2 but was not in baseline failing list)
-
-## Still failing (0/2) — need investigation
-0/2  adaptive-rejection-sampler    # both AgentTimeoutError
-0/2  caffe-cifar-10                # both AgentTimeoutError; build too slow
-0/2  chess-best-move               # both AgentTimeoutError 900s; one wrong move, one no output
-0/2  gpt2-codegolf                 # both AgentTimeoutError
-0/2  install-windows-3-11          # both AgentTimeoutError; skill updated (cirrus + win + socket path) but this run was before skill took effect
-0/2  make-doom-for-mips            # both AgentTimeoutError
-0/2  model-extraction-relu-logits  # both fail (NonZeroAgentExitCodeError + verifier fail)
-0/2  protein-assembly              # both NonZeroAgentExitCodeError (bench-runner exit 1)
-0/2  raman-fitting                 # both fail
-0/2  sam-cell-seg                  # both fail
-
-## Not in this run
-# query-optimize (was in baseline, not in this batch)
-
-## Code fixes applied during this session
-# 1. planExecutor.ts: fixed exec fallback writing logos:// URI as real path -> now writes to /tmp/logos-sandbox/
-# 2. planExecutor.ts: changed log URIs from logos://sandbox/plan/X to logos://sandbox/plan-X (flat, no subdirectory)
-# 3. planExecutor.ts + bench-runner.ts: prompts updated to "try logos_read first, fallback to cat /tmp/logos-sandbox/"
-# 4. logosTools.ts: logos_write now supports append=true parameter
-# 5. All tool docs (planExecutor, evaluator, exploreExecutor, logosTools): updated logos_write signature + "split large files into chunks" hint
-# 6. chatClient.ts: added debug logging for stream truncation (error type, httpStatus, contentBytes, toolBlocks, inputJson bytes received)
-# 7. All bench-runner.txt log outputs: tool call args now show total byte count when truncated
-
-## Skill changes applied during this session
-# install-windows-3-11 (qemu-vm-setup): Medium level — added DOS->win boot, -vga cirrus, /tmp/qemu-monitor.sock unix socket, absolute paths
-# make-mips-interpreter: Medium level — sparse memory, delay slots, custom syscalls, no plan mode, chunk writes, stdout completeness self-test
-# qemu-general: added warning about bare nc/telnet hanging on QEMU sockets
+## Summary of regressions (were passing, now fail)
+# configure-git-webserver, dna-insert, financial-document-processor,
+# extract-moves-from-video, make-mips-interpreter, extract-elf

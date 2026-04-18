@@ -1,0 +1,95 @@
+# Task Status Overview — Gemini (researcher branch)
+# Source: jobs/jobs-0418/4.7-researcher (89 tasks x1) + jobs/jobs-0418/4.6-researcher (89 tasks x2)
+# Compared against: 4.7-master (89 tasks x1)
+#
+# 4.7-master:      71/89 pass (79.8%)
+# 4.7-researcher:  64/88 pass (72.7%)  — 1 task (query-optimize) missing
+# 4.6-researcher: 128/176 pass (72.7%) — 2 tasks (query-optimize) VerifierTimeoutError
+
+## All three pass — 51 tasks (stable core)
+# build-cython-ext, build-pov-ray, cancel-async-tasks, circuit-fibsqrt,
+# cobol-modernization, constraints-scheduling, crack-7z-hash,
+# custom-memory-heap-crash, distribution-search, dna-assembly,
+# feal-differential-cryptanalysis, feal-linear-cryptanalysis, fix-code-vulnerability,
+# fix-git, fix-ocaml-gc, git-leak-recovery, git-multibranch, hf-model-inference,
+# kv-store-grpc, largest-eigenval, llm-inference-batching-scheduler,
+# log-summary-date-ranges, mailman, merge-diff-arc-agi-task, modernize-scientific-stack,
+# multi-source-data-merger, nginx-request-logging, openssl-selfsigned-cert,
+# overfull-hbox, password-recovery, path-tracing-reverse, polyglot-c-py,
+# polyglot-rust-c, portfolio-optimization, prove-plus-comm, pypi-server,
+# pytorch-model-cli, pytorch-model-recovery, regex-chess, regex-log,
+# reshard-c4-data, sanitize-git-repo, schemelike-metacircular-eval,
+# sparql-university, sqlite-db-truncate, torch-pipeline-parallelism,
+# tune-mjcf, vulnerable-secret, winning-avg-corewars, write-compressor,
+# sqlite-with-gcov
+
+## Researcher wins over master (researcher pass, master fail)
+# configure-git-webserver   4.7-res 1/1 P  4.6-res 2/2 P  master 0/1 F
+# dna-insert                4.7-res 1/1 P  4.6-res 1/2 M  master 0/1 F
+# extract-elf               4.7-res 1/1 P  4.6-res 2/2 P  master 0/1 F
+# financial-document-proc   4.7-res 1/1 P  4.6-res 2/2 P  master 0/1 F
+# gpt2-codegolf             4.7-res 1/1 P  4.6-res 0/2 F  master 0/1 F  (4.7-res only)
+# make-mips-interpreter     4.7-res 1/1 P  4.6-res 2/2 P  master 0/1 F
+# mteb-leaderboard          4.7-res 1/1 P  4.6-res 0/2 F  master 0/1 F  (4.7-res only)
+
+## Master wins over researcher (master pass, researcher fail)
+# adaptive-rejection-sampler  master 1/1 P  4.7-res 0/1 F  4.6-res 0/2 F
+# bn-fit-modify               master 1/1 P  4.7-res 0/1 F  4.6-res 2/2 P
+# build-pmars                 master 1/1 P  4.7-res 0/1 F  4.6-res 1/2 M
+# code-from-image             master 1/1 P  4.7-res 0/1 F  4.6-res 2/2 P
+# count-dataset-tokens        master 1/1 P  4.7-res 1/1 P  4.6-res 1/2 M  (flaky in 4.6)
+# db-wal-recovery             master 1/1 P  4.7-res 0/1 F  4.6-res 1/2 M
+# filter-js-from-html         master 1/1 P  4.7-res 0/1 F  4.6-res 0/2 F
+# gcode-to-text               master 1/1 P  4.7-res 0/1 F  4.6-res 0/2 F
+# headless-terminal           master 1/1 P  4.7-res 0/1 F  4.6-res 2/2 P
+# install-windows-3-11        master 1/1 P  4.7-res 0/1 F  4.6-res 0/2 F
+# large-scale-text-editing    master 1/1 P  4.7-res 0/1 F  4.6-res 1/2 M
+# mcmc-sampling-stan          master 1/1 P  4.7-res 0/1 F  4.6-res 2/2 P
+# path-tracing                master 1/1 P  4.7-res 0/1 F  4.6-res 2/2 P
+# protein-assembly            master 1/1 P  4.7-res 0/1 F  4.6-res 0/2 F
+# qemu-alpine-ssh             master 1/1 P  4.7-res 1/1 P  4.6-res 0/2 F  (flaky in 4.6)
+# rstan-to-pystan             master 1/1 P  4.7-res 0/1 F  4.6-res 2/2 P
+# train-fasttext              master 1/1 P  4.7-res 1/1 P  4.6-res 0/2 F  (flaky in 4.6)
+# torch-tensor-parallelism    master 1/1 P  both-res pass but 4.6 1/2 M
+
+## Researcher-only regressions (4.7-res fail, 4.6-res pass) — investigate
+0/1  bn-fit-modify               # 4.6 2/2 P -> 4.7-res 0/1 F
+0/1  build-pmars                 # 4.6 1/2 M -> 4.7-res 0/1 F
+0/1  code-from-image             # 4.6 2/2 P -> 4.7-res 0/1 F (AgentTimeoutError)
+0/1  db-wal-recovery             # 4.6 1/2 M -> 4.7-res 0/1 F
+0/1  headless-terminal           # 4.6 2/2 P -> 4.7-res 0/1 F
+0/1  large-scale-text-editing    # 4.6 1/2 M -> 4.7-res 0/1 F
+0/1  mcmc-sampling-stan          # 4.6 2/2 P -> 4.7-res 0/1 F
+0/1  path-tracing                # 4.6 2/2 P -> 4.7-res 0/1 F (AgentTimeoutError)
+0/1  rstan-to-pystan             # 4.6 2/2 P -> 4.7-res 0/1 F (AgentTimeoutError)
+
+## 4.6-researcher regressions (4.6 flaky/fail, 4.7-res pass or master pass)
+0/2  break-filter-js-from-html   # 4.6 1/2 M, 4.7-res 1/1 P, master 1/1 P
+0/2  feal-linear-cryptanalysis   # 4.6 0/2 F, 4.7-res 1/1 P, master 1/1 P
+0/2  filter-js-from-html         # 4.6 0/2 F, master 1/1 P
+0/2  gcode-to-text               # 4.6 0/2 F, master 1/1 P
+0/2  install-windows-3-11        # 4.6 0/2 F, master 1/1 P
+0/2  qemu-alpine-ssh             # 4.6 0/2 F, master 1/1 P, 4.7-res 1/1 P
+0/2  train-fasttext              # 4.6 0/2 F, master 1/1 P, 4.7-res 1/1 P
+
+## All fail across all runs
+0/1  caffe-cifar-10              # all timeout
+0/1  compile-compcert            # all timeout
+0/1  make-doom-for-mips          # all timeout/fail
+0/1  model-extraction-relu-logits # all fail
+0/1  mteb-retrieve               # all fail
+0/1  raman-fitting               # all fail/timeout
+0/1  sam-cell-seg                # all fail
+
+## Flaky across runs
+1/2  chess-best-move             # master 0/1 F, 4.7-res 0/1 F, 4.6 2/2 P — regressed
+1/2  extract-moves-from-video    # master 0/1 F, 4.7-res 0/1 F, 4.6 2/2 P — regressed
+1/2  video-processing            # all mostly fail (master 0/1, 4.7-res 0/1, 4.6 1/2)
+1/2  overfull-hbox               # 4.6 1/2 M, others pass
+1/2  winning-avg-corewars        # 4.6 1/2 M, others pass
+
+## Summary
+# 4.7-researcher has 7 tasks that pass where master fails (researcher adds value)
+# But has 14 tasks that master passes but researcher fails (regression)
+# 4.6-researcher (Gemini 2.5 Flash?) has significant flakiness: many 1/2 or 0/2 on tasks that pass elsewhere
+# Key concern: researcher branch adds ~7 net regressions vs master
