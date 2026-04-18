@@ -1089,6 +1089,21 @@ Focus on: eliminating correlated subqueries, reducing redundant joins, using CTE
 - After recovering all rows, verify precision by checking internal consistency: for each recovered row, sample multiple points near its kink and confirm the gradient jump is consistent to < 1e-5 relative error. If any row looks noisy, gather more samples and re-solve.
 - **Random seed pitfall**: \`forward.py\` uses \`np.random.seed()\` at module level to generate weights. If your \`steal.py\` also sets a seed, the interaction between your seed and the import can produce different random sequences depending on whether forward was already cached. Always set your seed AFTER importing forward, and use a different seed value.`,
   },
+  {
+    id: "raman-spectroscopy",
+    name: "Raman spectroscopy peak fitting",
+    triggers: [
+      ["raman", "graphene"],
+      ["raman", "peak"],
+      ["raman", "lorentzian"],
+      ["raman", "fitting"],
+      ["raman", "spectrum"],
+    ],
+    hint: `**Raman spectroscopy — check units and axis conventions before fitting**:
+- Raw instrument data may use different x-axis units (wavelength in nm, arbitrary CCD pixel index, etc.) rather than Raman shift in cm⁻¹. Search for the expected peak positions first: \`logos_call("web_search", {"query": "graphene Raman spectrum G peak 2D peak wavenumber cm-1"})\`
+- If the x values in the data file don't fall in the expected cm⁻¹ range (e.g. G peak ~1580 cm⁻¹, 2D peak ~2670 cm⁻¹ for graphene), you likely need a unit conversion. Research the instrument's output format before fitting.
+- European-format CSV files use commas as decimal separators (e.g. \`1580,32\` means \`1580.32\`). Check the data file format carefully.`,
+  },
 ];
 
 // ── Skill detection ──────────────────────────────────────────
