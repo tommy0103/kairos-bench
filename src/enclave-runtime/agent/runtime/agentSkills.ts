@@ -289,7 +289,11 @@ For screen constants, framebuffer format, and filesystem semantics, read the sou
 - \`doomgeneric/doomgeneric/doomgeneric.h\` — screen resolution defines
 - \`doomgeneric/doomgeneric/my_stdlib.c\` — syscall numbers and conventions
 - \`doomgeneric/doomgeneric/fake_fs.c\` — virtual filesystem implementation
-- \`doomgeneric/doomgeneric/doomgeneric_img.c\` — frame output logic`,
+- \`doomgeneric/doomgeneric/doomgeneric_img.c\` — frame output logic
+
+7. **Let the binary write its own BMP** — do NOT hook \`DG_DrawFrame\` from the host side to capture frames. The binary's \`writeBMPFile\` uses \`fopen\`/\`fwrite\` syscalls; implement those syscalls and let the native code produce the BMP. Host-side hooks may produce incorrect pixel format or color channel ordering.
+
+8. **SWL/SWR endianness**: use little-endian byte selection for MIPS32 LE. Big-endian semantics corrupt BMP headers (e.g. \`bpp\` = 0 instead of 32).`,
   },
   {
     id: "pdb-fasta-chromophore",
@@ -393,7 +397,9 @@ If you're unsure about QEMU monitor key sending or VGA adapter compatibility, se
    - These margins absorb 2-3 base boundary shifts without violating constraints.
    - If the insertion boundary is ambiguous, try shifting it ±2 bases and check that Tm constraints still hold for all interpretations.
 
-4. **Common pitfalls**:
+4. **Exhaustive boundary search**: when the insertion boundary is ambiguous (shared bases between insert and template), do NOT manually pick one boundary. Write a short script that enumerates all valid boundary positions × annealing lengths, computes Tm with \`oligotm\`, and filters by constraints. This takes seconds and eliminates boundary ambiguity errors.
+
+5. **Common pitfalls**:
    - Computing Tm on the wrong portion (including overhang bases).
    - Designing a reverse primer whose Tm barely passes 58°C — a 2-base boundary shift can push it below.
    - Designing primers with Tms far apart (e.g. 65°C vs 59°C) — a boundary shift widens the gap further.`,
@@ -532,7 +538,9 @@ OCR CANNOT reliably distinguish visually similar characters: \`0\`/\`O\`, \`1\`/
 - For MTEB results, you can \`git clone --depth=1\` the \`embeddings-benchmark/results\` repo and then checkout the commit corresponding to the target date. This gives you direct access to per-model JSON result files.
 - **Write your answer early**: once you have a strong candidate, write it to the output file FIRST, then continue verifying. A correct early answer beats a perfect analysis that times out.
 - **Time-sensitive queries ("as of DATE")**: benchmark datasets may contain results submitted at any time. If the task specifies a date, filter by when results were submitted — check model creation dates or commit timestamps.
-- **Model type matters**: leaderboards may distinguish between embedding models and general-purpose LLMs. Pay attention to what the task is actually asking for.`,
+- **Model type matters**: leaderboards may distinguish between embedding models and general-purpose LLMs. Pay attention to what the task is actually asking for.
+
+**Filter for task coverage completeness**: when computing mean scores, only include models with results for ALL tasks in the benchmark subset. Models with missing tasks appear to score higher (missing tasks tend to be harder). This is the #1 cause of wrong answers on leaderboard queries.`,
   },
   {
     id: "html-js-sanitization",
@@ -942,16 +950,9 @@ If writing the R file via logos_write gets truncated, use \`logos_exec\` with \`
       [".ckpt", "sample"],
       [".ckpt", "c file"],
     ],
-    hint: `**GPT-2 from TF checkpoint — understand the file format first**:
-
-The .ckpt file is TensorFlow's native checkpoint format. It stores weights as **named variables** (e.g. \`model/h0/attn/c_attn/w:0\`), not as a flat binary dump in a fixed order. You cannot just read the file sequentially as raw floats — you need to parse the checkpoint index to find where each variable is stored.
-
-Before writing the C reader, figure out the checkpoint structure:
-1. Check if Python is available and inspect the checkpoint: \`python3 -c "import struct; ..."\` or try installing tensorflow
-2. Look at how the official openai/gpt-2 repo loads weights — the variable names tell you the data layout
-3. The .ckpt format has an index file structure you can parse in C
-
-This is the #1 reason past runs failed — agents assumed the file is a raw float array and got garbage output.`,
+    hint: `**GPT-2 code golf — do NOT implement from scratch**:
+- Writing a dependency-free C GPT-2 under 5000 bytes from scratch is near-impossible within the time limit. Consider searching for existing minimal implementations to adapt.
+- The .ckpt file uses TensorFlow's named-variable format, not raw floats — you need to parse the index to locate each weight tensor.`,
   },
   {
     id: "make-doom-for-mips",
@@ -968,6 +969,24 @@ The time budget (900s) is tight. Every past run that used plan mode timed out du
 Two things that caused failures in past runs:
 1. **Read the VM's source** (\`/app/vm.js\`) to understand what syscall convention it expects — it does NOT use standard MIPS Linux syscalls.
 2. **Read the source for screen resolution** — do not hardcode dimensions, check \`doomgeneric.h\` for the actual values. Past runs used 320x200 but the reference expected 640x400.`,
+  },
+  {
+    id: "document-classification-ocr",
+    name: "Document classification with OCR",
+    triggers: [
+      ["invoice", "classify", "pdf"],
+      ["invoice", "classify", "jpg"],
+      ["invoice", "other", "pdf"],
+      ["invoice", "other", "jpg"],
+      ["document", "classify", "invoice"],
+      ["financial", "document", "processor"],
+      ["summary.csv", "invoice"],
+      ["total_amount", "vat_amount"],
+    ],
+    hint: `**Document classification + extraction — preview before coding**:
+- Before writing any parsing code, preview a sample of each document (\`pdftotext -layout\` for PDFs, \`tesseract\` for images) to understand the formats present and identify borderline cases.
+- Use \`pdftotext -layout\` (the \`-layout\` flag preserves tabular structure needed for some invoice formats).
+- Documents mentioning money/prices are not necessarily invoices (e.g. financial reports, quotes). Classify based on actual invoice structure, not just the presence of amounts.`,
   },
   {
     id: "sql-query-optimization",
@@ -994,9 +1013,9 @@ Focus on: eliminating correlated subqueries, reducing redundant joins, using CTE
       ["git", "server", "web", "push"],
       ["git clone", "git push", "curl"],
     ],
-    hint: `**Git-to-web deployment — do NOT reset the repo after testing**:
-- After verifying your setup works end-to-end (clone → commit → push → curl), do NOT clean up by resetting the repo to an empty state or deleting the deployed files. The verifier may rely on the content you pushed during testing being still present and served by the web server.
-- Clean up only your temporary clone directories (e.g. \`/tmp/test-clone\`), but leave the bare repo's refs and the web root intact.`,
+    hint: `**Git-to-web deployment — clean up deployed files after self-testing**:
+- After self-testing, remove deployed files from the web root (e.g. \`rm -f /var/www/*\`) and temp clone dirs. Keep the bare repo and web server running.
+- Leftover self-test files in the web root can cause stale/conflicting content on subsequent pushes.`,
   },
   {
     id: "torch-tensor-parallelism-gloo",
