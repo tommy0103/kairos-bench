@@ -985,10 +985,11 @@ Two things that caused failures in past runs:
       ["summary.csv", "invoice"],
       ["total_amount", "vat_amount"],
     ],
-    hint: `**Document classification + extraction — preview before coding**:
-- Before writing any parsing code, preview a sample of each document (\`pdftotext -layout\` for PDFs, \`tesseract\` for images) to understand the formats present and identify borderline cases.
+    hint: `**Document classification + extraction — preview EVERY document individually before classifying**:
+- This task is NOT time-sensitive. You have plenty of time. Prioritize accuracy over speed — misclassifying a single document will fail the entire task.
+- Extract text from EVERY document individually (\`pdftotext -layout\` for PDFs, \`tesseract\` for images) and read the full output before making any classification decision. Do NOT batch multiple documents in one command where output truncation could hide content.
 - Use \`pdftotext -layout\` (the \`-layout\` flag preserves tabular structure needed for some invoice formats).
-- Documents mentioning money/prices are not necessarily invoices (e.g. financial reports, quotes). Classify based on actual invoice structure, not just the presence of amounts.`,
+- Documents mentioning money/prices are not necessarily invoices (e.g. purchase orders, financial reports, quotes). Classify based on the document explicitly being an invoice (look for the word "Invoice" as a title/header), not just the presence of amounts or line items.`,
   },
   {
     id: "sql-query-optimization",
