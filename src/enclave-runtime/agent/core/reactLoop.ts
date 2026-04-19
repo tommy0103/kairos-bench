@@ -176,10 +176,25 @@ export async function* reactLoop(
         const status =
           typeof (err as any)?.status === "number" ? (err as any).status : 0;
         const msg = err instanceof Error ? err.message : String(err);
-        const body = (err as any)?.error ?? (err as any)?.body ?? (err as any)?.response?.body;
-        const detail = body
+        const body = (err as any)?.error ?? (err as any)?.body ?? (err as any)?.response?.body ?? (err as any)?.response?.data;
+        const rawDetail = body
           ? typeof body === "string" ? body : JSON.stringify(body).slice(0, 500)
           : "";
+        let detail = rawDetail;
+        if (!detail && err && typeof err === "object") {
+          try {
+            const own = Object.getOwnPropertyNames(err);
+            const extra: Record<string, unknown> = {};
+            for (const k of own) {
+              if (k !== "stack" && k !== "message") {
+                extra[k] = (err as any)[k];
+              }
+            }
+            if (Object.keys(extra).length > 0) {
+              detail = JSON.stringify(extra).slice(0, 500);
+            }
+          } catch {}
+        }
         const isRetryable =
           status === 500 ||
           status === 502 ||
