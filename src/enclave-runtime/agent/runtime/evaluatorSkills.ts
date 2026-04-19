@@ -886,7 +886,9 @@ print(f"\\nPASS: All {poly_count} rows have type='polyline'")
 2. Run: \`python3 /tmp/_skill_sam_check.py\`
 3. If FAIL: report with the count of rectangle rows. The error tells the fixer to convert all masks to polyline contours.
 4. If the coordinate column name differs, adapt the column name in check 3.
-5. Run this BEFORE and AFTER each fix attempt to track progress (e.g., "19/48 → 5/48 → 0/48").`,
+5. Run this BEFORE and AFTER each fix attempt to track progress (e.g., "19/48 → 5/48 → 0/48").
+
+**CRITICAL — do NOT change the argparse interface**: The verifier calls the script with \`--flag\` style arguments (e.g. \`--weights_path ...\`). If the agent used \`--flag\` style argparse, do NOT change it to positional args — that will break the verifier invocation. Only change argparse if it is clearly broken (e.g. wrong argument names).`,
   },
   {
     id: "mips-doom-frame-check",
