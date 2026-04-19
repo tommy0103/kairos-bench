@@ -157,6 +157,8 @@ export async function* reactLoop(
 
     let response: OpenAI.Chat.ChatCompletion | undefined;
     let apiRetries = 0;
+    const requestPayloadSize = JSON.stringify(messages).length;
+    const requestMsgCount = messages.length;
     while (true) {
       try {
         for await (const se of client.streamChatCompletion({
@@ -209,13 +211,17 @@ export async function* reactLoop(
           apiRetries++;
           const backoffMs = Math.min(2000 * 2 ** (apiRetries - 1), 30000);
           console.warn(
-            `[reactLoop] API error (status=${status}): ${msg}${detail ? ` | body: ${detail}` : ""} — retrying ${apiRetries}/${MAX_API_RETRIES} after ${backoffMs}ms`
+            `[reactLoop] API error (status=${status}): ${msg}${detail ? ` | body: ${detail}` : ""} | request: ${requestMsgCount} msgs, ${requestPayloadSize} chars — retrying ${apiRetries}/${MAX_API_RETRIES} after ${backoffMs}ms`
           );
+          if (apiRetries === 1) {
+            console.warn(`[reactLoop] request payload:\n${JSON.stringify(messages)}`);
+          }
           await new Promise((r) => setTimeout(r, backoffMs));
           response = undefined;
           continue;
         }
-        console.error(`[reactLoop] API error (status=${status}): ${msg}${detail ? ` | body: ${detail}` : ""}`);
+        console.error(`[reactLoop] API error (status=${status}): ${msg}${detail ? ` | body: ${detail}` : ""} | request: ${requestMsgCount} msgs, ${requestPayloadSize} chars`);
+        console.error(`[reactLoop] request payload:\n${JSON.stringify(messages)}`);
         throw err;
       }
     }
