@@ -1,71 +1,51 @@
-# Task Status Overview
-# Source: jobs/2026-04-15__17-18-00 (178 trials, 89 tasks x2)
-# Compared against: fix_list/todo.all (baseline)
-# Overall: 136/178 pass (76.4%)
+# Latest Run (2026-04-19__17-00-00) vs 4.7-master
 
-## Fully passing (2/2) — 67 tasks
-# bn-fit-modify, break-filter-js-from-html, build-cython-ext, build-pmars,
-# build-pov-ray, cancel-async-tasks, circuit-fibsqrt, cobol-modernization,
-# code-from-image, constraints-scheduling, count-dataset-tokens,
-# custom-memory-heap-crash, db-wal-recovery, distribution-search,
-# dna-assembly, dna-insert, extract-elf, extract-moves-from-video,
-# feal-differential-cryptanalysis, feal-linear-cryptanalysis,
-# filter-js-from-html, financial-document-processor, fix-code-vulnerability,
-# fix-git, gcode-to-text, git-leak-recovery, headless-terminal,
-# hf-model-inference, kv-store-grpc, large-scale-text-editing,
-# largest-eigenval, llm-inference-batching-scheduler, log-summary-date-ranges,
-# mailman, modernize-scientific-stack, multi-source-data-merger,
-# nginx-request-logging, openssl-selfsigned-cert, overfull-hbox,
-# password-recovery, path-tracing, path-tracing-reverse, polyglot-c-py,
-# polyglot-rust-c, portfolio-optimization, prove-plus-comm, pypi-server,
-# pytorch-model-cli, pytorch-model-recovery, qemu-startup, regex-chess,
-# regex-log, reshard-c4-data, rstan-to-pystan, sanitize-git-repo,
-# sqlite-db-truncate, sqlite-with-gcov, torch-pipeline-parallelism,
-# torch-tensor-parallelism, tune-mjcf, vulnerable-secret,
-# winning-avg-corewars
+## Overall: 80.7% (356/441) vs 79.8% (71/89) — +0.9%
 
-## Newly fixed since baseline
-# 2/2 extract-moves-from-video    (was 0/1 TIMEOUT)
-# 2/2 tune-mjcf                   (was 0/1 TIMEOUT)
+## Consistently 0% (never solved, 5 trials each)
+- caffe-cifar-10: 0/5 — timeouts during build/training
+- dna-insert: 0/5 — insert boundary + Q5 SDM primer convention
+- extract-moves-from-video: 0/4 — video analysis fundamentally hard
+- model-extraction-relu-logits: 0/5 — 1e-4 ratio precision unreachable with gradient methods
+- sam-cell-seg: 0/5 — MobileSAM polyline conversion issues
+- make-doom-for-mips: 0/5 — cross-compilation complexity + timeouts
 
-## Improved since baseline (partially passing)
-1/2  compile-compcert              # was 0/1; one pass, one AgentTimeoutError
+## Improved (skill changes helped)
+- compile-compcert: 0% → 100% (+100%) — menhir version hint in skill
+- extract-elf: 0% → 100% (+100%) — PIE base address skill
+- financial-document-processor: 0% → 100% (+100%) — document classification skill
+- make-mips-interpreter: 0% → 80% (+80%) — existing skill effective at scale
+- mteb-leaderboard: 0% → 80% (+80%)
+- adaptive-rejection-sampler: 0% → 60% (+60%)
+- chess-best-move: 0% → 40% (+40%)
+- configure-git-webserver: 0% → 40% (+40%)
+- gpt2-codegolf: 0% → 40% (+40%)
+- mteb-retrieve: 0% → 40% (+40%)
+- raman-fitting: 0% → 20% (+20%) — unit conversion skill, but still hard
+- video-processing: 0% → 20% (+20%)
 
+## Regressed (was 100% in master, now <100%)
+- gcode-to-text: 100% → 20% (-80%) — needs investigation
+- headless-terminal: 100% → 20% (-80%) — needs investigation
+- install-windows-3-11: 100% → 20% (-80%) — needs investigation
+- dna-assembly: 100% → 60% (-40%)
+- protein-assembly: 100% → 60% (-40%)
+- pytorch-model-cli: 100% → 60% (-40%)
+- schemelike-metacircular-eval: 100% → 60% (-40%)
+- tune-mjcf: 100% → 60% (-40%)
+- build-pmars: 100% → 80% (-20%)
+- large-scale-text-editing: 100% → 80% (-20%)
+- largest-eigenval: 100% → 80% (-20%)
+- mailman: 100% → 80% (-20%)
+- mcmc-sampling-stan: 100% → 80% (-20%)
+- overfull-hbox: 100% → 80% (-20%)
+- path-tracing: 100% → 80% (-20%)
+- path-tracing-reverse: 100% → 80% (-20%)
+- torch-tensor-parallelism: 100% → 80% (-20%)
+- write-compressor: 100% → 80% (-20%)
 
-
-
-## Flaky (was passing, now unstable 1/2)
-1/2  video-processing              # failed trial: takeoff frame off by 2-6 frames (225 vs expected 219-223)
-1/2  merge-diff-arc-agi-task       # one fail
-1/2  crack-7z-hash                 # one timeout
-1/2  sparql-university             # one fail
-1/2  chess-best-move               # see below (0/2 but was not in baseline failing list)
-
-## Still failing (0/2) — need investigation
-0/2  adaptive-rejection-sampler    # both AgentTimeoutError
-0/2  caffe-cifar-10                # both AgentTimeoutError; build too slow
-0/2  chess-best-move               # both AgentTimeoutError 900s; one wrong move, one no output
-0/2  gpt2-codegolf                 # both AgentTimeoutError
-0/2  install-windows-3-11          # both AgentTimeoutError; skill updated (cirrus + win + socket path) but this run was before skill took effect
-0/2  make-doom-for-mips            # both AgentTimeoutError
-0/2  model-extraction-relu-logits  # both fail (NonZeroAgentExitCodeError + verifier fail)
-0/2  protein-assembly              # both NonZeroAgentExitCodeError (bench-runner exit 1)
-0/2  raman-fitting                 # both fail
-0/2  sam-cell-seg                  # both fail
-
-## Not in this run
-# query-optimize (was in baseline, not in this batch)
-
-## Code fixes applied during this session
-# 1. planExecutor.ts: fixed exec fallback writing logos:// URI as real path -> now writes to /tmp/logos-sandbox/
-# 2. planExecutor.ts: changed log URIs from logos://sandbox/plan/X to logos://sandbox/plan-X (flat, no subdirectory)
-# 3. planExecutor.ts + bench-runner.ts: prompts updated to "try logos_read first, fallback to cat /tmp/logos-sandbox/"
-# 4. logosTools.ts: logos_write now supports append=true parameter
-# 5. All tool docs (planExecutor, evaluator, exploreExecutor, logosTools): updated logos_write signature + "split large files into chunks" hint
-# 6. chatClient.ts: added debug logging for stream truncation (error type, httpStatus, contentBytes, toolBlocks, inputJson bytes received)
-# 7. All bench-runner.txt log outputs: tool call args now show total byte count when truncated
-
-## Skill changes applied during this session
-# install-windows-3-11 (qemu-vm-setup): Medium level — added DOS->win boot, -vga cirrus, /tmp/qemu-monitor.sock unix socket, absolute paths
-# make-mips-interpreter: Medium level — sparse memory, delay slots, custom syscalls, no plan mode, chunk writes, stdout completeness self-test
-# qemu-general: added warning about bare nc/telnet hanging on QEMU sockets
+## Notes
+- Master only had 1 trial per task, so 100%→80% regressions may be noise (master got lucky)
+- The -80% regressions (gcode-to-text, headless-terminal, install-windows-3-11) are concerning and need investigation
+- 12 tasks improved vs 18 regressed, but regressions are mostly -20% (likely variance with 5 trials vs 1)
+- The 0% tasks (model-extraction, sam-cell-seg, make-doom-for-mips, caffe-cifar-10, dna-insert, extract-moves-from-video) are the hardest unsolved problems

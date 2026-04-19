@@ -1,71 +1,80 @@
-# Failure Analysis — 24 Failing Tasks
+# Failure Analysis — 2026-04-19\_\_17-00-00
 
-Source: `jobs/2026-04-13__11-00-00` baseline run
+## Trial Count Discrepancy
 
-## TIMEOUT (14 tasks)
+89 tasks × 5 trials = 445 expected. 441 scored, 4 unscored:
 
-| Task                         | Root Cause                                                                          | Fixable with skill?                                                                                 |
-| ---------------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| adaptive-rejection-sampler   | Agent ran out of time; verifier R code crashes with coercion error in ARS           | Maybe — need to check if R implementation has a known pitfall                                       |
-| caffe-cifar-10               | Build too slow — Caffe source compilation doesn't finish within timeout             | Partially — skill added to use apt package instead of source build, but 900s may still be too tight |
-| compile-compcert             | Still installing opam/Coq dependencies at 2400s timeout; ccomp never built          | Skill exists but Coq version matching is critical — agent may need specific version hints           |
-| extract-moves-from-video     | Tesseract OCR on large PNG frames hung (590s per call), agent never produced output | Maybe — need smarter frame extraction strategy, skip OCR on huge images                             |
-| gpt2-codegolf                | C implementation produces wrong output — incorrect weight loading order             | Unlikely — code logic bug, not a skill issue                                                        |
-| install-windows-3-11         | QEMU/Windows boots but VNC frozen, keyboard events produce no visual change         | Skill exists (qemu-vm-setup) but QEMU 5.2.0 source build may timeout                                |
-| make-doom-for-mips           | MIPS cross-compilation failed, doomgeneric_mips ELF never produced                  | Unlikely — complex cross-compilation task                                                           |
-| protein-assembly             | Gblock protein order wrong — flag_idx < donor_idx assertion fails                   | Maybe — domain knowledge issue, web_search might help                                               |
-| query-optimize               | Solution was correct but verifier SQL runtime test took 28+ min                     | Not agent's fault — verifier timeout, agent actually solved it                                      |
-| raman-fitting                | Fitting converges to wrong region (gamma=200 vs expected ~17)                       | Maybe — initial parameter guesses need guidance                                                     |
-| schemelike-metacircular-eval | eval.scm passes 62/63 tests, fails on continuation_passing.scm                      | Close to passing — might just need more time or a hint on continuations                             |
-| torch-tensor-parallelism     | Multi-GPU distributed ops fail, only single-process tests pass                      | Similar to pipeline-parallelism — evaluator skill might help                                        |
-| tune-mjcf                    | Achieves 63.9% of reference time, needs ≤60% — barely missed target                 | Close — need slightly better tuning strategy                                                        |
-| write-compressor             | data.comp causes segfault in decompressor — incorrect token structure               | Unlikely — algorithm correctness bug                                                                |
+| Trial                               | Reason                                                           |
+| ----------------------------------- | ---------------------------------------------------------------- |
+| `extract-moves-from-video__bHGSWJs` | AgentTimeoutError — no verifier result                           |
+| `query-optimize__CYcBiZe`           | NonZeroAgentExitCodeError — bench-runner crashed before verifier |
+| `query-optimize__pcaJ6Cf`           | VerifierTimeoutError — verifier timed out                        |
+| `regex-chess__PxdLDPm`              | NonZeroAgentExitCodeError — bench-runner crashed before verifier |
 
-## FAIL (10 tasks)
+These 4 trials crashed hard enough that the verifier never ran (or timed out), so no reward was recorded.
 
-| Task                         | Root Cause                                                                               | Fixable with skill?                                                                                       |
-| ---------------------------- | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| configure-git-webserver      | Evaluator passed but verifier's verify.sh returns 404 — post-push hook not serving files | Yes — evaluator skill should test the actual verify.sh behavior                                           |
-| count-dataset-tokens         | Agent gets 63841 tokens, verifier expects 79586 — tokenizer mismatch                     | Yes — need to tell agent which tokenizer to use                                                           |
-| cobol-modernization          | Actually passed verifier (3/3 tests) — may be a reporting bug                            | Check — might already be fixed                                                                            |
-| make-mips-interpreter        | Missing stdout string "I_InitGraphics: DOOM screen size: w x h: 320 x 200"               | Skill exists (mips-interpreter-doom) but stdout forwarding still broken                                   |
-| model-extraction-relu-logits | Stolen matrix rows don't match within 1e-4 tolerance for 7 rows                          | Unlikely — numerical precision issue in attack                                                            |
-| mteb-leaderboard             | Context overflow (1.08M tokens) — agent fetched huge Gradio data                         | Yes — web-scraping skill exists, should prevent large fetches. Also MAX_TOOL_OUTPUT_CHARS should help now |
-| mteb-retrieve                | Evaluator and verifier disagree on ground truth answer                                   | Need investigation — may be a task ambiguity                                                              |
-| polyglot-c-py                | Agent left compiled binaries in /app/polyglot/ — verifier requires ONLY main.py.c        | Yes — evaluator skill: "clean up build artifacts before finishing"                                        |
-| polyglot-rust-c              | Same as polyglot-c-py — compiled binaries left in output directory                       | Yes — same fix as above                                                                                   |
-| sam-cell-seg                 | /app/test_output.csv not created — verifier invocation differs from what agent expected  | Maybe — skill exists but verifier's specific invocation needs matching                                    |
+## NonZeroAgentExitCodeError (160/445 = 36%)
 
-## Priority ranking (most likely to fix with medium-level skills)
+This is the **dominant error**. The bench-runner process (`bun run bench-runner.ts`) exits with code 1 due to uncaught exceptions in `main().catch()`.
 
-### High priority (likely fixable)
+### Root Cause Breakdown
 
-1. **polyglot-c-py / polyglot-rust-c** — Just need to clean up build artifacts. Simple evaluator hint.
-2. **count-dataset-tokens** — Tokenizer specification mismatch. Agent needs to know which tokenizer.
-3. **mteb-leaderboard** — Context overflow now mitigated by MAX_TOOL_OUTPUT_CHARS. May auto-fix.
-4. **configure-git-webserver** — Evaluator needs to test actual verify.sh behavior.
-5. **torch-tensor-parallelism** — Similar pattern to pipeline-parallelism, skill should help.
+| Cause                                             | Count | Impact                                                                                                                                |
+| ------------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `500 Internal Server Error` (LLM API)             | 151   | Evaluator API call fails, bench-runner crashes. Verifier usually still runs (agent output already written).                           |
+| `400 No tool call found for function call output` | 4     | OpenAI API rejects tool response — possible race condition or message format issue.                                                   |
+| Git errors (in agent output, not bench-runner)    | ~14   | `fatal: not a git repository` etc. — these are from agent's `logos_exec` output containing "fatal:", not actual bench-runner crashes. |
 
-### Medium priority (might fix)
+**Key finding**: 151/160 NZEC are caused by **evaluator API 500 errors**. The bench-runner has no retry logic for evaluator API calls — a single 500 kills the evaluator/fixer cycle. Despite this, most trials still pass because the agent already wrote correct output before the evaluator ran.
 
-6. **cobol-modernization** — Check if already passing, may be reporting issue.
-7. **schemelike-metacircular-eval** — 62/63 tests pass, close to solution.
-8. **tune-mjcf** — Barely missed target (63.9% vs 60%), small tuning might help.
-9. **raman-fitting** — Initial parameter guidance could help convergence.
-10. **protein-assembly** — Domain knowledge issue, web_search + fetch_url might help.
+### Recommendation
 
-### Low priority (hard to fix with skills alone)
+- Add retry logic (3 attempts with exponential backoff) for API calls in the evaluator
+- The 500 errors are wasting evaluator/fixer cycles that could have caught remaining bugs
 
-11. **caffe-cifar-10** — Fundamental timeout issue, needs more CPU or apt package strategy.
-12. **query-optimize** — Already correct, verifier just slow.
-13. **compile-compcert** — Very long build, needs precise Coq version.
-14. **adaptive-rejection-sampler** — R implementation bug.
-15. **sam-cell-seg** — Verifier invocation mismatch.
-16. **extract-moves-from-video** — OCR strategy needs rethinking.
-17. **make-mips-interpreter** — Complex stdout forwarding bug.
-18. **make-doom-for-mips** — Cross-compilation complexity.
-19. **gpt2-codegolf** — Code logic bug.
-20. **install-windows-3-11** — QEMU version + VNC issue.
-21. **write-compressor** — Algorithm correctness.
-22. **model-extraction-relu-logits** — Numerical precision.
-23. **mteb-retrieve** — Task ambiguity.
+## AgentTimeoutError (39/445 = 9%)
+
+Agent exceeded the 900s time limit. Breakdown by task:
+
+| Task                     | Timeouts  | Notes                            |
+| ------------------------ | --------- | -------------------------------- |
+| caffe-cifar-10           | 5/5       | Training on CPU always times out |
+| extract-moves-from-video | 4/4       | Video analysis too slow          |
+| make-doom-for-mips       | 4/5       | Cross-compilation + debugging    |
+| path-tracing             | 3/5       | Rendering takes too long         |
+| rstan-to-pystan          | 3/5       | MCMC sampling slow               |
+| chess-best-move          | 3/5       | FEN recognition + engine         |
+| compile-compcert         | 2/5       | Coq proof compilation            |
+| gpt2-codegolf            | 3/5       | Iterating on C implementation    |
+| Others                   | scattered | 1-2 each                         |
+
+## VerifierTimeoutError (1/445)
+
+Only `query-optimize__pcaJ6Cf` — the verifier likely ran the unoptimized query which timed out.
+
+## Consistently Failing Tasks (0% across 5 trials)
+
+| Task                         | Failures | Root Cause                                                            | Fix Status                                             |
+| ---------------------------- | -------- | --------------------------------------------------------------------- | ------------------------------------------------------ |
+| caffe-cifar-10               | 0/5      | CPU training always times out; `test_interval` wastes time on testing | Skill exists but insufficient — timeout is fundamental |
+| dna-insert                   | 0/5      | Q5 SDM primer design + boundary ambiguity                             | Skill added, needs verification                        |
+| extract-moves-from-video     | 0/4      | Video frame analysis fundamentally hard, always times out             | No skill — may need different approach                 |
+| model-extraction-relu-logits | 0/5      | Gradient methods can't achieve 1e-4 ratio precision                   | Skill added warning against gradient methods           |
+| sam-cell-seg                 | 0/5      | MobileSAM polyline conversion issues                                  | Skill exists but may need update                       |
+| make-doom-for-mips           | 0/5      | Cross-compilation complexity + reading VM source + timeouts           | Skill exists                                           |
+
+## Major Regressions (100% → ≤20%)
+
+| Task                 | Master | Latest | Likely Cause                                        |
+| -------------------- | ------ | ------ | --------------------------------------------------- |
+| gcode-to-text        | 1/1    | 1/5    | Needs investigation — OCR + semantic disambiguation |
+| headless-terminal    | 1/1    | 1/5    | Needs investigation                                 |
+| install-windows-3-11 | 1/1    | 1/5    | QEMU Windows boot is fragile                        |
+
+Note: Master had only 1 trial per task, so "100%" may be lucky. These tasks may have always been ~20-40% reliable.
+
+## Summary
+
+- **Overall**: 80.7% (356/441) — solid but 36% of trials have NZEC (mostly harmless API 500s)
+- **The #1 infrastructure fix needed**: retry logic for evaluator API calls (would eliminate 151 NZEC errors and potentially improve scores by giving evaluator/fixer a chance to catch bugs)
+- **The #1 task-level fix needed**: the 6 persistently-0% tasks need fundamentally different approaches, not just skill hints

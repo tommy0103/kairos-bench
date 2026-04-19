@@ -36,15 +36,15 @@ export interface ReactLoopOptions {
   contextLimit?: number;
 }
 
-function stripTypebox(schema: Record<string, unknown>): Record<string, unknown> {
+function stripTypebox(
+  schema: Record<string, unknown>
+): Record<string, unknown> {
   const json = JSON.parse(JSON.stringify(schema));
   delete json["$id"];
   return json;
 }
 
-function toolToOpenAIFunction(
-  tool: AgentTool
-): OpenAI.Chat.ChatCompletionTool {
+function toolToOpenAIFunction(tool: AgentTool): OpenAI.Chat.ChatCompletionTool {
   return {
     type: "function",
     function: {
@@ -55,7 +55,9 @@ function toolToOpenAIFunction(
   };
 }
 
-function toolResultToText(result: { content: Array<{ text: string }> }): string {
+function toolResultToText(result: {
+  content: Array<{ text: string }>;
+}): string {
   return result.content.map((c) => c.text).join("\n");
 }
 
@@ -65,7 +67,7 @@ function toolResultToText(result: { content: Array<{ text: string }> }): string 
  */
 function estimateTokens(
   messages: OpenAI.Chat.ChatCompletionMessageParam[],
-  toolSchemas?: OpenAI.Chat.ChatCompletionTool[],
+  toolSchemas?: OpenAI.Chat.ChatCompletionTool[]
 ): number {
   let chars = 0;
   for (const msg of messages) {
@@ -120,6 +122,7 @@ export async function* reactLoop(
   let turnsWarned = false;
   let streamRetries = 0;
   const MAX_STREAM_RETRIES = 3;
+  const MAX_API_RETRIES = 3;
 
   for (let turn = 0; turn < maxTurns; turn++) {
     if (signal?.aborted) return;
@@ -153,16 +156,48 @@ export async function* reactLoop(
     }
 
     let response: OpenAI.Chat.ChatCompletion | undefined;
-    for await (const se of client.streamChatCompletion({
-      model,
-      messages,
-      tools: openaiTools.length > 0 ? openaiTools : undefined,
-      temperature,
-    })) {
-      if (se.type === "text") {
-        yield { type: "message_update", role: "assistant", delta: se.text };
-      } else {
-        response = se.response;
+    let apiRetries = 0;
+    while (true) {
+      try {
+        for await (const se of client.streamChatCompletion({
+          model,
+          messages,
+          tools: openaiTools.length > 0 ? openaiTools : undefined,
+          temperature,
+        })) {
+          if (se.type === "text") {
+            yield { type: "message_update", role: "assistant", delta: se.text };
+          } else {
+            response = se.response;
+          }
+        }
+        break;
+      } catch (err) {
+        const status =
+          typeof (err as any)?.status === "number" ? (err as any).status : 0;
+        const msg = err instanceof Error ? err.message : String(err);
+        const isRetryable =
+          status === 500 ||
+          status === 502 ||
+          status === 503 ||
+          status === 429 ||
+          msg.includes("500") ||
+          msg.includes("502") ||
+          msg.includes("503") ||
+          msg.includes("Internal Server Error") ||
+          msg.includes("overloaded");
+        if (isRetryable && apiRetries < MAX_API_RETRIES) {
+          apiRetries++;
+          const backoffMs = Math.min(2000 * 2 ** (apiRetries - 1), 30000);
+          console.warn(
+            `[reactLoop] API error (status=${status}): ${msg} — retrying ${apiRetries}/${MAX_API_RETRIES} after ${backoffMs}ms`
+          );
+          await new Promise((r) => setTimeout(r, backoffMs));
+          response = undefined;
+          continue;
+        }
+        console.error(`[reactLoop] API error (status=${status}): ${msg}`);
+        throw err;
       }
     }
 
@@ -185,14 +220,14 @@ export async function* reactLoop(
       if (streamRetries <= MAX_STREAM_RETRIES) {
         console.warn(
           `[reactLoop] stream disconnected with ~0 output tokens — ` +
-            `retrying (${streamRetries}/${MAX_STREAM_RETRIES})`,
+            `retrying (${streamRetries}/${MAX_STREAM_RETRIES})`
         );
         const backoffMs = Math.min(1000 * 2 ** (streamRetries - 1), 15000);
         await new Promise((r) => setTimeout(r, backoffMs));
         continue;
       }
       console.warn(
-        `[reactLoop] stream disconnect retries exhausted (${MAX_STREAM_RETRIES})`,
+        `[reactLoop] stream disconnect retries exhausted (${MAX_STREAM_RETRIES})`
       );
     } else {
       streamRetries = 0;
@@ -215,10 +250,13 @@ export async function* reactLoop(
           parsedParams = JSON.parse(toolCall.function.arguments || "{}");
         } catch (e) {
           const raw = toolCall.function.arguments ?? "";
-          const preview = raw.length > 2000 ? raw.slice(0, 2000) + `… (${raw.length} bytes total)` : raw;
+          const preview =
+            raw.length > 2000
+              ? raw.slice(0, 2000) + `… (${raw.length} bytes total)`
+              : raw;
           console.warn(
             `[reactLoop] failed to parse tool arguments for ${toolName}: ${e} (${raw.length} chars)\n` +
-              `  [raw-args] ${preview}`,
+              `  [raw-args] ${preview}`
           );
         }
 
@@ -248,7 +286,7 @@ export async function* reactLoop(
             "Do NOT retry with empty arguments. Re-generate the full arguments.";
           result = { error: "empty arguments" };
           console.warn(
-            `[reactLoop] skipping ${toolName} — empty params (streak: ${emptyCallStreak})`,
+            `[reactLoop] skipping ${toolName} — empty params (streak: ${emptyCallStreak})`
           );
         } else {
           try {
@@ -271,13 +309,16 @@ export async function* reactLoop(
               if (!tool) {
                 throw new Error(`unknown tool "${toolName}"`);
               }
-              const toolResult = await tool.execute(toolCallId, parsedParams, signal);
+              const toolResult = await tool.execute(
+                toolCallId,
+                parsedParams,
+                signal
+              );
               resultText = toolResultToText(toolResult);
               result = toolResult;
             }
           } catch (err) {
-            const errMsg =
-              err instanceof Error ? err.message : String(err);
+            const errMsg = err instanceof Error ? err.message : String(err);
             resultText = `Error: ${errMsg}`;
             result = { error: errMsg };
           }
@@ -292,7 +333,7 @@ export async function* reactLoop(
         if (emptyCallStreak >= 3) {
           console.warn(
             `[reactLoop] ${emptyCallStreak} consecutive empty tool calls — ` +
-              `injecting warning to model`,
+              `injecting warning to model`
           );
           messages.push({
             role: "tool" as const,
