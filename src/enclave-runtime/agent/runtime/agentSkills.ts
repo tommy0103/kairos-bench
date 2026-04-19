@@ -391,7 +391,7 @@ If you're unsure about QEMU monitor key sending or VGA adapter compatibility, se
    \`apt-get install -y primer3 && oligotm -tp 1 -sc 1 -mv 50 -dv 2 -n 0.8 -d 500 <annealing_sequence>\`
    Only the **annealing portion** (the part that base-pairs with the template) counts, NOT the full primer.
 
-2. **Insertion boundary ambiguity — THIS IS THE #1 FAILURE MODE (5/5 recent runs failed due to this)**: When comparing input and output plasmids to find the inserted sequence, shared bases at the insertion boundary (e.g. "ag") can be assigned to either the insert or the template. The verifier uses a SPECIFIC boundary definition that may differ from yours by 2-3 bases. If your boundary is off, the verifier's `rc(rev) + fwd` check will fail even though the PCR product is biologically correct. You MUST enumerate all possible boundaries.
+2. **Insertion boundary ambiguity — THIS IS THE #1 FAILURE MODE (5/5 recent runs failed due to this)**: When comparing input and output plasmids to find the inserted sequence, shared bases at the insertion boundary (e.g. "ag") can be assigned to either the insert or the template. The verifier uses a SPECIFIC boundary definition that may differ from yours by 2-3 bases. If your boundary is off, the verifier's \`rc(rev) + fwd\` check will fail even though the PCR product is biologically correct. You MUST enumerate all possible boundaries.
 
 3. **Design rules to handle ambiguity**:
    - Target Tm **60-65°C** for both primers (not just ≥ 58°C).
