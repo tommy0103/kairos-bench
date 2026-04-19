@@ -32,6 +32,7 @@
  *   EVALUATOR_API_KEY    — API key for the evaluator model (default: same as API_KEY)
  *   EVALUATOR_API_PROVIDER — "openai"|"anthropic" for evaluator (auto-detected)
  *   EVALUATOR_BASE_URL   — API endpoint for evaluator model (default: same as BASE_URL)
+ *   EVALUATOR_CONTEXT_LIMIT — Override context window size for evaluator (auto-detected from model)
  */
 
 import OpenAI from "openai";
@@ -125,7 +126,7 @@ function guessContextLimit(m: string): number {
   if (s.includes("gpt-4o") || s.includes("gpt-4-turbo")) return 128_000;
   if (s.includes("gpt-5")) return 400_000;
   if (s.includes("claude")) {
-    if (s.includes("1m")) return 1_000_000;
+    if (s.includes("1m") || s.includes("opus-4-7")) return 1_000_000;
     return 200_000;
   }
   return 64_000;
@@ -140,6 +141,7 @@ const evalProviderRaw = process.env.EVALUATOR_API_PROVIDER as
   | Provider
   | undefined;
 const evalBaseURL = process.env.EVALUATOR_BASE_URL || undefined;
+const evalContextLimitOverride = parseInt(process.env.EVALUATOR_CONTEXT_LIMIT ?? "0", 10) || undefined;
 
 function resolveEvalProvider(): Provider | undefined {
   if (!evalModel) return undefined;
@@ -161,10 +163,14 @@ You have Logos kernel primitives:
    to logos_read to retrieve it.
 
 2. **logos_read(uri, offset?, limit?)** — Read from any Logos URI.
-   Examples: \`logos://sandbox/${taskId ?? "{task_id}"}/...\`, \`logos://system/tasks\`, \`logos://proc/\`
+   Examples: \`logos://sandbox/${
+     taskId ?? "{task_id}"
+   }/...\`, \`logos://system/tasks\`, \`logos://proc/\`
    For large content, use \`offset\` (byte offset) and \`limit\` (max bytes) to paginate. Output is capped at ~400K chars.
 
-3. **logos_write(uri, content)** — Write to a Logos URI (e.g. \`logos://sandbox/${taskId ?? "{task_id}"}/...\`). Pure data, no side effects.
+3. **logos_write(uri, content)** — Write to a Logos URI (e.g. \`logos://sandbox/${
+        taskId ?? "{task_id}"
+      }/...\`). Pure data, no side effects.
    **WARNING**: logos_write writes to the Logos VFS, NOT to the container filesystem. The \`logos://sandbox/\` namespace is a remote filesystem — it is NOT accessible via shell commands in logos_exec. You can only read/write it via logos_read/logos_write. To create files at absolute container paths like \`/app/foo.py\`, use \`logos_exec\` with a shell heredoc: \`cat > /app/foo.py << 'EOF'\`.
 
 4. **logos_call(tool, params)** — Invoke a proc tool by name.
@@ -188,7 +194,9 @@ You have Logos kernel primitives:
      Do NOT use explore for sequential steps — use plan for that.
    - Blocked: call with \`sleep: { reason, retry }\` to pause.
    - \`task_log\`: detailed execution record (what you did, key outputs, errors). Required when using \`plan\` or \`explore\`.
-     Previous steps' logs are at \`logos://sandbox/${taskId ?? "{task_id}"}/plan-step-N.log\` (read with logos_read).`
+     Previous steps' logs are at \`logos://sandbox/${
+       taskId ?? "{task_id}"
+     }/plan-step-N.log\` (read with logos_read).`
     : `## Tools`;
 
   return `You are an autonomous terminal agent solving a benchmark task inside a sandbox.
@@ -226,7 +234,9 @@ ${toolDocs}
   - **If the task mentions a specific file format** (e.g. .ckpt, .pdb, .wad), inspect the actual file to confirm it matches what you found online. If it doesn't, search with different keywords rather than forcing a wrong hypothesis.
   - Skip research for straightforward tasks (build from source, fix a bug, write a standard script) where you already know the domain well.
 - **Container environment**: You are running inside a Docker container with no init system. When starting services (nginx, postgres, redis, apache, etc.), NEVER run them in the foreground — logos_exec will block forever. Always start services in background mode, e.g. \`nginx -g "daemon on;"\`, \`postgres &\`, \`redis-server --daemonize yes\`, or append \`&\` to the command. Verify the service started with a follow-up check (e.g. \`curl -s localhost\` or \`pgrep nginx\`).
-- **Context continuity**: before starting work, check \`logos_read("logos://sandbox/${taskId ?? "{task_id}"}/plan-initial.log")\`. If it returns empty, fall back to \`logos_exec("cat /tmp/logos-sandbox/plan-initial.log")\`. If a log exists, a previous agent already made partial progress — review it so you do not duplicate work.
+- **Context continuity**: before starting work, check \`logos_read("logos://sandbox/${
+    taskId ?? "{task_id}"
+  }/plan-initial.log")\`. If it returns empty, fall back to \`logos_exec("cat /tmp/logos-sandbox/plan-initial.log")\`. If a log exists, a previous agent already made partial progress — review it so you do not duplicate work.
 - **Context pressure**: if the system warns that your context window is nearly full, immediately enter plan mode by calling logos_complete with \`task_log\` (detailed record of everything done so far) and \`plan\` (remaining steps). Do not ignore context pressure warnings.
 - **Never give up directly**: if you feel stuck or believe the task is too complex to complete in one pass, do NOT call logos_complete with just a summary to end the task. Instead, use plan mode — decompose the remaining work into smaller subtasks via \`plan: [...]\` so that fresh agents can tackle each piece independently. Only use \`sleep\` if there is a genuine external blocker (e.g. missing credentials, unavailable service).${buildAgentSkillsSection(
     taskDescription
@@ -347,7 +357,10 @@ async function main(): Promise<void> {
       switch (event.type) {
         case "tool_execution_start": {
           const raw = JSON.stringify(event.params);
-          const args = raw.length > 200 ? raw.slice(0, 200) + `… (${raw.length} bytes total)` : raw;
+          const args =
+            raw.length > 200
+              ? raw.slice(0, 200) + `… (${raw.length} bytes total)`
+              : raw;
           console.log(`[tool] ${event.toolName}(${args})`);
           break;
         }
@@ -489,7 +502,7 @@ async function main(): Promise<void> {
       kernelMode: session.useKernel,
       evalClient: evalChatClient,
       evalModel,
-      evalContextLimit: evalModel ? guessContextLimit(evalModel) : undefined,
+      evalContextLimit: evalContextLimitOverride ?? (evalModel ? guessContextLimit(evalModel) : undefined),
     });
   }
 
