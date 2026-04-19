@@ -59,10 +59,11 @@ function wrapToolsWithExecTimeout(
                   text:
                     `exit_code: -1 (TIMEOUT after ${Math.round(timeoutMs / 1000)}s — evaluator limit)\n\n` +
                     "The command did not complete within the evaluator's time limit. " +
-                    "IMPORTANT: This does NOT necessarily mean the solution is wrong — the evaluator has a shorter timeout (${Math.round(timeoutMs / 1000)}s) than the verifier. " +
-                    "If the program appears to be doing real work (e.g. ML inference, compilation, image processing) and just needs more time, do NOT mark this as FAIL solely due to timeout. " +
-                    "Only mark FAIL if there is evidence of an actual bug (infinite loop, hang, crash). " +
-                    "If the only issue is speed, consider it a PASS — the verifier will have more time to run it.",
+                    "IMPORTANT: The evaluator has a much shorter timeout (" + Math.round(timeoutMs / 1000) + "s) than the verifier. " +
+                    "Because the command timed out, any output above is INCOMPLETE and MUST NOT be used as evidence of success or failure. " +
+                    "Do NOT inspect partial output from this command to draw conclusions. " +
+                    "If the program appears to be doing real work (e.g. ML inference, compilation, image processing) and just needs more time, do NOT mark this as FAIL — the verifier will have more time. " +
+                    "Only mark FAIL if you have evidence from OTHER (non-timed-out) commands that the solution has an actual bug.",
                 },
               ],
             };
