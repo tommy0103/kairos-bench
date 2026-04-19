@@ -651,7 +651,8 @@ A pure regex approach WILL miss many of these. The BS4 DOM walk + post-processin
   4. Set \`type=polyline\` for ALL rows. There should be ZERO \`type=rectangle\` rows.
 - **Post-processing validation**: After generating the output CSV, ALWAYS run a sanity check:
   \`python3 -c "import pandas as pd; df=pd.read_csv('/app/output.csv'); print('rectangle rows:', (df['type']=='rectangle').sum()); assert (df['type']=='rectangle').sum() == 0, 'FAIL: still have rectangle rows'"\`
-- **Overlap resolution**: After converting to polylines, there may be overlapping regions. Resolve overlaps by keeping the smaller mask (higher priority), then re-extract polylines from the final non-overlapping masks.`,
+- **Overlap resolution**: After converting to polylines, there may be overlapping regions. Resolve overlaps by keeping the smaller mask (higher priority), then re-extract polylines from the final non-overlapping masks.
+- **coords_x / coords_y must be FLAT lists**: The verifier checks that coordinate columns contain flat lists of numbers (e.g. \`[1, 2, 3]\`), NOT nested lists (e.g. \`[[1, 2], [3, 4]]\`). \`cv2.findContours\` returns arrays with shape \`(N, 1, 2)\` — you must flatten with \`.squeeze()\` or \`.reshape(-1, 2)\` before writing to CSV. Verify: \`python3 -c "import ast, pandas as pd; df=pd.read_csv('/app/output.csv'); [ast.literal_eval(v) for v in df['coords_x']]; print('coords OK')"\``,
   },
   {
     id: "service-daemon-startup",
