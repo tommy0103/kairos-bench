@@ -391,7 +391,7 @@ If you're unsure about QEMU monitor key sending or VGA adapter compatibility, se
    \`apt-get install -y primer3 && oligotm -tp 1 -sc 1 -mv 50 -dv 2 -n 0.8 -d 500 <annealing_sequence>\`
    Only the **annealing portion** (the part that base-pairs with the template) counts, NOT the full primer.
 
-2. **Insertion boundary ambiguity**: When comparing input and output plasmids to find the inserted sequence, shared bases at the insertion boundary (e.g. "ag") can be assigned to either the insert or the template. Different tools may define the boundary differently (shifted by 2-3 bases). This means your "annealing portion" and the evaluator's may differ, changing Tm by several degrees.
+2. **Insertion boundary ambiguity — THIS IS THE #1 FAILURE MODE (5/5 recent runs failed due to this)**: When comparing input and output plasmids to find the inserted sequence, shared bases at the insertion boundary (e.g. "ag") can be assigned to either the insert or the template. The verifier uses a SPECIFIC boundary definition that may differ from yours by 2-3 bases. If your boundary is off, the verifier's `rc(rev) + fwd` check will fail even though the PCR product is biologically correct. You MUST enumerate all possible boundaries.
 
 3. **Design rules to handle ambiguity**:
    - Target Tm **60-65°C** for both primers (not just ≥ 58°C).
@@ -399,7 +399,7 @@ If you're unsure about QEMU monitor key sending or VGA adapter compatibility, se
    - These margins absorb 2-3 base boundary shifts without violating constraints.
    - If the insertion boundary is ambiguous, try shifting it ±2 bases and check that Tm constraints still hold for all interpretations.
 
-4. **Exhaustive boundary search**: when the insertion boundary is ambiguous (shared bases between insert and template), do NOT manually pick one boundary. Write a short script that enumerates all valid boundary positions × annealing lengths, computes Tm with \`oligotm\`, and filters by constraints. This takes seconds and eliminates boundary ambiguity errors.
+4. **Exhaustive boundary search (MANDATORY — do NOT skip this)**: Write a script that (a) finds the longest common prefix and suffix between input and output to identify the changed region, (b) enumerates all valid boundary shifts (shared bases can slide ±2-3 positions), (c) for EACH boundary, computes the insert sequence, designs primers with the full insert on the forward primer 5' end, computes Tm for each annealing portion, and (d) picks the boundary+annealing length combination where ALL constraints are satisfied across ALL boundary interpretations. This takes seconds and is the ONLY reliable approach.
 
 5. **Common pitfalls**:
    - Computing Tm on the wrong portion (including overhang bases).
