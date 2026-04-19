@@ -188,13 +188,10 @@ export async function* reactLoop(
             const own = Object.getOwnPropertyNames(err);
             const extra: Record<string, unknown> = {};
             for (const k of own) {
-              if (k !== "stack" && k !== "message") {
-                extra[k] = (err as any)[k];
-              }
+              if (k === "stack") continue;
+              extra[k] = (err as any)[k];
             }
-            if (Object.keys(extra).length > 0) {
-              detail = JSON.stringify(extra);
-            }
+            detail = JSON.stringify(extra);
           } catch {}
         }
         const isRetryable =
