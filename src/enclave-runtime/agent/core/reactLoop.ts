@@ -176,6 +176,10 @@ export async function* reactLoop(
         const status =
           typeof (err as any)?.status === "number" ? (err as any).status : 0;
         const msg = err instanceof Error ? err.message : String(err);
+        const body = (err as any)?.error ?? (err as any)?.body ?? (err as any)?.response?.body;
+        const detail = body
+          ? typeof body === "string" ? body : JSON.stringify(body).slice(0, 500)
+          : "";
         const isRetryable =
           status === 500 ||
           status === 502 ||
@@ -190,13 +194,13 @@ export async function* reactLoop(
           apiRetries++;
           const backoffMs = Math.min(2000 * 2 ** (apiRetries - 1), 30000);
           console.warn(
-            `[reactLoop] API error (status=${status}): ${msg} — retrying ${apiRetries}/${MAX_API_RETRIES} after ${backoffMs}ms`
+            `[reactLoop] API error (status=${status}): ${msg}${detail ? ` | body: ${detail}` : ""} — retrying ${apiRetries}/${MAX_API_RETRIES} after ${backoffMs}ms`
           );
           await new Promise((r) => setTimeout(r, backoffMs));
           response = undefined;
           continue;
         }
-        console.error(`[reactLoop] API error (status=${status}): ${msg}`);
+        console.error(`[reactLoop] API error (status=${status}): ${msg}${detail ? ` | body: ${detail}` : ""}`);
         throw err;
       }
     }
