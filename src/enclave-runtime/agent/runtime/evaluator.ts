@@ -171,6 +171,12 @@ async function runEvaluator(opts: EvalLoopOptions): Promise<EvalResult> {
     maxTurns: Math.min(opts.maxTurnsPerAgent, 100),
     temperature: opts.temperature ?? 0.2,
     contextLimit: opts.evalContextLimit ?? opts.contextLimit,
+    contextPressureRatio: 0.6,
+    contextPressureMessage:
+      "CONTEXT WINDOW WARNING: You have used over 60% of your available context. " +
+      "You are the EVALUATOR — do NOT use plan mode. " +
+      "Make your PASS/FAIL decision NOW based on the evidence you have gathered so far, " +
+      "and call logos_complete immediately with your verdict.",
   });
 
   let completeParams: LogosCompleteParams | undefined;

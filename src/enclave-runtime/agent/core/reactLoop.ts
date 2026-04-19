@@ -34,6 +34,10 @@ export interface ReactLoopOptions {
   temperature?: number;
   /** Max context tokens. When ~80% is consumed a warning is injected. */
   contextLimit?: number;
+  /** Override the context pressure ratio (default: 0.8). */
+  contextPressureRatio?: number;
+  /** Override the context pressure message injected into the conversation. */
+  contextPressureMessage?: string;
 }
 
 function stripTypebox(
@@ -141,7 +145,7 @@ export async function* reactLoop(
 
     if (contextLimit && !contextWarned) {
       const est = estimateTokens(messages, openaiTools);
-      if (est > contextLimit * CONTEXT_PRESSURE_RATIO) {
+      if (est > contextLimit * (options.contextPressureRatio ?? CONTEXT_PRESSURE_RATIO)) {
         contextWarned = true;
         yield {
           type: "context_pressure",
@@ -150,7 +154,7 @@ export async function* reactLoop(
         };
         messages.push({
           role: "user" as const,
-          content: CONTEXT_PRESSURE_MSG,
+          content: options.contextPressureMessage ?? CONTEXT_PRESSURE_MSG,
         });
       }
     }
