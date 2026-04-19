@@ -178,7 +178,7 @@ export async function* reactLoop(
         const msg = err instanceof Error ? err.message : String(err);
         const body = (err as any)?.error ?? (err as any)?.body ?? (err as any)?.response?.body ?? (err as any)?.response?.data;
         const rawDetail = body
-          ? typeof body === "string" ? body : JSON.stringify(body).slice(0, 500)
+          ? typeof body === "string" ? body : JSON.stringify(body)
           : "";
         let detail = rawDetail;
         if (!detail && err && typeof err === "object") {
@@ -191,7 +191,7 @@ export async function* reactLoop(
               }
             }
             if (Object.keys(extra).length > 0) {
-              detail = JSON.stringify(extra).slice(0, 500);
+              detail = JSON.stringify(extra);
             }
           } catch {}
         }
