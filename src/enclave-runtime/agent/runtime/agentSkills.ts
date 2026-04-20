@@ -1108,6 +1108,22 @@ Focus on: eliminating correlated subqueries, reducing redundant joins, using CTE
 - Search for the conversion formula: \`logos_call("web_search", {"query": "Raman spectrometer raw data wavelength to wavenumber conversion formula"})\`
 - European-format CSV files use commas as decimal separators (e.g. \`1580,32\` means \`1580.32\`). Check the data file format carefully.`,
   },
+  {
+    id: "headless-terminal-pyte",
+    name: "Headless terminal pyte compatibility",
+    triggers: [
+      ["headless", "terminal"],
+      ["baseterminal", "terminal"],
+    ],
+    hint: `**pyte private CSI bug workaround**:
+If you use the \`pyte\` library for terminal emulation, you MUST subclass \`pyte.Screen\` and override \`select_graphic_rendition\` to accept \`**kwargs\`, because pyte's stream parser passes \`private=True\` for private CSI sequences (e.g. \`\\x1b[?25h\`) which crashes the default implementation:
+\`\`\`python
+class CompatScreen(pyte.Screen):
+    def select_graphic_rendition(self, *attrs, **kwargs):
+        super().select_graphic_rendition(*attrs)
+\`\`\`
+Use \`CompatScreen\` instead of \`pyte.Screen\`. This avoids a \`TypeError\` that only triggers nondeterministically depending on what escape sequences interactive programs emit.`,
+  },
 ];
 
 // ── Skill detection ──────────────────────────────────────────
