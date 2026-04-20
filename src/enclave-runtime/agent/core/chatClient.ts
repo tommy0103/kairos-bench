@@ -455,7 +455,21 @@ export function createOpenAIResponsesChatClient(
           }
 
           case "response.output_item.done":
-            if ((event as any).item) rawOutputItems.push((event as any).item);
+            if ((event as any).item) {
+              rawOutputItems.push((event as any).item);
+              const doneItem = (event as any).item;
+              if (doneItem.type === "function_call") {
+                const idx = (event as any).output_index;
+                if (!fcMap.has(idx)) {
+                  fcMap.set(idx, {
+                    id: doneItem.id ?? "",
+                    callId: doneItem.call_id ?? "",
+                    name: doneItem.name ?? "",
+                    args: doneItem.arguments ?? "{}",
+                  });
+                }
+              }
+            }
             break;
 
           case "response.completed":
