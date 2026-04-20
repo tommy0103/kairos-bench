@@ -199,10 +199,11 @@ export async function* reactLoop(
           } catch {}
         }
         const isRetryable =
+          status === 429 ||
+          status === 499 ||
           status === 500 ||
           status === 502 ||
           status === 503 ||
-          status === 429 ||
           msg.includes("500") ||
           msg.includes("502") ||
           msg.includes("503") ||

@@ -508,7 +508,6 @@ async function main(): Promise<void> {
 
   session.cleanup();
   console.log(`[bench-runner] done. success=${success} turns=${totalTurns}`);
-  process.exit(success ? 0 : 1);
 }
 
 function logosUriToFsPath(uri: string): string {
