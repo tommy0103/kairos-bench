@@ -525,6 +525,7 @@ async function main(): Promise<void> {
 
   session.cleanup();
   console.log(`[bench-runner] done. success=${success} turns=${totalTurns}`);
+  process.exit(0);
 }
 
 function logosUriToFsPath(uri: string): string {
