@@ -340,6 +340,7 @@ async function main(): Promise<void> {
 
   let totalTurns = 0;
   let success = false;
+  let completeParams: LogosCompleteParams | undefined;
 
   for (let attempt = 0; attempt < 3; attempt++) {
     console.log(`[bench-runner] attempt ${attempt + 1}`);
@@ -354,7 +355,7 @@ async function main(): Promise<void> {
       contextLimit,
     });
 
-    let completeParams: LogosCompleteParams | undefined;
+    completeParams = undefined;
 
     for await (const event of loop) {
       totalTurns++;
