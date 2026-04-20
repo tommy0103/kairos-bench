@@ -193,7 +193,11 @@ You have Logos kernel primitives:
        • You want to hedge between a complex correct approach and a simple heuristic.
      Do NOT use explore for sequential steps — use plan for that.
    - Blocked: call with \`sleep: { reason, retry }\` to pause.
-   - \`task_log\`: detailed execution record (what you did, key outputs, errors). Required when using \`plan\` or \`explore\`.
+   - \`task_log\`: **REQUIRED for all calls**. A detailed execution record that an evaluator will use to verify your work. Must include:
+     (1) Steps you took and commands you ran.
+     (2) Key outputs and verification results (e.g. "ran test X, output matched expected Y").
+     (3) **Domain-specific ground truth** you discovered — expected values, reference data, calibration constants, correct answers, etc. The evaluator cannot re-derive these, so you must record them.
+     (4) Any assumptions or ambiguities you resolved and how.
      Previous steps' logs are at \`logos://sandbox/${
        taskId ?? "{task_id}"
      }/plan-step-N.log\` (read with logos_read).`
@@ -487,6 +491,15 @@ async function main(): Promise<void> {
   }
 
   if (success && evalRetries > 0) {
+    const taskLogUri = `logos://sandbox/${session.taskId}/plan-initial.log`;
+    if (completeParams?.task_log) {
+      await persistLog(
+        session.tools,
+        taskLogUri,
+        completeParams.task_log,
+        "agent task_log",
+      );
+    }
     console.log(
       `[bench-runner] running evaluator (up to ${evalRetries} fix attempts)`
     );
@@ -503,6 +516,9 @@ async function main(): Promise<void> {
       evalClient: evalChatClient,
       evalModel,
       evalContextLimit: evalContextLimitOverride ?? (evalModel ? guessContextLimit(evalModel) : undefined),
+      agentReply: completeParams?.reply,
+      agentTaskLog: completeParams?.task_log,
+      agentTaskLogUri: taskLogUri,
     });
   }
 

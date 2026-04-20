@@ -95,6 +95,12 @@ export interface EvalLoopOptions {
   evalContextLimit?: number;
   /** Per-command timeout for evaluator's logos_exec (default: 120s). */
   evalExecTimeoutMs?: number;
+  /** Agent's reply when completing the task. */
+  agentReply?: string;
+  /** Agent's task_log when completing the task. */
+  agentTaskLog?: string;
+  /** URI where the full task_log is stored (for logos_read). */
+  agentTaskLogUri?: string;
 }
 
 // ── Main entry point ──────────────────────────────────────────
@@ -152,7 +158,13 @@ async function runEvaluator(opts: EvalLoopOptions): Promise<EvalResult> {
     opts.evalExecTimeoutMs ?? DEFAULT_EVAL_EXEC_TIMEOUT_MS,
   );
 
-  const prompt = buildEvaluatorPrompt(opts.originalTask, opts.kernelMode);
+  const prompt = buildEvaluatorPrompt(
+    opts.originalTask,
+    opts.kernelMode,
+    opts.agentReply,
+    opts.agentTaskLog,
+    opts.agentTaskLogUri,
+  );
 
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: prompt },
@@ -342,6 +354,9 @@ You have Logos kernel primitives:
 function buildEvaluatorPrompt(
   originalTask: string,
   kernelMode: boolean,
+  agentReply?: string,
+  agentTaskLog?: string,
+  agentTaskLogUri?: string,
 ): string {
   const skills = detectSkills(originalTask);
   const skillsBlock =
@@ -349,12 +364,22 @@ function buildEvaluatorPrompt(
       ? `\n## Testing skills (MANDATORY)\n\nThe following skills matched this task. You MUST execute every skill recipe below. Copy each test template, adapt the marked constants to match the actual solution, and run it. If ANY skill test fails, report FAIL.\n\n**CRITICAL — skill restrictions override general guidelines**: When a skill explicitly says "DO NOT test X", "DO NOT fail on Y", or "DO NOT write Z tests", those restrictions are ABSOLUTE. Your additional adversarial tests MUST NOT contradict or circumvent skill-level DO NOT instructions. Skill authors have domain knowledge about the real verifier's behavior — if a skill says a certain type of test produces false negatives, trust it.\n\n${skills.map((s) => s.recipe).join("\n\n---\n\n")}\n`
       : "";
 
+  const taskLogPreview = agentTaskLog
+    ? agentTaskLog.length > 3000
+      ? agentTaskLog.slice(0, 3000) + `\n\n[... truncated — read full log with logos_read("${agentTaskLogUri ?? "unknown"}") ...]`
+      : agentTaskLog
+    : null;
+
+  const agentContextBlock = (agentReply || taskLogPreview)
+    ? `\n## Agent's completion report\n\n${agentReply ? `**Agent reply**: ${agentReply}\n` : ""}${taskLogPreview ? `\n**Agent task_log** (what the agent did, key findings, verification results):\n\`\`\`\n${taskLogPreview}\n\`\`\`\n` : ""}Use this context to understand what the agent did and what it verified. Do NOT re-derive ground truth values that the agent already computed and verified — focus on testing the agent's OUTPUT, not re-doing the agent's RESEARCH.\n`
+    : "";
+
   return `You are an adversarial evaluator agent. Your job is to rigorously verify that a task has been completed correctly by designing and running your own tests.
 
 ## Original task
 
 ${originalTask}
-
+${agentContextBlock}
 ${toolDocsBlock(kernelMode)}
 
 ## Instructions
@@ -389,7 +414,7 @@ ${skillsBlock}
 - **Do not leave extra files in the solution directory**: after cleanup, verify with \`ls\` that the solution directory contains ONLY the files explicitly requested by the task. If you see unexpected files (binaries, symlinks, temp files), remove them before calling logos_complete.
 - **Working directory**: Your actual CWD is NOT /app. When testing compilation commands from the task description, \`cd\` to the SOURCE FILE's directory first (e.g. \`cd /app/polyglot && rustc main.rs\`), because compilers like \`rustc\` and \`gcc\` output binaries to CWD. If you \`cd /app && rustc /app/polyglot/main.rs\`, the binary lands in \`/app/main\` not \`/app/polyglot/main\`. This is normal compiler behavior, NOT a bug in the agent's solution — do NOT report it as a failure.
 - **Container environment**: You are inside a Docker container with no init system. Never start services in foreground (logos_exec will block forever). Use background mode: \`nginx -g "daemon on;"\`, \`cmd &\`, etc.
-- **Research before acting**: if the task involves unfamiliar concepts, libraries, or domain-specific terms, use \`logos_call("web_search", {"query": "..."})\` to look them up before writing tests or making assumptions.
+- **Do NOT research or re-implement the solution**: The main agent has already done the research, coding, and verification. Your job is ONLY to test the agent's output — not to re-derive the answer independently, scrape websites, clone repos, or build reference implementations. Verify by checking the agent's output files, running the agent's code, and testing edge cases. If you cannot verify a specific value without external data, check format and plausibility instead of trying to fetch the ground truth yourself.
 - You MUST call logos_complete exactly once.`;
 }
 

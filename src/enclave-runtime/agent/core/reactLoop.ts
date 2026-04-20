@@ -325,6 +325,13 @@ export async function* reactLoop(
                   "Call logos_complete again with a task_log field containing a detailed record " +
                   "of what you did, key outputs, commands run, errors encountered, and current state.";
                 result = { error: "missing task_log" };
+              } else if (!cp.task_log && !cp.plan && !cp.sleep) {
+                resultText =
+                  "Error: task_log is REQUIRED. Call logos_complete again with a task_log field. " +
+                  "Include: (1) what you did step by step, (2) key outputs and verification results, " +
+                  "(3) any domain-specific findings or ground truth values you discovered (e.g. expected answers, reference values, calibration data), " +
+                  "(4) how you verified correctness. The evaluator will use this to validate your work.";
+                result = { error: "missing task_log" };
               } else {
                 completeParams = cp;
                 resultText = "Turn completed.";
