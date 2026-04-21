@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import OpenAI from "openai";
+import * as readline from "node:readline";
 import {
   createOpenAIChatClient,
   createAnthropicChatClient,
@@ -13,7 +14,7 @@ const model = process.env.MODEL ?? "deepseek-chat";
 const task = process.argv[2];
 
 if (!task) {
-  console.error("Usage: bun run src/tui/index.ts <task-description>");
+  console.error("Usage: bun run src/enclave-runtime/tui/index.ts <task-description>");
   process.exit(1);
 }
 if (!apiKey) {
@@ -34,6 +35,16 @@ function guessContextLimit(m: string): number {
   if (s.includes("gpt-4o")) return 128_000;
   if (s.includes("claude")) return 200_000;
   return 64_000;
+}
+
+function promptUser(question: string): Promise<string> {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
 }
 
 async function main() {
@@ -66,6 +77,8 @@ async function main() {
     contextLimit: guessContextLimit(model),
     kernelMode: false,
   });
+
+  let awaitingInstruction = false;
 
   tree.on("event", (ev: TaskTreeEvent) => {
     switch (ev.type) {
@@ -108,7 +121,31 @@ async function main() {
     }
   });
 
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.on("data", async (data: Buffer) => {
+      if (data[0] === 0x03) {
+        console.log("\n[tui] Ctrl+C — exiting.");
+        process.exit(130);
+      }
+      if (data[0] === 0x1b && !awaitingInstruction) {
+        awaitingInstruction = true;
+        console.log("\n[tui] ESC pressed — aborting current task...");
+        console.log("[tui] Planner will review and replan. (Instruction input will be available in Ink TUI mode)");
+        tree.abort("User pressed ESC — review progress and replan.");
+        tree.resumeAfterAbort();
+        awaitingInstruction = false;
+      }
+    });
+  }
+
   await tree.run();
+
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(false);
+    process.stdin.pause();
+  }
 
   function printTree(node: typeof tree.root, indent = "") {
     const icon = node.status === "completed" ? "✓" : node.status === "aborted" ? "⚠" : "✗";

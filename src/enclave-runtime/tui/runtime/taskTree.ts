@@ -45,6 +45,7 @@ export interface TaskTreeOptions {
 interface RunSubAgentResult {
   params?: LogosCompleteParams;
   turns: number;
+  wasAborted: boolean;
 }
 
 function createNode(description: string, parentId: string | null): TaskNode {
@@ -67,6 +68,7 @@ export class TaskTree extends EventEmitter<{ event: [TaskTreeEvent] }> {
   private abortController: AbortController | null = null;
   private userInstruction: string | null = null;
   private pendingUserMessages: string[] = [];
+  private abortGate: { promise: Promise<void>; resolve: () => void } | null = null;
 
   constructor(opts: TaskTreeOptions) {
     super();
@@ -118,16 +120,32 @@ export class TaskTree extends EventEmitter<{ event: [TaskTreeEvent] }> {
   }
 
   abort(instruction?: string) {
-    this.userInstruction = instruction ?? null;
+    if (instruction !== undefined) {
+      this.userInstruction = instruction;
+    }
+    let resolveGate: () => void;
+    this.abortGate = {
+      promise: new Promise<void>((r) => { resolveGate = r; }),
+      resolve: () => resolveGate(),
+    };
     this.abortController?.abort();
+  }
+
+  setInstruction(instruction: string) {
+    this.userInstruction = instruction;
+  }
+
+  resumeAfterAbort() {
+    this.abortGate?.resolve();
+    this.abortGate = null;
   }
 
   async run(): Promise<void> {
     const result = await this.runSubAgent(this.current!, "executor");
 
     if (!result.params) {
-      this.current!.status = "failed";
-      this.current!.summary = "logos_complete was not called";
+      this.current!.status = result.wasAborted ? "aborted" : "failed";
+      this.current!.summary = result.wasAborted ? "Aborted by user" : "logos_complete was not called";
       this.emit_({ type: "node_updated", node: this.current! });
       return;
     }
@@ -159,7 +177,7 @@ export class TaskTree extends EventEmitter<{ event: [TaskTreeEvent] }> {
         const result = await this.runSubAgent(child, "executor");
 
         if (!result.params) {
-          child.status = this.abortController?.signal.aborted ? "aborted" : "failed";
+          child.status = result.wasAborted ? "aborted" : "failed";
           child.summary = child.status === "aborted"
             ? "Aborted by user"
             : "logos_complete was not called";
@@ -214,12 +232,37 @@ export class TaskTree extends EventEmitter<{ event: [TaskTreeEvent] }> {
       parent.pendingPlan.shift();
     }
 
-    if (parent.pendingPlan.length > 0) {
+    const childFailed = node.status === "aborted" || node.status === "failed";
+
+    if (childFailed || parent.pendingPlan.length > 0) {
       this.current = parent;
       this.emit_({ type: "depth_changed", breadcrumb: this.getBreadcrumb() });
+      if (this.abortGate) {
+        await this.abortGate.promise;
+      }
       const plannerResult = await this.runSubAgent(parent, "planner");
-      if (plannerResult.params) {
+      if (plannerResult.wasAborted) {
+        if (this.abortGate) {
+          await this.abortGate.promise;
+        }
+        const retryResult = await this.runSubAgent(parent, "planner");
+        if (retryResult.params) {
+          await this.handlePlannerResult(parent, retryResult.params);
+        } else {
+          parent.status = "failed";
+          parent.summary = "Planner aborted twice";
+          parent.completedAt = Date.now();
+          this.emit_({ type: "node_updated", node: parent });
+          this.current = null;
+        }
+      } else if (plannerResult.params) {
         await this.handlePlannerResult(parent, plannerResult.params);
+      } else if (childFailed) {
+        parent.status = "failed";
+        parent.summary = `Child "${node.description}" ${node.status}`;
+        parent.completedAt = Date.now();
+        this.emit_({ type: "node_updated", node: parent });
+        await this.bubbleUp(parent);
       }
       return;
     }
@@ -296,8 +339,9 @@ export class TaskTree extends EventEmitter<{ event: [TaskTreeEvent] }> {
       }
     }
 
+    const wasAborted = this.abortController?.signal.aborted ?? false;
     this.abortController = null;
-    return { params: completeParams, turns };
+    return { params: completeParams, turns, wasAborted };
   }
 
   buildExecutorPrompt(node: TaskNode): string {
