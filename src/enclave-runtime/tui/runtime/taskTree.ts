@@ -40,6 +40,7 @@ export interface TaskTreeOptions {
   contextLimit?: number;
   kernelMode: boolean;
   sessionId?: string;
+  onNodeComplete?: (node: TaskNode, params: LogosCompleteParams) => Promise<void>;
 }
 
 interface RunSubAgentResult {
@@ -197,6 +198,14 @@ export class TaskTree extends EventEmitter<{ event: [TaskTreeEvent] }> {
   private async handleComplete(node: TaskNode, params: LogosCompleteParams): Promise<void> {
     node.summary = params.summary;
     node.taskLog = params.task_log;
+
+    if (this.opts.onNodeComplete) {
+      try {
+        await this.opts.onNodeComplete(node, params);
+      } catch (e) {
+        console.warn(`[taskTree] onNodeComplete failed: ${e}`);
+      }
+    }
 
     if (params.plan && params.plan.length > 0) {
       node.pendingPlan = params.plan;
@@ -463,28 +472,23 @@ ${this.operationalRules()}`;
   }
 
   private toolDocsBlock(): string {
-    if (this.opts.kernelMode) {
-      return `## Tools
-
-You have Logos kernel primitives:
-
-1. **logos_exec(command)** — Execute a shell command. Output truncated to ~200 lines.
-2. **logos_read(uri)** — Read from any Logos URI.
-3. **logos_write(uri, content)** — Write to a Logos URI.
-4. **logos_complete(...)** — MANDATORY final call to finish your turn.`;
-    }
     return `## Tools
 
-- **logos_exec(command)** — Execute a shell command. Output truncated to ~200 lines.
+- **logos_exec(command)** — Execute a shell command in the project workspace. Output truncated to ~200 lines.
+  - The working directory is the project root. Use standard shell commands.
+  - To create/edit files, use \`cat > file << 'EOF'\` or \`sed -i\`.
+  - To read files, use \`cat\`, \`head\`, \`grep\`, etc.
 - **logos_complete(...)** — MANDATORY: call this when done or blocked.`;
   }
 
   private operationalRules(): string {
-    return `- You MUST call logos_complete to finish your turn.
+    return `- Your working directory is the project root. All file paths are relative to it.
+- You MUST call logos_complete to finish your turn.
 - Execute commands one at a time, observe output, then decide next steps.
+- To create or edit files, use logos_exec with shell commands (cat, sed, echo, etc.). Do NOT use logos_write for project files.
 - If you encounter an unrecoverable error, call logos_complete with sleep.
 - Do NOT ask the user for input. Work autonomously.
 - Be efficient — minimize unnecessary commands.
-- Before calling logos_complete, verify your work.`;
+- Before calling logos_complete, verify your work (e.g. run tests, check file contents).`;
   }
 }
