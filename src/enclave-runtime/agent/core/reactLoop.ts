@@ -20,6 +20,12 @@ export type ReactLoopEvent =
       toolCallId: string;
       result?: unknown;
     }
+  | {
+      type: "tool_output_chunk";
+      toolName: string;
+      toolCallId: string;
+      chunk: string;
+    }
   | { type: "logos_complete"; params: LogosCompleteParams }
   | { type: "context_pressure"; estimatedTokens: number; limit: number }
   | { type: "max_turns_reached" };
@@ -38,6 +44,8 @@ export interface ReactLoopOptions {
   contextPressureRatio?: number;
   /** Override the context pressure message injected into the conversation. */
   contextPressureMessage?: string;
+  /** Fired immediately when a tool emits a streaming chunk. */
+  onToolChunk?: (event: { toolName: string; toolCallId: string; chunk: string }) => void;
 }
 
 function stripTypebox(
@@ -346,7 +354,10 @@ export async function* reactLoop(
               const toolResult = await tool.execute(
                 toolCallId,
                 parsedParams,
-                signal
+                signal,
+                options.onToolChunk
+                  ? (chunk: string) => options.onToolChunk!({ toolName, toolCallId, chunk })
+                  : undefined,
               );
               resultText = toolResultToText(toolResult);
               result = toolResult;

@@ -11,7 +11,8 @@ export interface AgentTool<TParams = any, TDetails = any> {
   execute: (
     toolCallId: string,
     params: TParams,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    onChunk?: (chunk: string) => void
   ) => Promise<AgentToolResult<TDetails>>;
 }
 

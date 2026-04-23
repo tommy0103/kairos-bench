@@ -40,6 +40,9 @@ export interface TaskTreeOptions {
   contextLimit?: number;
   kernelMode: boolean;
   sessionId?: string;
+  projectState?: string;
+  recentCheckpoints?: Array<{ description: string; summary: string }>;
+  checkpointIndexUri?: string;
   onNodeComplete?: (node: TaskNode, params: LogosCompleteParams) => Promise<void>;
 }
 
@@ -87,6 +90,10 @@ export class TaskTree extends EventEmitter<{ event: [TaskTreeEvent] }> {
   private findParent(node: TaskNode): TaskNode | null {
     if (!node.parentId) return null;
     return this.nodeMap.get(node.parentId) ?? null;
+  }
+
+  getNode(id: string): TaskNode | null {
+    return this.nodeMap.get(id) ?? null;
   }
 
   getAncestorChain(node: TaskNode): TaskNode[] {
@@ -276,6 +283,18 @@ export class TaskTree extends EventEmitter<{ event: [TaskTreeEvent] }> {
       return;
     }
 
+    const needsEval = parent.children.length > 1
+      && parent.children.every((c) => c.status === "completed")
+      && !parent.children.some((c) => c.description.startsWith("[eval]"));
+
+    if (needsEval) {
+      parent.pendingPlan = ["[eval] Cross-module integration review: verify all subtask outputs are consistent, check imports/types/API contracts across changed files, run tests, and report issues or confirm integration is correct."];
+      this.current = parent;
+      this.emit_({ type: "node_updated", node: parent });
+      this.emit_({ type: "depth_changed", breadcrumb: this.getBreadcrumb() });
+      return;
+    }
+
     parent.status = "completed";
     parent.completedAt = Date.now();
     this.current = parent;
@@ -318,6 +337,17 @@ export class TaskTree extends EventEmitter<{ event: [TaskTreeEvent] }> {
       { role: "user", content: userMessage },
     ];
 
+    const sessionId = this.opts.sessionId;
+    const contextPressureMessage = sessionId
+      ? "CONTEXT WINDOW WARNING: You have used approximately 80% of your available context. " +
+        "To preserve coherence you should immediately:\n" +
+        `1. Call logos_complete with a detailed \`task_log\` recording everything you have done so far. ` +
+        `Your log will be saved to logos://session/${sessionId}/checkpoints/{checkpoint_id}/log.md for the next agent.\n` +
+        "2. Set the `plan` field to list the remaining steps as subtasks.\n" +
+        "Each subtask will be executed by a fresh agent with a clean context window and access to the same session.\n" +
+        "Do this NOW — do not attempt further tool calls before entering plan mode."
+      : undefined;
+
     const loop = reactLoop({
       client: this.opts.client,
       model: this.opts.model,
@@ -326,7 +356,11 @@ export class TaskTree extends EventEmitter<{ event: [TaskTreeEvent] }> {
       maxTurns: this.opts.maxTurnsPerAgent,
       temperature: this.opts.temperature ?? 0.2,
       contextLimit: this.opts.contextLimit,
+      contextPressureMessage,
       signal: this.abortController.signal,
+      onToolChunk: (ev) => {
+        this.emit_({ type: "react_loop_event", event: { type: "tool_output_chunk", ...ev } });
+      },
     });
 
     let turns = 0;
@@ -354,6 +388,9 @@ export class TaskTree extends EventEmitter<{ event: [TaskTreeEvent] }> {
   }
 
   buildExecutorPrompt(node: TaskNode): string {
+    if (node.description.startsWith("[eval]")) {
+      return this.buildEvaluatorPrompt(node);
+    }
     const { originalTask, kernelMode } = this.opts;
     const ancestors = this.getAncestorChain(node);
     const parent = this.findParent(node);
@@ -388,7 +425,7 @@ ${originalTask}
 ## Your assigned task
 
 ${node.description}
-${ancestorBlock}${siblingsBlock}
+${ancestorBlock}${siblingsBlock}${this.memoryBlock()}
 
 ${this.toolDocsBlock()}
 
@@ -398,9 +435,76 @@ ${this.operationalRules()}
 
 When done, call logos_complete with:
 - \`summary\`: concise description of what you accomplished.
+- \`reply\`: message to the user explaining what was done or asking for clarification.
 - \`task_log\`: detailed execution record (required).
-- If the task is too complex, call logos_complete with \`plan\` to decompose it.
-- If blocked, call logos_complete with \`sleep\`.`;
+- If the task has multiple distinct steps, call logos_complete with \`plan: ["step 1", "step 2", ...]\` to decompose it. Each step will be executed by a fresh agent with its own context. Prefer plan mode for multi-step tasks over doing everything in one pass.
+- If blocked, call logos_complete with \`sleep\`.
+- Before calling logos_complete, update \`PROJECT_STATE.md\` in the project root with a brief summary of the current project state, what has been done, and what remains. This file serves as persistent memory across agent turns.`;
+  }
+
+  private buildEvaluatorPrompt(node: TaskNode): string {
+    const { originalTask } = this.opts;
+    const parent = this.findParent(node);
+    const siblings = parent ? parent.children.filter((c) => c.id !== node.id) : [];
+
+    const siblingDetails = siblings.map((s, i) => {
+      return `${i + 1}. **${s.description}** — ${s.summary ?? "(no summary)"}`;
+    }).join("\n");
+
+    return `You are an evaluator agent. Your job is to find real bugs in the work done by other agents.
+
+## Original task
+
+${originalTask}
+
+## Scope being evaluated
+
+${parent?.description ?? node.description}
+
+## What was done
+
+${siblingDetails}
+${this.memoryBlock()}
+
+${this.toolDocsBlock()}
+
+## Your method
+
+Follow these three steps strictly:
+
+### Step 1: Run existing tests, find environment contradictions
+
+Run the project's existing test suite and type checker. Do NOT skip this. Look for:
+- Tests that were passing before but now fail (regressions)
+- Type errors introduced by the changes
+- Build failures
+
+Record every failure. Do not try to fix anything yet.
+
+### Step 2: Write adversarial edge-case tests targeting seams
+
+The most likely bugs live at the boundaries between subtasks — where one agent's output meets another's input. Write small, targeted test cases that specifically probe:
+- Cross-module integration points (does module A actually call module B's new API correctly?)
+- Edge cases the individual agents likely didn't consider (empty inputs, concurrent access, error propagation across boundaries)
+- Contract mismatches (does the type signature match the runtime behavior?)
+
+Run these tests. Record failures.
+
+### Step 3: Triage — distinguish real bugs from wrong test assumptions
+
+For each failure found in steps 1 and 2, determine:
+- **Real bug**: the implementation is wrong → needs a fix task
+- **Wrong test premise**: the test itself has incorrect assumptions about the new architecture → the test needs updating, not the code
+- **Environment issue**: missing dependency, wrong config → needs a setup fix
+
+## Your decision
+
+After your review, call logos_complete:
+
+- If no real bugs found: \`{ summary: "Evaluation passed: ...", reply: "...", task_log: "detailed findings" }\`
+- If real bugs found: \`{ summary: "Found N issues: ...", reply: "...", task_log: "detailed findings", plan: ["fix: ...", "fix: ..."] }\` — prefix each fix task with "fix:" so the next agent knows the context.
+
+${this.operationalRules()}`;
   }
 
   buildPlannerPrompt(node: TaskNode): string {
@@ -443,7 +547,7 @@ ${originalTask}
 ## Your assigned scope
 
 ${node.description}
-
+${this.memoryBlock()}
 ## Completed subtasks
 
 ${completedBlock}
@@ -466,9 +570,27 @@ Then choose one action:
 2. **Replan**: adjustments needed → call logos_complete with a revised \`plan\`.
 3. **Done**: task is fully achieved → call logos_complete with just a \`summary\` (no plan field).
 
-Always include \`task_log\` with your reasoning.
+Always include \`task_log\` with your reasoning and \`reply\` to communicate your decision to the user.
+Before calling logos_complete, update \`PROJECT_STATE.md\` in the project root with the current project state summary.
 
 ${this.operationalRules()}`;
+  }
+
+  private memoryBlock(): string {
+    const parts: string[] = [];
+    if (this.opts.projectState) {
+      parts.push(`## Project State (from PROJECT_STATE.md)\n\n${this.opts.projectState}`);
+    }
+    if (this.opts.recentCheckpoints && this.opts.recentCheckpoints.length > 0) {
+      const lines = this.opts.recentCheckpoints.map(
+        (c) => `- "${c.description}" — ${c.summary}`
+      );
+      parts.push(`## Recent checkpoints\n\n${lines.join("\n")}`);
+    }
+    if (this.opts.checkpointIndexUri) {
+      parts.push(`## Checkpoint history\n\nFull checkpoint index available at: \`${this.opts.checkpointIndexUri}\` (use logos_read to access).`);
+    }
+    return parts.length > 0 ? "\n\n" + parts.join("\n\n") : "";
   }
 
   private toolDocsBlock(): string {
@@ -478,7 +600,12 @@ ${this.operationalRules()}`;
   - The working directory is the project root. Use standard shell commands.
   - To create/edit files, use \`cat > file << 'EOF'\` or \`sed -i\`.
   - To read files, use \`cat\`, \`head\`, \`grep\`, etc.
-- **logos_complete(...)** — MANDATORY: call this when done or blocked.`;
+- **logos_read(uri)** — Read from the Logos VFS. Use to discover proc tools (\`logos://proc/\`) or retrieve truncated output.
+- **logos_call(tool, params)** — Invoke a proc tool (e.g. \`web_search\`, \`fetch_url\`).
+- **logos_complete(...)** — MANDATORY final call. Options:
+  - Normal finish: \`{ summary, reply, task_log }\`
+  - **Plan mode**: \`{ summary, reply, task_log, plan: ["step 1", "step 2", ...] }\` — decomposes the task into subtasks. Each subtask will be executed by a fresh agent. Use plan mode when the task has multiple distinct steps or is too complex for a single pass.
+  - Blocked: \`{ summary, reply, task_log, sleep: { reason, retry } }\``;
   }
 
   private operationalRules(): string {

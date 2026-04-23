@@ -1,9 +1,11 @@
 import React from "react";
-import { Box, Text } from "ink";
+import { Box, Text, useStdout } from "ink";
 
 interface TimelineProps {
   breadcrumb: string[];
   children: Array<{ label: string; status: string }>;
+  selectedIndex?: number;
+  isNavigating?: boolean;
 }
 
 const STATUS_ICONS: Record<string, string> = {
@@ -11,7 +13,7 @@ const STATUS_ICONS: Record<string, string> = {
   running: "▶",
   aborted: "⚠",
   failed: "✗",
-  pending: "_",
+  pending: "·",
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -22,40 +24,48 @@ const STATUS_COLORS: Record<string, string> = {
   pending: "gray",
 };
 
-function truncateBreadcrumb(parts: string[], maxWidth: number): string[] {
-  const full = parts.join(" > ");
-  if (full.length <= maxWidth) return parts;
-  if (parts.length <= 2) return parts;
-  const first = parts[0];
-  const last2 = parts.slice(-2);
-  const truncated = [first, "...", ...last2];
-  return truncated;
+const CRUMB_MAX = 30;
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
 
-export const Timeline: React.FC<TimelineProps> = React.memo(({ breadcrumb, children }) => {
-  const crumbs = truncateBreadcrumb(
-    breadcrumb.map((s) => (s.length > 30 ? s.slice(0, 30) + "…" : s)),
-    80,
-  );
+function buildBreadcrumb(parts: string[], maxWidth: number): string {
+  const truncated = parts.map((p) => truncate(p, CRUMB_MAX));
+  const full = truncated.join(" › ");
+  if (full.length <= maxWidth) return full;
+  if (parts.length <= 2) return truncated.join(" › ");
+  const first = truncated[0];
+  const last = truncated[truncated.length - 1];
+  return `${first} › … › ${last}`;
+}
+
+export const Timeline: React.FC<TimelineProps> = React.memo(({ breadcrumb, children, selectedIndex, isNavigating }) => {
+  const { stdout } = useStdout();
+  const width = stdout?.columns ?? 120;
+  const crumbStr = buildBreadcrumb(breadcrumb, width - 20);
 
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color="yellow" bold>
-          {crumbs.join(" > ")}
-        </Text>
+        <Text color="yellow" bold wrap="truncate">{crumbStr}</Text>
+        {isNavigating && <Text color="gray" dimColor> (←→)</Text>}
       </Box>
-      <Box gap={1} flexWrap="wrap">
+      <Box flexDirection="column" marginLeft={1}>
         {children.map((child, i) => {
           const icon = STATUS_ICONS[child.status] ?? "?";
           const color = STATUS_COLORS[child.status] ?? "white";
-          const label = child.label.length > 25 ? child.label.slice(0, 25) + "…" : child.label;
+          const selected = isNavigating && i === selectedIndex;
+          const isLast = i === children.length - 1;
+          const branch = isLast ? "└─" : "├─";
           return (
-            <Text key={i}>
-              <Text color={color}>[{icon}</Text>
-              <Text> {label}</Text>
-              <Text color={color}>]</Text>
-            </Text>
+            <Box key={i}>
+              <Text color="gray" dimColor>{branch}</Text>
+              <Text inverse={selected} wrap="wrap">
+                <Text color={color}>{icon} </Text>
+                <Text>{child.label}</Text>
+              </Text>
+            </Box>
           );
         })}
       </Box>

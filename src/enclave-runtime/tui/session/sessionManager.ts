@@ -11,6 +11,7 @@ export interface SessionManagerOptions {
 export interface ManagedSession {
   sessionId: string;
   projectPath: string;
+  workspacePath: string;
   rollback(checkpointId: string): Promise<void>;
   fork(newSessionId?: string): Promise<string>;
   accept(files: string[]): Promise<void>;
@@ -24,12 +25,13 @@ export async function createManagedSession(
   await ensureJuiceFS();
 
   console.log(`[session] creating session ${sessionId} from ${opts.projectPath}`);
-  await opts.sessionClient.createSession(opts.projectPath, sessionId);
-  console.log(`[session] session ${sessionId} ready`);
+  const { workspacePath } = await opts.sessionClient.createSession(opts.projectPath, sessionId);
+  console.log(`[session] session ${sessionId} ready (workspace: ${workspacePath})`);
 
   return {
     sessionId,
     projectPath: opts.projectPath,
+    workspacePath,
 
     async rollback(checkpointId: string) {
       console.log(`[session] rolling back to ${checkpointId}`);

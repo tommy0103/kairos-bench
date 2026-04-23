@@ -71,6 +71,10 @@ async function main() {
       contextLimit: guessContextLimit(model),
       initialTask: task,
       onNodeComplete: session.onNodeComplete,
+      onAccept: async (files: string[]) => {
+        await session.managedSession.accept(files);
+      },
+      managedSession: session.managedSession,
       logosClient: session.logosClient,
       sessionId: session.sessionId,
       initialCheckpointId: session.initialCheckpointId,

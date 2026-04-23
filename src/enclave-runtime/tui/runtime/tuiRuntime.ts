@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
+import { spawn } from "node:child_process";
 import { Type } from "@sinclair/typebox";
 import type { AgentTool } from "../../agent/core/types";
 import type { LogosClient } from "../../agent/runtime/logosClient";
 import { createTuiLogosClient, type TuiLogosClient } from "../session/tuiLogosClient";
 import { createManagedSession, type ManagedSession } from "../session/sessionManager";
-import { createTuiCompleteHandler } from "./tuiCompleteHandler";
+import { createTuiCompleteHandler, type CheckpointRecord } from "./tuiCompleteHandler";
+export type { CheckpointRecord } from "./tuiCompleteHandler";
 
 const STDOUT_TAIL_LINES = 200;
 const STDERR_TAIL_LINES = 50;
@@ -34,6 +36,7 @@ export interface TuiSession {
   logosClient: LogosClient;
   projectName: string;
   initialCheckpointId: string;
+  getCheckpointHistory: () => CheckpointRecord[];
   cleanup: () => void;
 }
 
@@ -43,10 +46,10 @@ export interface TuiSessionOptions {
   sessionId?: string;
   agentConfigId?: string;
   execTimeoutMs?: number;
-  onCheckpoint?: (checkpointId: string) => void;
+  onCheckpoint?: (checkpointId: string, record: CheckpointRecord) => void;
 }
 
-function createExecTool(client: LogosClient, sessionId: string, execTimeoutMs?: number): AgentTool {
+function createExecTool(client: LogosClient, sessionId: string, workspacePath: string, execTimeoutMs?: number): AgentTool {
   const timeoutMs = execTimeoutMs ?? DEFAULT_EXEC_TIMEOUT_MS;
   const timeoutSec = Math.round(timeoutMs / 1000);
 
@@ -61,82 +64,218 @@ function createExecTool(client: LogosClient, sessionId: string, execTimeoutMs?: 
     parameters: Type.Object({
       command: Type.String({ description: "Shell command to execute in the project workspace." }),
     }),
-    execute: async (callId, params, signal) => {
-      let result: { stdout: string; stderr: string; exit_code: number };
-      try {
-        const abortPromise = signal
-          ? new Promise<never>((_, reject) => {
-              if (signal.aborted) reject(new Error("aborted"));
-              signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
-            })
-          : null;
-        const execPromise = client.exec(params.command);
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`logos_exec timed out after ${timeoutSec}s`)),
-            timeoutMs,
-          )
-        );
-        const racers: Promise<any>[] = [execPromise, timeoutPromise];
-        if (abortPromise) racers.push(abortPromise);
-        result = await Promise.race(racers);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg === "aborted") {
-          return { content: [{ type: "text", text: "Command aborted by user." }] };
+    execute: async (callId, params, signal, onChunk) => {
+      return execViaGrpc(client, sessionId, callId, params.command, timeoutMs, timeoutSec, signal);
+    },
+  };
+}
+
+async function execViaGrpc(
+  client: LogosClient, sessionId: string, callId: string,
+  command: string, timeoutMs: number, timeoutSec: number, signal?: AbortSignal,
+): Promise<{ content: Array<{ type: string; text: string }>; details?: any }> {
+  let result: { stdout: string; stderr: string; exit_code: number };
+  try {
+    const abortPromise = signal
+      ? new Promise<never>((_, reject) => {
+          if (signal.aborted) reject(new Error("aborted"));
+          signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        })
+      : null;
+    const execPromise = client.exec(command);
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`logos_exec timed out after ${timeoutSec}s`)),
+        timeoutMs,
+      )
+    );
+    const racers: Promise<any>[] = [execPromise, timeoutPromise];
+    if (abortPromise) racers.push(abortPromise);
+    result = await Promise.race(racers);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg === "aborted") {
+      return { content: [{ type: "text", text: "Command aborted by user." }] };
+    }
+    if (msg.includes("timed out")) {
+      return {
+        content: [{
+          type: "text",
+          text: `exit_code: -1 (TIMEOUT after ${timeoutSec}s)\n\nThe command did not complete within the time limit.`,
+        }],
+      };
+    }
+    throw err;
+  }
+
+  const logBase = `logos://session/${sessionId}/terminal/${callId}`;
+  if (result.stdout) {
+    client.write(`${logBase}.stdout`, result.stdout).catch(() => {});
+  }
+  if (result.stderr) {
+    client.write(`${logBase}.stderr`, result.stderr).catch(() => {});
+  }
+
+  const logHintStdout = `logos_read("${logBase}.stdout")`;
+  const logHintStderr = `logos_read("${logBase}.stderr")`;
+
+  let stdout = tailLines(result.stdout, STDOUT_TAIL_LINES, logHintStdout) || "(empty)";
+  let stderr = tailLines(result.stderr, STDERR_TAIL_LINES, logHintStderr) || "(empty)";
+
+  const combined = stdout.length + stderr.length;
+  if (combined > MAX_TOOL_OUTPUT_CHARS) {
+    const stderrBudget = Math.min(stderr.length, Math.floor(MAX_TOOL_OUTPUT_CHARS * 0.2));
+    const stdoutBudget = MAX_TOOL_OUTPUT_CHARS - stderrBudget;
+    if (stdout.length > stdoutBudget) {
+      stdout = stdout.slice(0, stdoutBudget) +
+        `\n[... truncated — use ${logHintStdout} for full output ...]`;
+    }
+    if (stderr.length > stderrBudget) {
+      stderr = stderr.slice(0, stderrBudget) +
+        `\n[... truncated — use ${logHintStderr} for full output ...]`;
+    }
+  }
+
+  const text = [
+    `exit_code: ${result.exit_code}`,
+    "",
+    "stdout:",
+    stdout,
+    "",
+    "stderr:",
+    stderr,
+  ].join("\n");
+
+  return { content: [{ type: "text", text }], details: result };
+}
+
+function execViaSpawn(
+  client: LogosClient, sessionId: string, workspacePath: string, callId: string,
+  command: string, timeoutMs: number, timeoutSec: number,
+  signal?: AbortSignal, onChunk?: (chunk: string) => void,
+): Promise<{ content: Array<{ type: string; text: string }>; details?: any }> {
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+
+    const child = spawn("bash", ["-c", command], {
+      cwd: workspacePath,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, HOME: workspacePath },
+    });
+
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      settle(-1, true);
+    }, timeoutMs);
+
+    const onAbort = () => {
+      child.kill("SIGKILL");
+      settle(-1, false, true);
+    };
+    if (signal) {
+      if (signal.aborted) {
+        child.kill("SIGKILL");
+        resolve({ content: [{ type: "text", text: "Command aborted by user." }] });
+        return;
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+
+    let stdoutBuf = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      const str = String(chunk);
+      stdout += str;
+      if (onChunk) {
+        stdoutBuf += str;
+        const lines = stdoutBuf.split("\n");
+        stdoutBuf = lines.pop()!;
+        for (const line of lines) {
+          onChunk(line);
         }
-        if (msg.includes("timed out")) {
-          return {
-            content: [{
-              type: "text",
-              text: `exit_code: -1 (TIMEOUT after ${timeoutSec}s)\n\nThe command did not complete within the time limit.`,
-            }],
-          };
-        }
-        throw err;
+      }
+    });
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += String(chunk);
+    });
+
+    function settle(exitCode: number, timedOut = false, aborted = false) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+
+      if (onChunk && stdoutBuf) {
+        onChunk(stdoutBuf);
+        stdoutBuf = "";
+      }
+
+      if (aborted) {
+        resolve({ content: [{ type: "text", text: "Command aborted by user." }] });
+        return;
       }
 
       const logBase = `logos://session/${sessionId}/terminal/${callId}`;
-      if (result.stdout) {
-        client.write(`${logBase}.stdout`, result.stdout).catch(() => {});
+      if (stdout) {
+        client.write(`${logBase}.stdout`, stdout).catch(() => {});
       }
-      if (result.stderr) {
-        client.write(`${logBase}.stderr`, result.stderr).catch(() => {});
+      if (stderr) {
+        client.write(`${logBase}.stderr`, stderr).catch(() => {});
+      }
+
+      if (timedOut) {
+        resolve({
+          content: [{
+            type: "text",
+            text: `exit_code: -1 (TIMEOUT after ${timeoutSec}s)\n\nThe command did not complete within the time limit.`,
+          }],
+        });
+        return;
       }
 
       const logHintStdout = `logos_read("${logBase}.stdout")`;
       const logHintStderr = `logos_read("${logBase}.stderr")`;
 
-      let stdout = tailLines(result.stdout, STDOUT_TAIL_LINES, logHintStdout) || "(empty)";
-      let stderr = tailLines(result.stderr, STDERR_TAIL_LINES, logHintStderr) || "(empty)";
+      let stdoutText = tailLines(stdout, STDOUT_TAIL_LINES, logHintStdout) || "(empty)";
+      let stderrText = tailLines(stderr, STDERR_TAIL_LINES, logHintStderr) || "(empty)";
 
-      const combined = stdout.length + stderr.length;
+      const combined = stdoutText.length + stderrText.length;
       if (combined > MAX_TOOL_OUTPUT_CHARS) {
-        const stderrBudget = Math.min(stderr.length, Math.floor(MAX_TOOL_OUTPUT_CHARS * 0.2));
+        const stderrBudget = Math.min(stderrText.length, Math.floor(MAX_TOOL_OUTPUT_CHARS * 0.2));
         const stdoutBudget = MAX_TOOL_OUTPUT_CHARS - stderrBudget;
-        if (stdout.length > stdoutBudget) {
-          stdout = stdout.slice(0, stdoutBudget) +
+        if (stdoutText.length > stdoutBudget) {
+          stdoutText = stdoutText.slice(0, stdoutBudget) +
             `\n[... truncated — use ${logHintStdout} for full output ...]`;
         }
-        if (stderr.length > stderrBudget) {
-          stderr = stderr.slice(0, stderrBudget) +
+        if (stderrText.length > stderrBudget) {
+          stderrText = stderrText.slice(0, stderrBudget) +
             `\n[... truncated — use ${logHintStderr} for full output ...]`;
         }
       }
 
       const text = [
-        `exit_code: ${result.exit_code}`,
+        `exit_code: ${exitCode}`,
         "",
         "stdout:",
-        stdout,
+        stdoutText,
         "",
         "stderr:",
-        stderr,
+        stderrText,
       ].join("\n");
 
-      return { content: [{ type: "text", text }], details: result };
-    },
-  };
+      resolve({ content: [{ type: "text", text }], details: { stdout, stderr, exit_code: exitCode } });
+    }
+
+    child.on("error", () => {
+      settle(-1);
+    });
+
+    child.on("close", (code) => {
+      settle(code ?? -1);
+    });
+  });
 }
 
 function createReadTool(client: LogosClient): AgentTool {
@@ -260,7 +399,7 @@ export async function createTuiSession(
   });
 
   const tools: AgentTool[] = [
-    createExecTool(client, sessionId, opts.execTimeoutMs),
+    createExecTool(client, sessionId, managedSession.workspacePath, opts.execTimeoutMs),
     createReadTool(client),
     createCallTool(client, sessionId),
     createCompleteTool(),
@@ -276,6 +415,7 @@ export async function createTuiSession(
     logosClient: client,
     projectName,
     initialCheckpointId,
+    getCheckpointHistory: completeHandler.getHistory,
     cleanup: () => client.close(),
   };
 }
