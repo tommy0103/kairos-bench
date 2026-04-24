@@ -259,7 +259,7 @@ export async function getWorkspaceDiff(
         const statResult = await client.exec(
           `for f in ${modified.map((d) => `"${d.path}"`).join(" ")}; do ` +
           `diff --unified=0 "${snapshotRelative}/$f" "./$f" 2>/dev/null | ` +
-          `awk '/^[+][^+]/{a++} /^[-][^-]/{d++} END{print FILENAME":"a":"d}' FILENAME="$f"; done 2>/dev/null`
+          `awk 'BEGIN{a=0;d=0} /^[+][^+]/{a++} /^[-][^-]/{d++} END{print FILENAME":"a":"d}' FILENAME="$f"; done 2>/dev/null`
         );
         for (const line of statResult.stdout.split("\n")) {
           const match = line.match(/^(.+):(\d+):(\d+)$/);

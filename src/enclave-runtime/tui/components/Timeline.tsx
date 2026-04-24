@@ -25,7 +25,6 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const CRUMB_MAX = 30;
-
 function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }

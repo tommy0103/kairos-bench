@@ -1,0 +1,104 @@
+graph TD
+    subgraph "Entry Points"
+        APP_TSX["app.tsx<br/>(Kernel Mode)"]
+        INDEX_TS["index.ts<br/>(Standalone Mode)"]
+    end
+
+    subgraph "Ink UI Components"
+        APP["App.tsx<br/>Mode State Machine<br/>running | prompt | inject | abort_prompt | accept"]
+        TERMINAL["Terminal.tsx<br/>Scrollable Log Panel"]
+        TIMELINE["Timeline.tsx<br/>Breadcrumb + Task Tree"]
+        FILEVIEW["FileView.tsx<br/>Live Diff Sidebar"]
+        ACCEPTPANEL["AcceptPanel.tsx<br/>File Accept/Reject"]
+        INPUTBOX["InputBox.tsx<br/>Text Input"]
+    end
+
+    subgraph "Runtime Engine"
+        TASKTREE["TaskTree<br/>Hierarchical Agent Orchestrator<br/>(EventEmitter)"]
+        REACTLOOP["reactLoop<br/>Async Generator<br/>LLM ↔ Tool Execution"]
+        DIFFENGINE["diffEngine<br/>Workspace Diff Utilities"]
+    end
+
+    subgraph "Agent Roles (Prompts)"
+        EXECUTOR["Executor<br/>buildExecutorPrompt"]
+        PLANNER["Planner<br/>buildPlannerPrompt"]
+        EVALUATOR["Evaluator<br/>buildEvaluatorPrompt"]
+    end
+
+    subgraph "Agent Tools"
+        LOGOS_EXEC["logos_exec<br/>Shell Commands"]
+        LOGOS_READ["logos_read<br/>VFS Read"]
+        LOGOS_CALL["logos_call<br/>Proc Tools"]
+        LOGOS_COMPLETE["logos_complete<br/>Turn Terminator<br/>summary, plan, task_log"]
+    end
+
+    subgraph "Session Layer"
+        TUI_RUNTIME["tuiRuntime.ts<br/>createTuiSession()"]
+        TUI_LOGOS_CLIENT["TuiLogosClient<br/>gRPC Client"]
+        SESSION_MGR["ManagedSession<br/>create | rollback | fork | accept"]
+        COMPLETE_HANDLER["TuiCompleteHandler<br/>Checkpoint on Complete"]
+        STANDALONE["standaloneSession.ts<br/>Local Exec (no kernel)"]
+    end
+
+    subgraph "External"
+        KERNEL["Rust Kernel<br/>gRPC over UDS"]
+        LLM["LLM API<br/>(ChatClient)"]
+    end
+
+    APP_TSX --> TUI_RUNTIME
+    APP_TSX --> APP
+    INDEX_TS --> STANDALONE
+    INDEX_TS --> APP
+
+    APP --> TERMINAL
+    APP --> TIMELINE
+    APP --> FILEVIEW
+    APP --> ACCEPTPANEL
+    APP --> INPUTBOX
+
+    APP -- "startJob(task)" --> TASKTREE
+    TASKTREE -- "runSubAgent()" --> REACTLOOP
+    TASKTREE -- "events" --> APP
+
+    TASKTREE --> EXECUTOR
+    TASKTREE --> PLANNER
+    TASKTREE --> EVALUATOR
+
+    REACTLOOP --> LLM
+    REACTLOOP --> LOGOS_EXEC
+    REACTLOOP --> LOGOS_READ
+    REACTLOOP --> LOGOS_CALL
+    REACTLOOP --> LOGOS_COMPLETE
+
+    LOGOS_COMPLETE -- "plan[]" --> TASKTREE
+
+    TUI_RUNTIME --> TUI_LOGOS_CLIENT
+    TUI_RUNTIME --> SESSION_MGR
+    TUI_RUNTIME --> COMPLETE_HANDLER
+    TUI_LOGOS_CLIENT --> KERNEL
+    SESSION_MGR --> TUI_LOGOS_CLIENT
+
+    LOGOS_EXEC --> TUI_LOGOS_CLIENT
+    LOGOS_READ --> TUI_LOGOS_CLIENT
+    LOGOS_CALL --> TUI_LOGOS_CLIENT
+
+    COMPLETE_HANDLER -- "checkpoint + task_log" --> TUI_LOGOS_CLIENT
+    DIFFENGINE --> TUI_LOGOS_CLIENT
+    APP -- "rollback/fork/accept" --> SESSION_MGR
+
+    FILEVIEW --> DIFFENGINE
+    ACCEPTPANEL --> DIFFENGINE
+
+    classDef entry fill:#4a9eff,color:#fff
+    classDef ui fill:#7c3aed,color:#fff
+    classDef runtime fill:#059669,color:#fff
+    classDef tools fill:#d97706,color:#fff
+    classDef session fill:#dc2626,color:#fff
+    classDef external fill:#6b7280,color:#fff
+
+    class APP_TSX,INDEX_TS entry
+    class APP,TERMINAL,TIMELINE,FILEVIEW,ACCEPTPANEL,INPUTBOX ui
+    class TASKTREE,REACTLOOP,DIFFENGINE,EXECUTOR,PLANNER,EVALUATOR runtime
+    class LOGOS_EXEC,LOGOS_READ,LOGOS_CALL,LOGOS_COMPLETE tools
+    class TUI_RUNTIME,TUI_LOGOS_CLIENT,SESSION_MGR,COMPLETE_HANDLER,STANDALONE session
+    class KERNEL,LLM external

@@ -379,6 +379,7 @@ export async function createTuiSession(
 
   const managedSession = await createManagedSession({
     sessionClient: client.session,
+    logosClient: client,
     projectPath: opts.projectPath,
     sessionId,
   });

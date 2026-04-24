@@ -28,6 +28,7 @@ export type ReactLoopEvent =
     }
   | { type: "logos_complete"; params: LogosCompleteParams }
   | { type: "context_pressure"; estimatedTokens: number; limit: number }
+  | { type: "token_usage"; estimatedTokens: number; limit: number }
   | { type: "max_turns_reached" };
 
 export interface ReactLoopOptions {
@@ -127,7 +128,7 @@ export async function* reactLoop(
     temperature,
     contextLimit,
   } = options;
-  const messages = [...options.messages];
+  const messages = options.messages;
   const openaiTools = tools.map(toolToOpenAIFunction);
   const toolMap = new Map(tools.map((t) => [t.name, t]));
   let contextWarned = false;
@@ -165,6 +166,11 @@ export async function* reactLoop(
           content: options.contextPressureMessage ?? CONTEXT_PRESSURE_MSG,
         });
       }
+    }
+
+    if (contextLimit) {
+      const est = estimateTokens(messages, openaiTools);
+      yield { type: "token_usage", estimatedTokens: est, limit: contextLimit };
     }
 
     let response: OpenAI.Chat.ChatCompletion | undefined;

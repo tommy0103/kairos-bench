@@ -2,12 +2,13 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Box, Text, useInput, useApp } from "ink";
 import type { ChatClient } from "../../agent/core/chatClient";
 import type { AgentTool, LogosCompleteParams } from "../../agent/core/types";
-import { TaskTree, type TaskTreeEvent, type TaskNode } from "../runtime/taskTree";
+import { TaskTree, type TaskTreeEvent, type TaskNode, type ConversationTurn } from "../runtime/taskTree";
 import { Terminal } from "./Terminal";
 import { Timeline } from "./Timeline";
 import { FileView } from "./FileView";
 import { InputBox } from "./InputBox";
 import { AcceptPanel } from "./AcceptPanel";
+import { ContextBar } from "./ContextBar";
 import { getWorkspaceDiff, getInlineDiffSummary, getIncrementalDiffSummary, takeWorkspaceSnapshot, type FileDiff, type WorkspaceSnapshot } from "../runtime/diffEngine";
 import type { LogosClient } from "../../agent/runtime/logosClient";
 
@@ -52,7 +53,9 @@ export const App: React.FC<AppProps> = ({ client, model, tools, contextLimit, in
   const [timelineSelIdx, setTimelineSelIdx] = useState(0);
   const [viewBreadcrumb, setViewBreadcrumb] = useState<string[]>([]);
   const [viewChildren, setViewChildren] = useState<Array<{ label: string; status: string }>>([]);
+  const [contextUsage, setContextUsage] = useState<{ used: number; limit: number } | null>(null);
   const treeRef = useRef<TaskTree | null>(null);
+  const conversationHistory = useRef<ConversationTurn[]>([]);
   const lastCheckpointRef = useRef<string>(initialCheckpointId ?? "");
   const jobCheckpointRef = useRef<string>(initialCheckpointId ?? "");
   const streamedToolCalls = useRef<Set<string>>(new Set());
@@ -102,6 +105,14 @@ export const App: React.FC<AppProps> = ({ client, model, tools, contextLimit, in
     if (onNodeComplete) {
       await onNodeComplete(node, params);
     }
+    if (node.parentId === null && params.reply) {
+      const last = conversationHistory.current[conversationHistory.current.length - 1];
+      if (last?.role === "agent") {
+        last.content = params.reply;
+      } else {
+        conversationHistory.current.push({ role: "agent", content: params.reply });
+      }
+    }
     if (node.checkpointPath) {
       const cpId = node.checkpointPath.split("/").pop() ?? "";
       if (cpId) {
@@ -120,11 +131,23 @@ export const App: React.FC<AppProps> = ({ client, model, tools, contextLimit, in
       } catch {}
     }
 
+    conversationHistory.current.push({ role: "user", content: task });
+
+    const recentHistory = conversationHistory.current.slice(-6, -1);
+    let synthesizedTask = task;
+    if (recentHistory.length > 0) {
+      const historyText = recentHistory.map((turn) =>
+        turn.role === "user" ? `[User]: ${turn.content}` : `[Agent]: ${turn.content}`
+      ).join("\n\n");
+      synthesizedTask = `## Recent conversation context\n\n${historyText}\n\n## Current request\n\n${task}`;
+    }
+
     const tree = new TaskTree({
       client,
       model,
       tools,
-      originalTask: task,
+      originalTask: synthesizedTask,
+      displayTask: task,
       maxTurnsPerAgent: 100,
       temperature: 0.2,
       contextLimit,
@@ -132,6 +155,8 @@ export const App: React.FC<AppProps> = ({ client, model, tools, contextLimit, in
       sessionId,
       projectState,
       checkpointIndexUri: sessionId ? `logos://session/${sessionId}/checkpoints/index.json` : undefined,
+      conversationHistory: conversationHistory.current.slice(-6),
+      logosClient,
       onNodeComplete: wrappedOnNodeComplete,
     });
     treeRef.current = tree;
@@ -243,6 +268,8 @@ export const App: React.FC<AppProps> = ({ client, model, tools, contextLimit, in
             if (logosClient && sessionId && lastCheckpointRef.current) {
               getWorkspaceDiff(logosClient, sessionId, jobCheckpointRef.current).then(setChangedFiles).catch(() => {});
             }
+          } else if (re.type === "token_usage") {
+            setContextUsage({ used: re.estimatedTokens, limit: re.limit });
           } else if (re.type === "logos_complete") {
             addLine(`  ✓ ${re.params.summary}`);
             if (re.params.reply) {
@@ -259,6 +286,7 @@ export const App: React.FC<AppProps> = ({ client, model, tools, contextLimit, in
     setMode("running");
     setBreadcrumb([task]);
     setChildren([]);
+    setContextUsage(null);
 
     tree.run().then(async () => {
       tree.off("event", handler);
@@ -516,6 +544,9 @@ export const App: React.FC<AppProps> = ({ client, model, tools, contextLimit, in
             )}
             {mode === "abort_prompt" && (
               <InputBox prefix="[abort instruction] " onSubmit={handleAbortSubmit} onCancel={handleAbortCancel} />
+            )}
+            {mode === "running" && contextUsage && (
+              <ContextBar used={contextUsage.used} limit={contextUsage.limit} />
             )}
             {statusLine && <Text color="gray">{statusLine}</Text>}
           </>

@@ -4,6 +4,7 @@ import type { ChatClient } from "../../agent/core/chatClient";
 import { reactLoop } from "../../agent/core/reactLoop";
 import type { ReactLoopEvent } from "../../agent/core/reactLoop";
 import type { AgentTool, LogosCompleteParams } from "../../agent/core/types";
+import type { LogosClient } from "../../agent/runtime/logosClient";
 import { EventEmitter } from "node:events";
 
 export type TaskStatus = "running" | "completed" | "aborted" | "failed";
@@ -30,11 +31,17 @@ export type TaskTreeEvent =
   | { type: "execution_finished" }
   | { type: "react_loop_event"; event: ReactLoopEvent };
 
+export interface ConversationTurn {
+  role: "user" | "agent";
+  content: string;
+}
+
 export interface TaskTreeOptions {
   client: ChatClient;
   model: string;
   tools: AgentTool[];
   originalTask: string;
+  displayTask?: string;
   maxTurnsPerAgent: number;
   temperature?: number;
   contextLimit?: number;
@@ -43,6 +50,8 @@ export interface TaskTreeOptions {
   projectState?: string;
   recentCheckpoints?: Array<{ description: string; summary: string }>;
   checkpointIndexUri?: string;
+  logosClient?: LogosClient;
+  conversationHistory?: ConversationTurn[];
   onNodeComplete?: (node: TaskNode, params: LogosCompleteParams) => Promise<void>;
 }
 
@@ -77,7 +86,7 @@ export class TaskTree extends EventEmitter<{ event: [TaskTreeEvent] }> {
   constructor(opts: TaskTreeOptions) {
     super();
     this.opts = opts;
-    this.root = createNode(opts.originalTask, null);
+    this.root = createNode(opts.displayTask ?? opts.originalTask, null);
     this.root.status = "running";
     this.nodeMap.set(this.root.id, this.root);
     this.current = this.root;
@@ -324,9 +333,22 @@ export class TaskTree extends EventEmitter<{ event: [TaskTreeEvent] }> {
     this.emit_({ type: "execution_started", node, role });
     this.abortController = new AbortController();
 
-    const systemPrompt = role === "executor"
+    const [crystalNotes, toolRanking] = await Promise.all([
+      this.queryCrystals(node.description),
+      this.queryToolRanking(node.description),
+    ]);
+
+    const allNotes = [crystalNotes, toolRanking.notes].filter(Boolean).join("\n\n");
+    const behavioralNotes = allNotes
+      ? (crystalNotes.startsWith("\n\n## Behavioral Notes")
+        ? crystalNotes + (toolRanking.notes ? "\n\n" + toolRanking.notes : "")
+        : (allNotes ? `\n\n## Behavioral Notes\n\n${allNotes}` : ""))
+      : "";
+
+    const systemPrompt = (role === "executor"
       ? this.buildExecutorPrompt(node)
-      : this.buildPlannerPrompt(node);
+      : this.buildPlannerPrompt(node))
+      + behavioralNotes;
 
     const userMessage = role === "executor"
       ? node.description
@@ -334,8 +356,23 @@ export class TaskTree extends EventEmitter<{ event: [TaskTreeEvent] }> {
 
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
       { role: "system", content: systemPrompt },
-      { role: "user", content: userMessage },
     ];
+
+    if (node.parentId === null && role === "executor") {
+      const history = this.opts.conversationHistory ?? [];
+      const recent = history.slice(-6);
+      if (recent.length > 0) {
+        const historyText = recent.map((turn) =>
+          turn.role === "user" ? `[User]: ${turn.content}` : `[Agent]: ${turn.content}`
+        ).join("\n\n");
+        messages.push({
+          role: "user",
+          content: `## Recent conversation history\n\n${historyText}\n\n---\n\nNow proceed with the current task below.`,
+        });
+      }
+    }
+
+    messages.push({ role: "user", content: userMessage });
 
     const sessionId = this.opts.sessionId;
     const contextPressureMessage = sessionId
@@ -352,7 +389,7 @@ export class TaskTree extends EventEmitter<{ event: [TaskTreeEvent] }> {
       client: this.opts.client,
       model: this.opts.model,
       messages,
-      tools: this.opts.tools,
+      tools: toolRanking.tools,
       maxTurns: this.opts.maxTurnsPerAgent,
       temperature: this.opts.temperature ?? 0.2,
       contextLimit: this.opts.contextLimit,
@@ -375,6 +412,19 @@ export class TaskTree extends EventEmitter<{ event: [TaskTreeEvent] }> {
           messages.push({ role: "user", content: `[User Instruction]: ${msg}` });
         }
         this.pendingUserMessages = [];
+      }
+
+      if (event.type === "tool_execution_end") {
+        const isError = event.result && typeof event.result === "object" && "error" in (event.result as any);
+        if (isError) {
+          const errorMsg = (event.result as any)?.error ?? "";
+          const freshCrystals = await this.queryCrystals(
+            `${node.description}\nFailed tool: ${event.toolName}\nError: ${errorMsg}`
+          );
+          if (freshCrystals) {
+            messages.push({ role: "user", content: freshCrystals.trim() });
+          }
+        }
       }
 
       if (event.type === "logos_complete") {
@@ -591,6 +641,67 @@ ${this.operationalRules()}`;
       parts.push(`## Checkpoint history\n\nFull checkpoint index available at: \`${this.opts.checkpointIndexUri}\` (use logos_read to access).`);
     }
     return parts.length > 0 ? "\n\n" + parts.join("\n\n") : "";
+  }
+
+  private async queryCrystals(context: string): Promise<string> {
+    const lc = this.opts.logosClient;
+    if (!lc) return "";
+
+    try {
+      await lc.write("logos://proc/memory/crystal/query/input", context);
+      const raw = await lc.read("logos://proc/memory/crystal/query/output");
+      const data = JSON.parse(raw);
+      const crystals = data?.crystals as Array<{ label: string; bullets: string }> | undefined;
+      if (!crystals || crystals.length === 0) return "";
+
+      const lines = crystals.map(
+        (c) => `[${c.label}]\n${c.bullets.trim()}`
+      );
+      return `\n\n## Behavioral Notes\n\n${lines.join("\n\n")}`;
+    } catch {
+      return "";
+    }
+  }
+
+  private async queryToolRanking(task: string): Promise<{ tools: AgentTool[]; notes: string }> {
+    const lc = this.opts.logosClient;
+    if (!lc) return { tools: this.opts.tools, notes: "" };
+
+    try {
+      await lc.write("logos://proc/memory/tool/query/input", task);
+      const raw = await lc.read("logos://proc/memory/tool/query/output");
+      const data = JSON.parse(raw);
+      const ranked = data?.ranked_tools as Array<{
+        tool_name: string;
+        score: number;
+        memories: string[];
+      }> | undefined;
+
+      if (!ranked || ranked.length === 0) return { tools: this.opts.tools, notes: "" };
+
+      const hasMemories = ranked.some((r) => r.score > 0);
+      let filteredTools = this.opts.tools;
+      if (hasMemories && this.opts.tools.length > 15) {
+        const topNames = new Set(
+          ranked
+            .filter((r) => r.score > 0.3)
+            .map((r) => r.tool_name)
+        );
+        const coreTools = new Set(["logos_exec", "logos_read", "logos_write", "logos_call", "logos_complete"]);
+        filteredTools = this.opts.tools.filter(
+          (t) => coreTools.has(t.name) || topNames.has(t.name) || !hasMemories
+        );
+      }
+
+      const toolNotes = ranked
+        .filter((r) => r.memories.length > 0)
+        .map((r) => `[${r.tool_name}]\n${r.memories.join("\n")}`)
+        .join("\n\n");
+
+      return { tools: filteredTools, notes: toolNotes };
+    } catch {
+      return { tools: this.opts.tools, notes: "" };
+    }
   }
 
   private toolDocsBlock(): string {

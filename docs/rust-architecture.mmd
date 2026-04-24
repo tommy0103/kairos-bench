@@ -1,0 +1,145 @@
+graph TD
+    subgraph "logos-kernel (Main Binary)"
+        MAIN["main.rs<br/>Boot Sequence (12 steps)"]
+        GRPC["grpc.rs<br/>LogosService<br/>read | write | patch | exec | call<br/>handshake | create_session | checkpoint<br/>rollback | fork"]
+        TOKEN["TokenRegistry<br/>One-time Token → Session"]
+
+        subgraph "Namespaces"
+            PROC_NS["ProcNs<br/>logos://proc/<br/>Tool Registry + Call Slots"]
+            SANDBOX_NS["SandboxNs<br/>logos://sandbox/<br/>Container Workspace"]
+            TMP_NS["TmpNs<br/>logos://tmp/<br/>In-Memory Scratch"]
+            USERS_NS["UsersNs<br/>logos://users/<br/>(chat feature)"]
+            DEVICES_NS["DevicesNs<br/>logos://devices/<br/>(chat feature)"]
+            SERVICES_NS["ServicesNs<br/>logos://services/<br/>Service Registry"]
+            PROC_STORE_NS["ProcStoreNs<br/>logos://proc-store/<br/>External Tool Persistence"]
+            SVC_STORE_NS["SvcStoreNs<br/>logos://svc-store/<br/>Service Declarations"]
+        end
+
+        subgraph "Sandbox Backends"
+            HOST_EXEC["HostExecutor<br/>Direct sh -c"]
+            CONTAINERD_EXEC["ContainerdExecutor<br/>containerd + overlayfs"]
+        end
+
+        subgraph "Built-in ProcTools"
+            WEB_SEARCH["WebSearchTool<br/>DuckDuckGo + Wikipedia + SO"]
+            FETCH_URL["FetchUrlTool<br/>HTTP GET"]
+            BROWSE["BrowseTool<br/>pinchtab Browser"]
+            SYS_SEARCH["SystemSearchTasksTool"]
+            SYS_CONTEXT["SystemGetContextTool<br/>(chat)"]
+            SYS_COMPLETE["SystemCompleteTool<br/>(sandbox)"]
+            MEM_SEARCH["MemorySearchTool<br/>(chat)"]
+            MEM_RANGE["MemoryRangeFetchTool<br/>(chat)"]
+        end
+
+        CRON["CronScheduler<br/>Periodic Jobs"]
+        CONSOLIDATOR["Consolidator<br/>Memory Consolidation<br/>(chat feature)"]
+    end
+
+    subgraph "logos-vfs (Core Abstractions)"
+        NS_TRAIT["Namespace trait<br/>read | write | patch"]
+        ROUTING["RoutingTable<br/>URI → Namespace Dispatch"]
+        MIDDLEWARE["VfsMiddleware<br/>Before/After Hooks"]
+        URI["LogosUri<br/>logos:// Parser"]
+    end
+
+    subgraph "logos-session-ns (TUI Workspace)"
+        SESSION_NS["SessionNs<br/>logos://session/<br/>JuiceFS CoW Workspaces"]
+        SESSION_OPS["create_session | checkpoint<br/>rollback | fork | accept | exec"]
+    end
+
+    subgraph "logos-system (Task Management)"
+        SYSTEM_MOD["SystemModule<br/>logos://system/"]
+        TASK_DB["TaskDb<br/>SQLite Tasks<br/>pending → active → sleep/finished"]
+        ANCHOR_DB["AnchorDb<br/>SQLite FTS5<br/>Experience Snapshots"]
+        COMPLETE["complete()<br/>logos_complete Handler"]
+    end
+
+    subgraph "logos-mm (Memory Module)"
+        MM_MOD["MemoryModule<br/>logos://memory/"]
+        MSG_DB["MessageDb<br/>Per-Group SQLite + FTS5"]
+        SUMMARIES["HierarchicalPlugin<br/>short | mid | long Summaries"]
+        GRAPH["GraphPlugin<br/>Subject → Predicate → Object"]
+    end
+
+    subgraph "logos-session (Clustering)"
+        SESSION_STORE["SessionStore<br/>L0 (active) → L1 (inactive) → L2 (LanceDB)"]
+        L2["L2Store<br/>LanceDB + Ollama Embeddings"]
+    end
+
+    subgraph "logos-mcp (MCP Bridge)"
+        MCP["logos-mcp Binary<br/>JSON-RPC stdio ↔ gRPC"]
+    end
+
+    subgraph "External Clients"
+        TS_CLIENT["TypeScript TUI<br/>TuiLogosClient"]
+        MCP_CLIENT["MCP-compatible LLM"]
+    end
+
+    %% Connections
+    MAIN --> ROUTING
+    MAIN --> GRPC
+    MAIN --> CRON
+
+    GRPC --> ROUTING
+    GRPC --> TOKEN
+    GRPC --> SESSION_NS
+
+    ROUTING --> NS_TRAIT
+    ROUTING --> MIDDLEWARE
+    ROUTING --> URI
+
+    PROC_NS --> NS_TRAIT
+    SANDBOX_NS --> NS_TRAIT
+    TMP_NS --> NS_TRAIT
+    SESSION_NS --> NS_TRAIT
+    SYSTEM_MOD --> NS_TRAIT
+    MM_MOD --> NS_TRAIT
+
+    SANDBOX_NS --> HOST_EXEC
+    SANDBOX_NS --> CONTAINERD_EXEC
+
+    PROC_NS --> WEB_SEARCH
+    PROC_NS --> FETCH_URL
+    PROC_NS --> BROWSE
+    PROC_NS --> SYS_SEARCH
+    PROC_NS --> SYS_COMPLETE
+    PROC_NS --> MEM_SEARCH
+
+    PROC_STORE_NS --> PROC_NS
+
+    SESSION_NS --> SESSION_OPS
+
+    SYSTEM_MOD --> TASK_DB
+    SYSTEM_MOD --> ANCHOR_DB
+    SYSTEM_MOD --> COMPLETE
+
+    MM_MOD --> MSG_DB
+    MM_MOD --> SUMMARIES
+    MM_MOD --> GRAPH
+    MM_MOD --> SESSION_STORE
+
+    SESSION_STORE --> L2
+
+    CRON --> CONSOLIDATOR
+    CONSOLIDATOR --> MM_MOD
+
+    TS_CLIENT --> GRPC
+    MCP_CLIENT --> MCP
+    MCP --> GRPC
+
+    %% Dependency arrows (crate level)
+    MM_MOD -.->|"depends on"| SESSION_STORE
+
+    classDef core fill:#4a9eff,color:#fff
+    classDef namespace fill:#7c3aed,color:#fff
+    classDef storage fill:#059669,color:#fff
+    classDef tool fill:#d97706,color:#fff
+    classDef external fill:#6b7280,color:#fff
+    classDef bridge fill:#dc2626,color:#fff
+
+    class NS_TRAIT,ROUTING,MIDDLEWARE,URI core
+    class PROC_NS,SANDBOX_NS,TMP_NS,USERS_NS,DEVICES_NS,SERVICES_NS,PROC_STORE_NS,SVC_STORE_NS,SESSION_NS namespace
+    class TASK_DB,ANCHOR_DB,MSG_DB,SUMMARIES,GRAPH,SESSION_STORE,L2 storage
+    class WEB_SEARCH,FETCH_URL,BROWSE,SYS_SEARCH,SYS_CONTEXT,SYS_COMPLETE,MEM_SEARCH,MEM_RANGE tool
+    class TS_CLIENT,MCP_CLIENT,HOST_EXEC,CONTAINERD_EXEC external
+    class MCP bridge

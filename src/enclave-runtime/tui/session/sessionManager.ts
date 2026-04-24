@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import type { SessionLifecycleClient } from "./tuiLogosClient";
+import type { LogosClient } from "../../agent/runtime/logosClient";
 
 export interface SessionManagerOptions {
   sessionClient: SessionLifecycleClient;
+  logosClient: LogosClient;
   projectPath: string;
   sessionId?: string;
 }
@@ -48,13 +50,18 @@ export async function createManagedSession(
     },
 
     async accept(files: string[]) {
-      console.log(`[session] accepting ${files.length} files → ${opts.projectPath}`);
-      await runCommand("rsync", [
-        "-a",
-        ...files.map((f) => `--include=${f}`),
-        "--exclude=*",
-        `${opts.projectPath}/`,
-      ]);
+      console.log(`[session] accepting ${files.length} changed file(s) → ${opts.projectPath}`);
+      const excludes = [
+        ".logos", ".git", "node_modules", "*.tsbuildinfo", ".DS_Store",
+        "*.pyc", "__pycache__", ".next", "dist", ".turbo", "*.lock",
+        "bun.lock", "coverage",
+      ].map((e) => `--exclude='${e}'`).join(" ");
+      const dest = opts.projectPath.replace(/'/g, "'\\''");
+      const cmd = `rsync -a --delete ${excludes} ./ '${dest}/'`;
+      const result = await opts.logosClient.exec(cmd);
+      if (result.exit_code !== 0) {
+        throw new Error(`rsync failed (exit ${result.exit_code}): ${result.stderr}`);
+      }
       console.log(`[session] accept complete`);
     },
   };
